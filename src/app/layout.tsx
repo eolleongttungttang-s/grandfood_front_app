@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "@/components/app/providers";
+import { AccessibilityFrame } from "@/components/app/accessibility-frame";
 
 export const metadata: Metadata = {
   title: "GrandFood 가족·이용자 앱",
@@ -16,9 +17,7 @@ export default function RootLayout({
     <html lang="ko" className="h-full antialiased font-sans">
       <body className="min-h-full bg-[#2a1c15] font-sans">
         <Providers>
-          <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-background text-foreground sm:my-6 sm:min-h-[calc(100vh-3rem)] sm:rounded-[2rem] sm:shadow-2xl sm:ring-1 sm:ring-black/10 overflow-hidden">
-            {children}
-          </div>
+          <AccessibilityFrame>{children}</AccessibilityFrame>
         </Providers>
       </body>
     </html>

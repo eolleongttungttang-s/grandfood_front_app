@@ -5,9 +5,9 @@ import Link from "next/link";
 
 import { useSession } from "@/lib/session";
 import { getWard, getWardDetail } from "@/lib/wards";
-import { WardDetailView } from "@/components/guardian/ward-detail-view";
+import { ReportView } from "@/components/guardian/report-view";
 
-export default function GuardianWardDetailPage() {
+export default function GuardianWardReportPage() {
   const { id } = useParams<{ id: string }>();
   const { account } = useSession();
 
@@ -30,5 +30,5 @@ export default function GuardianWardDetailPage() {
   }
 
   const detail = getWardDetail(ward);
-  return <WardDetailView ward={ward} detail={detail} guardianName={account.name} />;
+  return <ReportView ward={ward} detail={detail} />;
 }

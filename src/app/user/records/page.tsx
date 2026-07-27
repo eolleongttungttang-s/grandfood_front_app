@@ -11,5 +11,5 @@ export default function UserRecordsPage() {
   if (!account || !ward) return null;
 
   const detail = getWardDetail(ward);
-  return <RecordsView detail={detail} />;
+  return <RecordsView wardId={ward.id} detail={detail} />;
 }

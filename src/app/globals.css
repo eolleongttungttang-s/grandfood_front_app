@@ -148,3 +148,35 @@
     @apply font-sans;
   }
 }
+
+/* 접근성: 큰 글씨 모드 — rem 기준이 되는 html 폰트 크기를 올려 전체 텍스트를 함께 키워요 */
+html[data-text-size="large"] {
+  font-size: 120%;
+}
+
+/* 접근성: 고대비 모드 — 테두리·보조 텍스트 대비를 강하게 */
+html[data-contrast="high"] {
+  --foreground: #1a0f08;
+  --muted-foreground: #3a281f;
+  --border: #7a4f36;
+  --input: #7a4f36;
+  --card-foreground: #1a0f08;
+}
+html[data-contrast="high"] .text-muted-foreground {
+  color: var(--muted-foreground);
+}
+
+@media print {
+  body {
+    background: #fff !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-frame {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+}

@@ -10,6 +10,10 @@ export type Ward = {
   facility: string;
   /** 보호자 화면에서 보여줄 관계 표기 (본인 화면에서는 사용하지 않음) */
   relationToGuardian: string;
+  /** 여러 부모님(양가)을 등록해 관리하는 경우 구분용 그룹명 */
+  familyGroup: string;
+  /** 이 대상자를 함께 보고 있는 다른 보호자 (형제자매 등 가족 공유) */
+  coGuardians: string[];
   conditions: string[];
   status: WardStatus;
   lastMeal: { tone: MealTone; label: string };
@@ -26,6 +30,8 @@ export const WARDS: Ward[] = [
     address: "역삼1동",
     facility: "강남구 노인맞춤돌봄센터",
     relationToGuardian: "어머니",
+    familyGroup: "본가",
+    coGuardians: ["박은정 (딸)"],
     conditions: ["고혈압", "당뇨"],
     status: "확인 필요",
     lastMeal: { tone: "미응답", label: "3일째 미응답" },
@@ -40,6 +46,8 @@ export const WARDS: Ward[] = [
     address: "청담동",
     facility: "강남구 노인맞춤돌봄센터",
     relationToGuardian: "할머니",
+    familyGroup: "본가",
+    coGuardians: [],
     conditions: ["치매 초기", "당뇨"],
     status: "확인 필요",
     lastMeal: { tone: "미응답", label: "4일째 미응답" },
@@ -54,6 +62,8 @@ export const WARDS: Ward[] = [
     address: "대치2동",
     facility: "강남구 노인맞춤돌봄센터",
     relationToGuardian: "할아버지",
+    familyGroup: "처가",
+    coGuardians: ["윤서연 (아내)"],
     conditions: ["심부전", "고혈압"],
     status: "관찰중",
     lastMeal: { tone: "소량", label: "어제 소량 섭취" },
@@ -65,6 +75,8 @@ export const WARDS: Ward[] = [
 export function getWard(id: string): Ward | undefined {
   return WARDS.find((w) => w.id === id);
 }
+
+export type MenuItem = { id: string; name: string };
 
 export type WardDetail = {
   allergies: string[];
@@ -84,8 +96,15 @@ export type WardDetail = {
     kcal: number;
     reasons: string[];
   };
+  /** 오늘의 배달 식단 사진(이모지로 대체)과 메뉴 구성 */
+  todayMenu: { photoEmoji: string; items: MenuItem[] };
+  /** 오늘 배송 도착 예정 시각 */
+  deliveryEta: string;
+  /** 오늘 잔반율(%) — 최근 응답 상태에서 추정 */
+  leftoverPercent: number;
   mealHistory: MealTone[];
   nextVisit: { date: string; worker: string; type: "방문" | "전화" } | null;
+  visitHistory: { date: string; worker: string; type: "방문" | "전화" }[];
 };
 
 function seed(id: string) {
@@ -95,6 +114,25 @@ function seed(id: string) {
 }
 
 const ALLERGY_POOL = ["없음", "고등어(해산물)", "메밀", "갑각류", "우유", "견과류"];
+
+const MENU_POOL: Record<string, { photoEmoji: string; items: string[] }> = {
+  "저염 · 단백강화 당뇨식": {
+    photoEmoji: "🍱",
+    items: ["잡곡밥", "두부조림", "시금치나물", "저염된장국", "배추김치"],
+  },
+  "저염 관리형 식단": {
+    photoEmoji: "🍚",
+    items: ["잡곡밥", "고등어구이", "나물무침", "저염된장국", "깍두기"],
+  },
+  "저염 · 저지방 관리식": {
+    photoEmoji: "🥗",
+    items: ["현미밥", "닭가슴살찜", "브로콜리나물", "맑은무국", "배추김치"],
+  },
+  "일반 균형식": {
+    photoEmoji: "🍛",
+    items: ["흰쌀밥", "제육볶음", "시금치나물", "미역국", "깍두기"],
+  },
+};
 
 export function getWardDetail(ward: Ward): WardDetail {
   const s = seed(ward.id);
@@ -161,6 +199,23 @@ export function getWardDetail(ward: Ward): WardDetail {
         ? { date: "2026.08.02", worker: ward.caseWorkerName, type: "전화" as const }
         : null;
 
+  const visitHistory = [
+    { date: "2026.07.20", worker: ward.caseWorkerName, type: "방문" as const },
+    { date: "2026.07.06", worker: ward.caseWorkerName, type: "전화" as const },
+    ...(nextVisit ? [nextVisit] : []),
+  ];
+
+  const menu = MENU_POOL[dietName] ?? MENU_POOL["일반 균형식"];
+  const todayMenu = {
+    photoEmoji: menu.photoEmoji,
+    items: menu.items.map((name, i) => ({ id: `${ward.id}-menu-${i}`, name })),
+  };
+
+  const deliveryEta = ward.status === "확인 필요" ? "12:30" : "12:00";
+
+  const leftoverPercent =
+    ward.lastMeal.tone === "미응답" ? 100 : ward.lastMeal.tone === "소량" ? 55 : 5;
+
   return {
     allergies,
     medications,
@@ -173,7 +228,11 @@ export function getWardDetail(ward: Ward): WardDetail {
       weightKg: Number(weightKg.toFixed(1)),
     },
     diet: { name: dietName, sodiumMg, proteinG, kcal, reasons },
+    todayMenu,
+    deliveryEta,
+    leftoverPercent,
     mealHistory,
     nextVisit,
+    visitHistory,
   };
 }

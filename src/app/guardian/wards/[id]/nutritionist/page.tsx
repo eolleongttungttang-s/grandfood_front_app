@@ -4,10 +4,10 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 
 import { useSession } from "@/lib/session";
-import { getWard, getWardDetail } from "@/lib/wards";
-import { WardDetailView } from "@/components/guardian/ward-detail-view";
+import { getWard } from "@/lib/wards";
+import { NutritionistHistoryView } from "@/components/guardian/nutritionist-history-view";
 
-export default function GuardianWardDetailPage() {
+export default function GuardianWardNutritionistPage() {
   const { id } = useParams<{ id: string }>();
   const { account } = useSession();
 
@@ -29,6 +29,5 @@ export default function GuardianWardDetailPage() {
     );
   }
 
-  const detail = getWardDetail(ward);
-  return <WardDetailView ward={ward} detail={detail} guardianName={account.name} />;
+  return <NutritionistHistoryView ward={ward} />;
 }

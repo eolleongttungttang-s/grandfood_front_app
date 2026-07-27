@@ -1,7 +1,15 @@
 "use client";
 
+import { Pill } from "lucide-react";
+
 import { WardDetail } from "@/lib/wards";
 import { TopBar } from "@/components/app/top-bar";
+import { Switch } from "@/components/ui/switch";
+import {
+  medicationReminderStore,
+  setMedicationReminder,
+} from "@/lib/medication-reminder-store";
+import { useLocalStore } from "@/lib/use-store";
 
 const MEAL_TONE_CLASS: Record<string, string> = {
   완식: "bg-foreground",
@@ -18,16 +26,52 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-export function RecordsView({ detail }: { detail: WardDetail }) {
+export function RecordsView({
+  wardId,
+  detail,
+}: {
+  wardId: string;
+  detail: WardDetail;
+}) {
   const completeCount = detail.mealHistory.filter((m) => m === "완식").length;
   const smallCount = detail.mealHistory.filter((m) => m === "소량").length;
   const noResponseCount = detail.mealHistory.filter((m) => m === "미응답").length;
+  const reminderEnabled = useLocalStore(medicationReminderStore)[wardId] ?? false;
+  const hasRealMeds = detail.medications[0]?.name !== "특이 복약 없음";
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
-      <TopBar title="섭취 · 건강 기록" subtitle="최근 14일" />
+      <TopBar title="건강 기록" subtitle="섭취 · 검진 · 복약" />
 
       <div className="flex flex-col gap-4 px-5">
+        {hasRealMeds && (
+          <div className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                <Pill className="h-3.5 w-3.5 text-accent" />
+                복약 알림
+              </span>
+              <Switch
+                checked={reminderEnabled}
+                onCheckedChange={(checked) => setMedicationReminder(wardId, checked)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              {detail.medications.map((m) => (
+                <div key={m.name} className="flex justify-between text-sm">
+                  <span className="text-foreground">{m.name}</span>
+                  <span className="text-muted-foreground">{m.schedule}</span>
+                </div>
+              ))}
+            </div>
+            {reminderEnabled && (
+              <p className="text-xs text-muted-foreground">
+                복용 시간에 맞춰 알림을 보내드릴게요.
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-baseline justify-between">
             <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>

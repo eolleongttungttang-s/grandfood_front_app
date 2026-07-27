@@ -1,4 +1,4 @@
-export type NotificationType = "미응답" | "검진" | "방문" | "식단변경" | "공지";
+export type NotificationType = "SOS" | "미응답" | "검진" | "방문" | "식단변경" | "공지";
 
 export type NotificationItem = {
   id: string;
@@ -10,6 +10,7 @@ export type NotificationItem = {
 };
 
 const TYPE_STYLE: Record<NotificationType, string> = {
+  SOS: "bg-destructive text-white",
   미응답: "bg-risk-high text-risk-high-foreground",
   검진: "bg-secondary text-secondary-foreground",
   방문: "bg-risk-normal text-risk-normal-foreground",

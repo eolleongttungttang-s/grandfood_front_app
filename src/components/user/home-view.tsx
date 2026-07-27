@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronRight, PhoneCall } from "lucide-react";
+import { useState } from "react";
+import {
+  ChevronRight,
+  Mic,
+  MessageCircleHeart,
+  PhoneCall,
+  Stethoscope,
+  Truck,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Ward, WardDetail } from "@/lib/wards";
@@ -9,12 +17,11 @@ import { USER_NOTIFICATIONS, notificationBadgeClass } from "@/lib/notifications"
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
-
-const MEAL_TONE_TEXT: Record<Ward["lastMeal"]["tone"], string> = {
-  완식: "오늘도 잘 챙겨 드셨어요",
-  소량: "평소보다 적게 드셨어요",
-  미응답: "아직 식사 확인이 안 됐어요",
-};
+import { getNutritionTip } from "@/lib/nutrition-tip";
+import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
+import { mealCheckStore, setMealCheck } from "@/lib/meal-check-store";
+import { useLocalStore } from "@/lib/use-store";
+import { getSpeechRecognition, speak } from "@/lib/accessibility";
 
 export function HomeView({
   name,
@@ -25,73 +32,176 @@ export function HomeView({
   ward: Ward;
   detail: WardDetail;
 }) {
+  const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
+  const mealCheck = useLocalStore(mealCheckStore)[ward.id] ?? null;
+  const [listening, setListening] = useState(false);
+
+  function checkMeal(status: "완식" | "남김") {
+    setMealCheck(ward.id, status);
+    const message = status === "완식" ? "잘 하셨어요! 다음 식사도 챙겨드릴게요." : "알겠어요, 남긴 반찬은 다음 식단에 참고할게요.";
+    toast.success(message);
+    speak(message);
+  }
+
+  function listenForMealStatus() {
+    const Recognition = getSpeechRecognition();
+    if (!Recognition) {
+      toast.error("이 브라우저에서는 음성 명령을 지원하지 않아요. 버튼을 눌러주세요.");
+      return;
+    }
+    const recognition = new Recognition();
+    recognition.lang = "ko-KR";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    setListening(true);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      if (transcript.includes("남")) checkMeal("남김");
+      else checkMeal("완식");
+    };
+    recognition.onerror = () => {
+      toast.error("음성을 잘 듣지 못했어요. 다시 시도해 주세요.");
+    };
+    recognition.onend = () => setListening(false);
+    recognition.start();
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
       <TopBar title={`안녕하세요, ${name}님`} subtitle={ward.facility} />
 
       <div className="flex flex-col gap-4 px-5">
-        <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <span className="text-xs font-semibold text-muted-foreground">
-            오늘의 식사
-          </span>
-          <div className="flex items-center justify-between">
-            <span className="text-lg font-extrabold text-foreground">
-              {ward.lastMeal.label}
-            </span>
-            <Badge className={notificationBadgeClass(ward.lastMeal.tone === "미응답" ? "미응답" : "공지")}>
-              {ward.lastMeal.tone}
-            </Badge>
+        <div className="flex items-center gap-2 rounded-xl bg-muted px-4 py-2.5 text-sm text-foreground">
+          <Truck className="h-4 w-4 shrink-0 text-accent" />
+          오늘 점심 배송 예정 · <span className="font-semibold">{detail.deliveryEta}</span>
+        </div>
+
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-center gap-3">
+            <span className="text-4xl">{detail.todayMenu.photoEmoji}</span>
+            <div className="flex flex-col">
+              <span className="text-xs font-semibold text-muted-foreground">
+                오늘의 식단
+              </span>
+              <span className="text-lg font-extrabold text-foreground">
+                {detail.diet.name}
+              </span>
+            </div>
           </div>
-          <p className="text-sm text-muted-foreground">
-            {MEAL_TONE_TEXT[ward.lastMeal.tone]}
-          </p>
-          {ward.lastMeal.tone !== "완식" && (
+          <div className="flex flex-col gap-1.5">
+            {detail.todayMenu.items.map((item) => {
+              const disliked = dislikes.includes(item.id);
+              return (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2"
+                >
+                  <span
+                    className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
+                  >
+                    {item.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleDislike(ward.id, item.id)}
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+                      disliked
+                        ? "bg-destructive/10 text-destructive"
+                        : "bg-transparent text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {disliked ? "기피 표시됨" : "이거 싫어요"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <span className="text-xs font-semibold text-muted-foreground">
+            식사하셨으면 알려주세요
+          </span>
+          <div className="flex gap-2">
             <Button
-              size="sm"
-              variant="outline"
-              className="mt-1 w-fit"
-              onClick={() =>
-                toast.success(`${ward.caseWorkerName}님께 연락 요청을 보냈어요.`)
-              }
+              size="lg"
+              className="h-14 flex-1 text-base"
+              onClick={() => checkMeal("완식")}
             >
-              <PhoneCall />
-              담당자에게 연락하기
+              다 먹었어요
             </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="h-14 flex-1 text-base"
+              onClick={() => checkMeal("남김")}
+            >
+              남겼어요
+            </Button>
+          </div>
+          <Button
+            variant="ghost"
+            className="w-fit self-center text-muted-foreground"
+            onClick={listenForMealStatus}
+            disabled={listening}
+          >
+            <Mic className={listening ? "animate-pulse text-destructive" : ""} />
+            {listening ? "듣고 있어요..." : "말로 알려주기"}
+          </Button>
+          {mealCheck && (
+            <p className="text-center text-xs text-muted-foreground">
+              오늘 체크: <span className="font-semibold text-foreground">{mealCheck}</span>
+            </p>
           )}
         </div>
 
+        <div className="rounded-2xl bg-sidebar p-4 text-sm text-sidebar-foreground shadow-sm">
+          💬 {getNutritionTip(detail)}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2.5">
+          <Button
+            variant="outline"
+            className="h-auto flex-col gap-1.5 py-3"
+            nativeButton={false}
+            render={<Link href="/user/nutritionist" />}
+          >
+            <Stethoscope className="h-5 w-5 text-accent" />
+            <span className="text-sm">영양사와 상담하기</span>
+          </Button>
+          <Button
+            variant="outline"
+            className="h-auto flex-col gap-1.5 py-3"
+            nativeButton={false}
+            render={<Link href="/user/companion" />}
+          >
+            <MessageCircleHeart className="h-5 w-5 text-accent" />
+            <span className="text-sm">말벗과 이야기하기</span>
+          </Button>
+        </div>
+
+        {ward.lastMeal.tone !== "완식" && (
+          <Button
+            variant="outline"
+            className="w-fit"
+            onClick={() =>
+              toast.success(`${ward.caseWorkerName}님께 연락 요청을 보냈어요.`)
+            }
+          >
+            <PhoneCall />
+            담당자에게 연락하기
+          </Button>
+        )}
+
         <Link
           href="/user/diet"
-          className="flex flex-col gap-2 rounded-2xl bg-sidebar p-5 text-sidebar-foreground shadow-sm"
+          className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3"
         >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold tracking-wide text-sidebar-primary">
-              오늘의 배정 식단
-            </span>
-            <ChevronRight className="h-4 w-4 text-sidebar-foreground/60" />
-          </div>
-          <span className="text-xl font-extrabold">{detail.diet.name}</span>
-          <div className="flex gap-4 pt-1 text-xs">
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">나트륨</span>
-              <span className="font-semibold">{detail.diet.sodiumMg}mg</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">단백질</span>
-              <span className="font-semibold">{detail.diet.proteinG}g</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">열량</span>
-              <span className="font-semibold">{detail.diet.kcal}kcal</span>
-            </div>
-          </div>
+          <span className="text-sm font-semibold text-foreground">
+            식단 상세와 건강지표 더보기
+          </span>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
         </Link>
-
-        <div className="grid grid-cols-3 gap-2.5">
-          <StatCard label="수축기 혈압" value={`${detail.checkup.systolicBP}`} unit="mmHg" />
-          <StatCard label="공복혈당" value={`${detail.checkup.fastingGlucose}`} unit="mg/dL" />
-          <StatCard label="체중" value={`${detail.checkup.weightKg}`} unit="kg" />
-        </div>
 
         <div className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">안내 사항</span>
@@ -108,30 +218,6 @@ export function HomeView({
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  unit,
-}: {
-  label: string;
-  value: string;
-  unit: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1 rounded-xl bg-muted px-3 py-3">
-      <span className="text-[11px] font-medium text-muted-foreground">
-        {label}
-      </span>
-      <span className="text-base font-extrabold text-foreground">
-        {value}
-        <span className="ml-0.5 text-xs font-medium text-muted-foreground">
-          {unit}
-        </span>
-      </span>
     </div>
   );
 }

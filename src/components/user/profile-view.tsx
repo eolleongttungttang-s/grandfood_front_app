@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { LogOut, Phone } from "lucide-react";
+import { LogOut, Phone, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Account } from "@/lib/auth";
@@ -13,6 +13,8 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { TopBar } from "@/components/app/top-bar";
 import { useSession } from "@/lib/session";
+import { accessibilityStore, speak, updateAccessibility } from "@/lib/accessibility";
+import { useLocalStore } from "@/lib/use-store";
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
@@ -27,6 +29,7 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
   const router = useRouter();
   const { logout } = useSession();
   const [notifyEnabled, setNotifyEnabled] = useState(true);
+  const a11y = useLocalStore(accessibilityStore);
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -66,6 +69,61 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
           <Phone />
           담당자에게 전화 연결 요청하기
         </Button>
+
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <span className="text-xs font-bold text-foreground">화면 · 음성 설정</span>
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold text-foreground">큰 글씨 모드</span>
+              <span className="text-xs text-muted-foreground">글씨를 더 크게 보여드려요</span>
+            </div>
+            <Switch
+              checked={a11y.largeText}
+              onCheckedChange={(checked) => updateAccessibility({ largeText: checked })}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold text-foreground">고대비 모드</span>
+              <span className="text-xs text-muted-foreground">
+                글자와 배경 대비를 또렷하게 해요
+              </span>
+            </div>
+            <Switch
+              checked={a11y.highContrast}
+              onCheckedChange={(checked) => updateAccessibility({ highContrast: checked })}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold text-foreground">음성 안내</span>
+              <span className="text-xs text-muted-foreground">
+                주요 안내를 소리로도 읽어드려요
+              </span>
+            </div>
+            <Switch
+              checked={a11y.voiceGuidance}
+              onCheckedChange={(checked) => {
+                updateAccessibility({ voiceGuidance: checked });
+                if (checked) {
+                  setTimeout(() => speak("음성 안내를 켰어요."), 100);
+                }
+              }}
+            />
+          </div>
+          {a11y.voiceGuidance && (
+            <Button
+              variant="outline"
+              className="w-fit"
+              onClick={() =>
+                speak(`${ward.name}님의 오늘 식사 상태는 ${ward.lastMeal.label} 입니다.`)
+              }
+            >
+              <Volume2 />
+              오늘 상태 읽어주기
+            </Button>
+          )}
+        </div>
 
         <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex flex-col">
