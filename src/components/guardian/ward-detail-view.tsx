@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Ward, WardDetail, WardStatus } from "@/lib/wards";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 
 const STATUS_BADGE_CLASS: Record<WardStatus, string> = {
   "확인 필요": "bg-risk-high text-risk-high-foreground",
@@ -43,13 +44,16 @@ export function WardDetailView({
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
       <div className="flex items-center justify-between bg-sidebar px-5 py-3 text-sidebar-foreground">
-        <Link
-          href="/guardian/home"
-          className="flex items-center gap-1 text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          대상자 목록
-        </Link>
+        <div className="flex items-center gap-3">
+          <GrandFoodMark className="h-6 w-6 shrink-0 rounded-md" />
+          <Link
+            href="/guardian/home"
+            className="flex items-center gap-1 text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            대상자 목록
+          </Link>
+        </div>
         <Badge className={STATUS_BADGE_CLASS[ward.status]}>{ward.status}</Badge>
       </div>
 
