@@ -16,6 +16,8 @@ export type GuardianInviteResult = {
   code: string;
   issuedAt: string;
   expiresAt: string;
+  /** 이 초대가 어떤 ward들에 대한 것인지 — 수락 시 새 보호자에게 이 ward들 접근 권한을 부여해야 한다 */
+  wardIds: string[];
 };
 
 export const guardianInviteStore = createLocalStore<GuardianInviteResult | null>(
@@ -24,15 +26,14 @@ export const guardianInviteStore = createLocalStore<GuardianInviteResult | null>
 );
 
 // TODO(backend): POST /guardians/invites { wardIds } — 공동 보호자 초대 코드 발급.
-// 실제 백엔드는 어떤 ward들에 대한 초대인지(wardIds)를 저장해뒀다가, 초대 수락 시 그 ward들에 대한
-// 접근 권한을 새 보호자에게 부여해야 한다. 목업은 코드/만료일 계산만 흉내내고 wardIds는 저장하지 않는다.
-export async function createGuardianInvite(_cmd: CreateGuardianInviteCommand): Promise<GuardianInviteResult> {
+export async function createGuardianInvite(cmd: CreateGuardianInviteCommand): Promise<GuardianInviteResult> {
   const issuedAt = new Date();
   const expiresAt = new Date(issuedAt.getTime() + INVITE_VALID_DAYS * 24 * 60 * 60 * 1000);
   const result: GuardianInviteResult = {
     code: generateInviteCode(),
     issuedAt: issuedAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
+    wardIds: cmd.wardIds,
   };
   guardianInviteStore.write(result);
   return result;

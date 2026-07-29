@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Stethoscope } from "lucide-react";
 
 import { Ward, WardDetail } from "@/lib/wards";
+import { getDish } from "@/lib/dishes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
@@ -18,6 +19,11 @@ export function DietView({
   detail: WardDetail;
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
+  // 조합을 대표할 이모지 하나 — "메인" 반찬이 있으면 그걸, 없으면 첫 반찬을 대표로 보여준다.
+  // (DishComboItem 자체엔 이모지가 없어서, 카탈로그 원본(dishes.ts)에서 다시 찾아온다.)
+  const representativeDish =
+    detail.recommendedCombo.items.map((i) => getDish(i.dishId)).find((d) => d?.category === "메인") ??
+    getDish(detail.recommendedCombo.items[0]?.dishId);
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -26,35 +32,35 @@ export function DietView({
       <div className="flex flex-col gap-4 px-5">
         <div className="flex flex-col gap-2 rounded-2xl bg-sidebar p-5 text-sidebar-foreground shadow-sm">
           <span className="text-xs font-bold tracking-wide text-sidebar-primary">
-            배정 식단
+            AI 반찬 매칭
           </span>
-          <span className="text-xl font-extrabold">{detail.diet.name}</span>
+          <span className="text-xl font-extrabold">오늘의 추천 반찬 조합</span>
           <div className="flex gap-4 pt-1 text-xs">
             <div className="flex flex-col">
               <span className="text-sidebar-foreground/60">나트륨</span>
-              <span className="font-semibold">{detail.diet.sodiumMg}mg</span>
+              <span className="font-semibold">{detail.recommendedCombo.totalSodiumMg}mg</span>
             </div>
             <div className="flex flex-col">
               <span className="text-sidebar-foreground/60">단백질</span>
-              <span className="font-semibold">{detail.diet.proteinG}g</span>
+              <span className="font-semibold">{detail.recommendedCombo.totalProteinG}g</span>
             </div>
             <div className="flex flex-col">
               <span className="text-sidebar-foreground/60">열량</span>
-              <span className="font-semibold">{detail.diet.kcal}kcal</span>
+              <span className="font-semibold">{detail.recommendedCombo.totalKcal}kcal</span>
             </div>
           </div>
         </div>
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">
-            {detail.todayMenu.photoEmoji} 오늘 메뉴 구성
+            {representativeDish?.imageEmoji ?? "🍽️"} 오늘 메뉴 구성
           </span>
           <div className="flex flex-col gap-1.5">
-            {detail.todayMenu.items.map((item) => {
-              const disliked = dislikes.includes(item.id);
+            {detail.recommendedCombo.items.map((item) => {
+              const disliked = dislikes.includes(item.dishId);
               return (
                 <div
-                  key={item.id}
+                  key={item.dishId}
                   className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2"
                 >
                   <span
@@ -64,7 +70,7 @@ export function DietView({
                   </span>
                   <button
                     type="button"
-                    onClick={() => toggleDislike(ward.id, item.id)}
+                    onClick={() => toggleDislike(ward.id, item.dishId)}
                     className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
                       disliked
                         ? "bg-destructive/10 text-destructive"
@@ -85,8 +91,8 @@ export function DietView({
         </div>
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <span className="text-xs font-bold text-foreground">왜 이 식단인가요</span>
-          {detail.diet.reasons.map((reason, i) => (
+          <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
+          {detail.recommendedCombo.reasons.map((reason, i) => (
             <div
               key={i}
               className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"

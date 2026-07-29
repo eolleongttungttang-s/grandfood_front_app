@@ -1,4 +1,4 @@
-import { WARDS } from "@/lib/wards";
+import { WARDS } from "@/lib/ward-registry";
 import { GuardianWardReportPageClient } from "./page-client";
 
 export function generateStaticParams() {

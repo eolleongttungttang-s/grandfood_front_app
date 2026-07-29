@@ -13,13 +13,15 @@ import {
 import { toast } from "sonner";
 
 import { Ward, WardDetail } from "@/lib/wards";
+import { getPartnerStore } from "@/lib/partner-stores";
+import { getDish } from "@/lib/dishes";
 import { USER_NOTIFICATIONS, notificationBadgeClass } from "@/lib/notifications";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 import { getNutritionTip } from "@/lib/nutrition-tip";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
-import { mealCheckStore, setMealCheck } from "@/lib/meal-check-store";
+import { quickMealCheckStore, setQuickMealCheck } from "@/lib/meal-log-store";
 import { useLocalStore } from "@/lib/use-store";
 import { getSpeechRecognition, speak } from "@/lib/accessibility";
 
@@ -33,11 +35,15 @@ export function HomeView({
   detail: WardDetail;
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
-  const mealCheck = useLocalStore(mealCheckStore)[ward.id] ?? null;
+  const mealCheck = useLocalStore(quickMealCheckStore)[ward.id] ?? null;
   const [listening, setListening] = useState(false);
+  const partnerStore = getPartnerStore(ward.partnerStoreId);
+  const representativeDish =
+    detail.recommendedCombo.items.map((i) => getDish(i.dishId)).find((d) => d?.category === "메인") ??
+    getDish(detail.recommendedCombo.items[0]?.dishId);
 
   function checkMeal(status: "완식" | "남김") {
-    setMealCheck(ward.id, status);
+    setQuickMealCheck(ward.id, status);
     const message = status === "완식" ? "잘 하셨어요! 다음 식사도 챙겨드릴게요." : "알겠어요, 남긴 반찬은 다음 식단에 참고할게요.";
     toast.success(message);
     speak(message);
@@ -68,7 +74,7 @@ export function HomeView({
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
-      <TopBar title={`안녕하세요, ${name}님`} subtitle={ward.facility} />
+      <TopBar title={`안녕하세요, ${name}님`} subtitle={partnerStore?.name} />
 
       <div className="flex flex-col gap-4 px-5">
         <div className="flex items-center gap-2 rounded-xl bg-muted px-4 py-2.5 text-sm text-foreground">
@@ -78,22 +84,22 @@ export function HomeView({
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-center gap-3">
-            <span className="text-4xl">{detail.todayMenu.photoEmoji}</span>
+            <span className="text-4xl">{representativeDish?.imageEmoji ?? "🍽️"}</span>
             <div className="flex flex-col">
               <span className="text-xs font-semibold text-muted-foreground">
-                오늘의 식단
+                오늘의 추천 반찬 조합
               </span>
               <span className="text-lg font-extrabold text-foreground">
-                {detail.diet.name}
+                {partnerStore?.name ?? "담당 반찬가게"}
               </span>
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            {detail.todayMenu.items.map((item) => {
-              const disliked = dislikes.includes(item.id);
+            {detail.recommendedCombo.items.map((item) => {
+              const disliked = dislikes.includes(item.dishId);
               return (
                 <div
-                  key={item.id}
+                  key={item.dishId}
                   className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2"
                 >
                   <span
@@ -103,7 +109,7 @@ export function HomeView({
                   </span>
                   <button
                     type="button"
-                    onClick={() => toggleDislike(ward.id, item.id)}
+                    onClick={() => toggleDislike(ward.id, item.dishId)}
                     className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
                       disliked
                         ? "bg-destructive/10 text-destructive"
@@ -185,11 +191,11 @@ export function HomeView({
             variant="outline"
             className="w-fit"
             onClick={() =>
-              toast.success(`${ward.caseWorkerName}님께 연락 요청을 보냈어요.`)
+              toast.success(`${partnerStore?.name ?? "담당 반찬가게"}에 연락 요청을 보냈어요.`)
             }
           >
             <PhoneCall />
-            담당자에게 연락하기
+            매장에 문의하기
           </Button>
         )}
 

@@ -1,84 +1,22 @@
-// Ward/WardDetail — B2C(반찬가게) 피벗의 핵심 타입. B2G(정부 위탁 돌봄) 버전에서는
+// WardDetail — B2C(반찬가게) 피벗의 핵심 타입. B2G(정부 위탁 돌봄) 버전에서는
 // 어르신이 정부 시설(facility)에 속하고 사회복지사(caseWorker)가 담당했지만,
 // 지금은 파트너 반찬가게(partnerStoreId)가 그 역할을 대신한다.
+//
+// Ward 타입/WARDS 배열/getWard()는 ward-registry.ts로 옮겼다 — generateStaticParams()가
+// 서버(빌드 타임)에서 이 파일을 그대로 import하면, 아래에서 쓰는 건강 프로필/배송 store들
+// (local-store.ts 기반, "use client")까지 같이 로드되면서 빌드가 깨지기 때문이다.
+// 이 파일은 그 registry를 다시 export해서, 기존에 "@/lib/wards"에서 Ward를 가져오던
+// 코드들은 그대로 두고 쓸 수 있게 했다.
 
 import { seedFromId } from "@/lib/seed";
 import { getHealthProfile, type HealthProfileView } from "@/lib/health-profile";
 import { matchDishes, type DishCombo } from "@/lib/recommendation";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import type { AllergyTag } from "@/lib/dishes";
+import { WARDS, getWard, type Ward, type WardStatus, type MealTone } from "@/lib/ward-registry";
 
-export type WardStatus = "확인 필요" | "관찰중" | "양호";
-export type MealTone = "완식" | "소량" | "미응답";
-
-export type Ward = {
-  id: string;
-  name: string;
-  age: number;
-  gender: "여" | "남";
-  address: string;
-  /** 담당 반찬가게. B2G 버전의 facility/caseWorker(정부 시설·사회복지사)를 대체 —
-   *  문의도 이제 이 매장으로 하면 된다 (partner-stores.ts 참고). */
-  partnerStoreId: string;
-  /** 보호자 화면에서 보여줄 관계 표기 (본인 화면에서는 사용하지 않음) */
-  relationToGuardian: string;
-  /** 여러 부모님(양가)을 등록해 관리하는 경우 구분용 그룹명 */
-  familyGroup: string;
-  /** 이 대상자를 함께 보고 있는 다른 보호자 (형제자매 등 가족 공유) */
-  coGuardians: string[];
-  conditions: string[];
-  status: WardStatus;
-  lastMeal: { tone: MealTone; label: string };
-};
-
-export const WARDS: Ward[] = [
-  {
-    id: "001",
-    name: "박순자",
-    age: 82,
-    gender: "여",
-    address: "역삼1동",
-    partnerStoreId: "store-yeoksam",
-    relationToGuardian: "어머니",
-    familyGroup: "본가",
-    coGuardians: ["박은정 (딸)"],
-    conditions: ["고혈압", "당뇨"],
-    status: "확인 필요",
-    lastMeal: { tone: "미응답", label: "3일째 미응답" },
-  },
-  {
-    id: "006",
-    name: "한상옥",
-    age: 88,
-    gender: "여",
-    address: "청담동",
-    partnerStoreId: "store-cheongdam",
-    relationToGuardian: "할머니",
-    familyGroup: "본가",
-    coGuardians: [],
-    conditions: ["치매 초기", "당뇨"],
-    status: "확인 필요",
-    lastMeal: { tone: "미응답", label: "4일째 미응답" },
-  },
-  {
-    id: "008",
-    name: "윤태식",
-    age: 91,
-    gender: "남",
-    address: "대치2동",
-    partnerStoreId: "store-daechi",
-    relationToGuardian: "할아버지",
-    familyGroup: "처가",
-    coGuardians: ["윤서연 (아내)"],
-    conditions: ["심부전", "고혈압"],
-    status: "관찰중",
-    lastMeal: { tone: "소량", label: "어제 소량 섭취" },
-  },
-];
-
-export function getWard(id: string): Ward | undefined {
-  return WARDS.find((w) => w.id === id);
-}
+export { WARDS, getWard };
+export type { Ward, WardStatus, MealTone };
 
 export type WardDetail = {
   allergies: string[];
