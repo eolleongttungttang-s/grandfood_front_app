@@ -17,6 +17,10 @@
 > 그냥 원화 정수 `priceWon`으로만 다룸 — 필요시 백엔드의 `Money`처럼 `{amount, currency}`로
 > 바꿔도 프론트 쪽 영향은 `subscription.ts` 한 파일뿐).
 
+> API 서버 주소는 `NEXT_PUBLIC_API_BASE_URL` 환경변수로 잡는다 (기본값 `http://localhost:8000`,
+> `.env.local.example` 참고). 정적 export(`output:"export"`) 앱이라 이 값은 **빌드 시점에** 확정돼야
+> 하고, 배포 후 런타임에는 못 바꾼다.
+
 ---
 
 ## 1. 반찬 카탈로그 — `src/lib/dishes.ts`
@@ -98,13 +102,21 @@ type HealthProfileView = RegisterHealthProfileCommand & {
 
 ## 4. 식사 체크인 · 잔반 분석 — `src/lib/meal-log-store.ts`
 
+**이미 실제 `fetch()`로 호출 중** (다른 항목들과 달리 아직 mock이 아님) — `/user/diet` 화면에서
+카메라로 찍은 사진을 실제로 이 엔드포인트에 업로드하려고 시도한다. 백엔드에 아직 이 라우트가 없어서
+지금은 연결 실패/404가 나는 게 정상이며, 이 라우트를 만들면 프론트는 그대로 연결된다.
+
 | Method | Path | 설명 |
 |---|---|---|
-| POST | `/wards/:id/meal-logs` | 식전/식후 사진 업로드 (multipart: `beforePhoto`, `afterPhoto`, `mealSlot`) |
+| POST | `/wards/:id/meal-logs` | 식전/식후 사진 업로드 (multipart: `mealSlot`, `comboId`, `beforePhoto`, `afterPhoto`) |
 
 ```ts
 type MealSlot = "아침" | "점심" | "저녁";
 type MealLogCompartment = { dishId: string; name: string; leftoverPercent: number };
+
+// multipart 필드: mealSlot(text), comboId(text, 위 2번 DishCombo.comboId), beforePhoto(file), afterPhoto(file)
+// comboId를 같이 보내는 이유: 서버가 사진을 분석해도, "그 사진이 어떤 반찬 구성이었는지"를 알아야
+// compartments를 반찬별로 매핑할 수 있기 때문 (DishCombo.items의 dishId 순서/구성을 참조).
 
 // Response — 실제로는 비전 모델이 사진을 분석해 칸(compartment)별 잔반율을 계산해서 돌려줌
 type MealLogEntry = {

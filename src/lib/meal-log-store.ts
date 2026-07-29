@@ -7,7 +7,6 @@
 // 분리해서 둔다.
 
 import { createLocalStore } from "@/lib/local-store";
-import type { DishCombo } from "@/lib/recommendation";
 
 export type QuickMealStatus = "완식" | "남김" | null;
 
@@ -48,34 +47,38 @@ export function wardMealLogs(all: Record<string, MealLogEntry[]>, wardId: string
   return all[wardId] ?? [];
 }
 
-// TODO(backend): POST /wards/:id/meal-logs (multipart: beforePhoto, afterPhoto) — 식전/식후 사진 업로드.
-// 실제로는 비전 모델이 사진을 분석해 칸(compartment)별 잔반율을 계산해서 응답으로 돌려준다.
-// 사진 업로드 UI와 실제 이미지 분석(ML)은 이번 작업 범위 밖이라, 목업은 업로드 자체를 흉내내지 않고
-// seed 대신 간단한 난수로 "그럴듯한 잔반율"만 채워 응답 모양(MealLogEntry)만 맞춰둔다.
+// 실제 백엔드 서버 주소. grandfood_backend는 uvicorn 기본 포트(8000)로 뜨니 그 값을 기본값으로 뒀다.
+// 이 앱은 next.config.ts에서 output:"export"로 정적 export하기 때문에, 이 값은 "실행 중에" 바뀌는
+// 게 아니라 빌드할 때 process.env에서 읽혀 번들에 그대로 박힌다 — 배포 환경마다 API 주소가 다르면
+// 빌드 전에 .env.local(또는 CI 환경변수)에 NEXT_PUBLIC_API_BASE_URL을 설정해야 한다.
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+
+// POST /wards/:id/meal-logs — 식전/식후 사진을 실제로 백엔드에 업로드해서 잔반 분석을 요청한다.
+// grandfood_backend에는 아직 이 엔드포인트가 없어서(팀원이 구현 예정), 지금은 호출하면 연결 실패/404가
+// 나는 게 정상이다 — docs/backend-api-contract.md의 4번 항목대로 엔드포인트가 생기면 그대로 연결된다.
 export async function submitMealLogPhotos(params: {
   wardId: string;
   mealSlot: MealSlot;
-  beforePhotoRef: string | null;
-  afterPhotoRef: string | null;
-  combo: DishCombo;
+  /** 오늘 추천받은 조합 id — 서버가 잔반 사진을 어떤 반찬 구성과 비교해야 하는지 알아야 하므로 함께 보낸다 */
+  comboId: string;
+  beforePhoto: File;
+  afterPhoto: File;
 }): Promise<MealLogEntry> {
-  const compartments: MealLogCompartment[] = params.combo.items.map((item) => ({
-    dishId: item.dishId,
-    name: item.name,
-    leftoverPercent: Math.floor(Math.random() * 60), // 0~59% — 실제로는 비전 모델 출력값으로 대체
-  }));
-  const entry: MealLogEntry = {
-    id: `meallog-${params.wardId}-${Date.now()}`,
-    wardId: params.wardId,
-    mealSlot: params.mealSlot,
-    loggedAt: new Date().toISOString(),
-    beforePhotoRef: params.beforePhotoRef,
-    afterPhotoRef: params.afterPhotoRef,
-    leftoverRatePercent: Math.round(
-      compartments.reduce((sum, c) => sum + c.leftoverPercent, 0) / compartments.length
-    ),
-    compartments,
-  };
+  const formData = new FormData();
+  formData.append("mealSlot", params.mealSlot);
+  formData.append("comboId", params.comboId);
+  formData.append("beforePhoto", params.beforePhoto);
+  formData.append("afterPhoto", params.afterPhoto);
+
+  const response = await fetch(`${API_BASE_URL}/wards/${params.wardId}/meal-logs`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(`잔반 분석 요청이 실패했어요 (status ${response.status})`);
+  }
+
+  const entry: MealLogEntry = await response.json();
   mealLogStore.update((prev) => ({ ...prev, [params.wardId]: [...(prev[params.wardId] ?? []), entry] }));
   return entry;
 }
