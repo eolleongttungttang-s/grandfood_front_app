@@ -10,7 +10,6 @@ import { Account } from "@/lib/auth";
 import { Ward } from "@/lib/wards";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { TopBar } from "@/components/app/top-bar";
 import { useSession } from "@/lib/session";
@@ -31,19 +30,9 @@ export function GuardianProfileView({
   const router = useRouter();
   const { logout } = useSession();
   const [notifyEnabled, setNotifyEnabled] = useState(true);
-  const [addOpen, setAddOpen] = useState(false);
-  const [addName, setAddName] = useState("");
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const currentPlanId = useLocalStore(subscriptionStore);
   const currentPlan = PLANS.find((p) => p.id === currentPlanId);
-
-  function submitAddWard() {
-    const trimmed = addName.trim();
-    if (!trimmed) return;
-    toast.success(`${trimmed}님 등록 요청을 보냈어요. 담당자 확인 후 연결돼요.`);
-    setAddName("");
-    setAddOpen(false);
-  }
 
   function createInvite() {
     const code = randomInviteCode();
@@ -91,25 +80,15 @@ export function GuardianProfileView({
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </Link>
           ))}
-          {!addOpen ? (
-            <Button variant="outline" size="sm" className="mt-1 w-fit" onClick={() => setAddOpen(true)}>
-              대상자 추가하기
-            </Button>
-          ) : (
-            <div className="mt-1 flex gap-2">
-              <Input
-                value={addName}
-                onChange={(e) => setAddName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submitAddWard();
-                }}
-                placeholder="등록할 어르신 성함"
-              />
-              <Button size="sm" onClick={submitAddWard}>
-                요청
-              </Button>
-            </div>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-1 w-fit"
+            nativeButton={false}
+            render={<Link href="/guardian/wards/new" />}
+          >
+            대상자 추가하기
+          </Button>
         </div>
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
