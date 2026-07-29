@@ -2,6 +2,7 @@
 // g-invite 화면에서 사용.
 
 import { createLocalStore } from "@/lib/local-store";
+import { generateInviteCode, INVITE_VALID_DAYS } from "@/lib/invite-code";
 
 export type WardInviteInput = {
   name: string;
@@ -14,18 +15,6 @@ export type WardInviteResult = WardInviteInput & {
   expiresAt: string;
   smsSent: boolean;
 };
-
-// 혼동되기 쉬운 문자(I, O, 0, 1)는 제외
-const INVITE_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const INVITE_VALID_DAYS = 7;
-
-function generateInviteCode(length = 6): string {
-  let code = "";
-  for (let i = 0; i < length; i++) {
-    code += INVITE_CODE_CHARS[Math.floor(Math.random() * INVITE_CODE_CHARS.length)];
-  }
-  return code;
-}
 
 export const wardInviteStore = createLocalStore<WardInviteResult | null>(
   "grandfood-app-ward-invite",
