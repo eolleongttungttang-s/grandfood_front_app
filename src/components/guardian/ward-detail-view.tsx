@@ -23,7 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
-import { getDeliveryHistory } from "@/lib/delivery";
+import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
   addMessage,
   chatStore,
@@ -380,13 +380,13 @@ export function WardDetailView({
 
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <h2 className="pb-1 text-sm font-bold text-foreground">배송 일정 · 이력</h2>
-          {getDeliveryHistory().map((d, i) => (
+          {wardDeliveries(useLocalStore(deliveryStore), ward.id).map((d) => (
             <div
-              key={i}
+              key={d.id}
               className="flex items-center justify-between border-b border-border py-2 text-sm last:border-0"
             >
-              <span className="text-muted-foreground">{d.date}</span>
-              <span className="text-foreground">{d.time}</span>
+              <span className="text-muted-foreground">{d.scheduledDate}</span>
+              <span className="text-foreground">{d.scheduledTime}</span>
               <Badge variant={d.status === "예정" ? "outline" : "secondary"}>{d.status}</Badge>
             </div>
           ))}
