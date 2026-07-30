@@ -1,143 +1,54 @@
-export type WardStatus = "확인 필요" | "관찰중" | "양호";
-export type MealTone = "완식" | "소량" | "미응답";
+// WardDetail — B2C(반찬가게) 피벗의 핵심 타입. B2G(정부 위탁 돌봄) 버전에서는
+// 어르신이 정부 시설(facility)에 속하고 사회복지사(caseWorker)가 담당했지만,
+// 지금은 파트너 반찬가게(partnerStoreId)가 그 역할을 대신한다.
+//
+// Ward 타입/WARDS 배열/getWard()는 ward-registry.ts로 옮겼다 — generateStaticParams()가
+// 서버(빌드 타임)에서 이 파일을 그대로 import하면, 아래에서 쓰는 건강 프로필/배송 store들
+// (local-store.ts 기반, "use client")까지 같이 로드되면서 빌드가 깨지기 때문이다.
+// 이 파일은 그 registry를 다시 export해서, 기존에 "@/lib/wards"에서 Ward를 가져오던
+// 코드들은 그대로 두고 쓸 수 있게 했다.
 
-export type Ward = {
-  id: string;
-  name: string;
-  age: number;
-  gender: "여" | "남";
-  address: string;
-  facility: string;
-  /** 보호자 화면에서 보여줄 관계 표기 (본인 화면에서는 사용하지 않음) */
-  relationToGuardian: string;
-  /** 여러 부모님(양가)을 등록해 관리하는 경우 구분용 그룹명 */
-  familyGroup: string;
-  /** 이 대상자를 함께 보고 있는 다른 보호자 (형제자매 등 가족 공유) */
-  coGuardians: string[];
-  conditions: string[];
-  status: WardStatus;
-  lastMeal: { tone: MealTone; label: string };
-  caseWorkerName: string;
-  caseWorkerPhone: string;
-};
+import { seedFromId } from "@/lib/seed";
+import { getHealthProfile, type HealthProfileView } from "@/lib/health-profile";
+import { matchDishes, type DishCombo } from "@/lib/recommendation";
+import { deliveryStore, wardDeliveries } from "@/lib/delivery";
+import type { AllergyTag } from "@/lib/dishes";
+import { WARDS, getWard, type Ward, type WardStatus, type MealTone } from "@/lib/ward-registry";
 
-export const WARDS: Ward[] = [
-  {
-    id: "001",
-    name: "박순자",
-    age: 82,
-    gender: "여",
-    address: "역삼1동",
-    facility: "강남구 노인맞춤돌봄센터",
-    relationToGuardian: "어머니",
-    familyGroup: "본가",
-    coGuardians: ["박은정 (딸)"],
-    conditions: ["고혈압", "당뇨"],
-    status: "확인 필요",
-    lastMeal: { tone: "미응답", label: "3일째 미응답" },
-    caseWorkerName: "김미정 사회복지사",
-    caseWorkerPhone: "02-3423-1000",
-  },
-  {
-    id: "006",
-    name: "한상옥",
-    age: 88,
-    gender: "여",
-    address: "청담동",
-    facility: "강남구 노인맞춤돌봄센터",
-    relationToGuardian: "할머니",
-    familyGroup: "본가",
-    coGuardians: [],
-    conditions: ["치매 초기", "당뇨"],
-    status: "확인 필요",
-    lastMeal: { tone: "미응답", label: "4일째 미응답" },
-    caseWorkerName: "박정현 주무관",
-    caseWorkerPhone: "02-3423-1002",
-  },
-  {
-    id: "008",
-    name: "윤태식",
-    age: 91,
-    gender: "남",
-    address: "대치2동",
-    facility: "강남구 노인맞춤돌봄센터",
-    relationToGuardian: "할아버지",
-    familyGroup: "처가",
-    coGuardians: ["윤서연 (아내)"],
-    conditions: ["심부전", "고혈압"],
-    status: "관찰중",
-    lastMeal: { tone: "소량", label: "어제 소량 섭취" },
-    caseWorkerName: "박정현 주무관",
-    caseWorkerPhone: "02-3423-1002",
-  },
-];
-
-export function getWard(id: string): Ward | undefined {
-  return WARDS.find((w) => w.id === id);
-}
-
-export type MenuItem = { id: string; name: string };
+export { WARDS, getWard };
+export type { Ward, WardStatus, MealTone };
 
 export type WardDetail = {
   allergies: string[];
   medications: { name: string; schedule: string }[];
   chewingNote: string;
-  checkup: {
-    date: string;
-    systolicBP: number;
-    fastingGlucose: number;
-    hba1c: number;
-    weightKg: number;
-  };
-  diet: {
-    name: string;
-    sodiumMg: number;
-    proteinG: number;
-    kcal: number;
-    reasons: string[];
-  };
-  /** 오늘의 배달 식단 사진(이모지로 대체)과 메뉴 구성 */
-  todayMenu: { photoEmoji: string; items: MenuItem[] };
-  /** 오늘 배송 도착 예정 시각 */
+  /** 건강 프로필 등록 단계의 결과 (자가 입력 또는 마이데이터 연동). health-profile.ts 참고 */
+  healthProfile: HealthProfileView;
+  /** AI 반찬 매칭 결과 — 한정된 카탈로그에서 오늘 추천된 조합. recommendation.ts 참고 */
+  recommendedCombo: DishCombo;
+  /** 오늘 배달 예정 시각 */
   deliveryEta: string;
-  /** 오늘 잔반율(%) — 최근 응답 상태에서 추정 */
+  /** 오늘 잔반율(%) — 최근 응답 상태에서 추정한 요약값 (사진 기반 상세 분석은 meal-log-store.ts) */
   leftoverPercent: number;
   mealHistory: MealTone[];
-  nextVisit: { date: string; worker: string; type: "방문" | "전화" } | null;
-  visitHistory: { date: string; worker: string; type: "방문" | "전화" }[];
+  /** 다음 배송 예정일 — B2G 버전의 사회복지사 방문 일정(nextVisit)을 대체 */
+  nextDeliveryDate: string;
 };
-
-function seed(id: string) {
-  let s = 0;
-  for (const ch of id) s += ch.charCodeAt(0);
-  return s;
-}
 
 const ALLERGY_POOL = ["없음", "고등어(해산물)", "메밀", "갑각류", "우유", "견과류"];
 
-const MENU_POOL: Record<string, { photoEmoji: string; items: string[] }> = {
-  "저염 · 단백강화 당뇨식": {
-    photoEmoji: "🍱",
-    items: ["잡곡밥", "두부조림", "시금치나물", "저염된장국", "배추김치"],
-  },
-  "저염 관리형 식단": {
-    photoEmoji: "🍚",
-    items: ["잡곡밥", "고등어구이", "나물무침", "저염된장국", "깍두기"],
-  },
-  "저염 · 저지방 관리식": {
-    photoEmoji: "🥗",
-    items: ["현미밥", "닭가슴살찜", "브로콜리나물", "맑은무국", "배추김치"],
-  },
-  "일반 균형식": {
-    photoEmoji: "🍛",
-    items: ["흰쌀밥", "제육볶음", "시금치나물", "미역국", "깍두기"],
-  },
-};
+// 표시용 알레르기 라벨("고등어(해산물)")에서 반찬 매칭에 쓸 알레르기 태그("해산물")만 뽑아낸다.
+// 라벨은 사람이 읽을 문구(생선 이름 포함)이고, 태그는 dishes.ts의 AllergyTag와 맞아떨어지는 값이라 분리했다.
+const ALLERGY_TAG_KEYWORDS: AllergyTag[] = ["해산물", "메밀", "갑각류", "우유", "견과류"];
+function labelToAllergyTag(label: string): AllergyTag | null {
+  return ALLERGY_TAG_KEYWORDS.find((tag) => label.includes(tag)) ?? null;
+}
 
 export function getWardDetail(ward: Ward): WardDetail {
-  const s = seed(ward.id);
+  const s = seedFromId(ward.id);
   const has = (keyword: string) => ward.conditions.some((c) => c.includes(keyword));
   const allergies = [ALLERGY_POOL[s % ALLERGY_POOL.length]];
+  const allergyTags = allergies.map(labelToAllergyTag).filter((t): t is AllergyTag => t !== null);
 
   const medications: { name: string; schedule: string }[] = [];
   if (has("고혈압")) medications.push({ name: "암로디핀 5mg", schedule: "1일 1회 · 아침" });
@@ -153,33 +64,43 @@ export function getWardDetail(ward: Ward): WardDetail {
         ? "일반식 가능 · 질긴 음식만 주의하고 있어요"
         : "저작 · 연하 상태 정상이에요";
 
+  // 예전엔 이 수치들이 국가검진 OCR 결과였는데, 지금은 "아직 아무도 건강 프로필을 등록/연동하지
+  // 않았을 때의 기본값"이 됐다. getHealthProfile()이 실제 등록된 값이 있으면 그걸 대신 돌려준다.
   const systolicBP = 118 + (has("고혈압") ? 24 : 0) + (s % 7);
   const fastingGlucose = 92 + (has("당뇨") ? 34 : 0) + (s % 10);
   const hba1c = Number((5.6 + (has("당뇨") ? 1.3 : 0) + (s % 5) * 0.1).toFixed(1));
   const weightKg =
     (ward.gender === "여" ? 54 : 66) - Math.max(0, ward.age - 75) * 0.3;
 
-  const dietName = has("심부전")
-    ? "저염 · 저지방 관리식"
-    : has("당뇨")
-      ? "저염 · 단백강화 당뇨식"
-      : has("고혈압")
-        ? "저염 관리형 식단"
-        : "일반 균형식";
+  const fallbackHealthProfile: HealthProfileView = {
+    wardId: ward.id,
+    source: "self_reported",
+    systolicBP,
+    fastingGlucose,
+    hba1c,
+    weightKg: Number(weightKg.toFixed(1)),
+    updatedAt: "2026.05.14",
+  };
+  const healthProfile = getHealthProfile(ward.id, fallbackHealthProfile);
 
-  const sodiumMg = has("고혈압") || has("당뇨") || has("심부전") ? 1500 : 1800;
-  const proteinG = ward.status === "확인 필요" ? 68 : 58;
-  const kcal = 1550 + (s % 4) * 30;
-
-  const reasons: string[] = [];
+  // AI 반찬 매칭 — 매칭 서비스(recommendation.ts)는 진단 질환/알레르기만 알 뿐 정확한 혈압·혈당
+  // 수치는 모른다고 가정했으므로, 그 수치에 대한 설명은 여기서 조합의 reasons에 덧붙인다.
+  const combo = matchDishes({
+    wardId: ward.id,
+    storeId: ward.partnerStoreId,
+    conditions: ward.conditions,
+    allergyTags,
+    statusHint: ward.status,
+  });
+  const vitalsReasons: string[] = [];
   if (has("고혈압"))
-    reasons.push(`수축기 ${systolicBP}mmHg → 나트륨 1일 ${sodiumMg}mg 이하로 제한하고 있어요`);
+    vitalsReasons.push(`수축기 ${healthProfile.systolicBP}mmHg → 나트륨 섭취를 줄이는 게 중요해요`);
   if (has("당뇨"))
-    reasons.push(`공복혈당 ${fastingGlucose}mg/dL → 단순당을 줄이고 잡곡 위주로 구성했어요`);
-  if (has("심부전")) reasons.push("수분 · 나트륨 제한이 필요해 국물류를 줄였어요");
-  if (allergies[0] !== "없음")
-    reasons.push(`${allergies[0]} 알레르기 → 대체 단백원(닭가슴살 · 두부)으로 바꿨어요`);
-  if (reasons.length === 0) reasons.push("특별한 위험 요인이 없어 표준 균형식을 유지하고 있어요");
+    vitalsReasons.push(`공복혈당 ${healthProfile.fastingGlucose}mg/dL → 단순당을 줄이는 게 중요해요`);
+  const recommendedCombo: DishCombo = {
+    ...combo,
+    reasons: vitalsReasons.length > 0 ? [...vitalsReasons, ...combo.reasons] : combo.reasons,
+  };
 
   const tailCount =
     ward.lastMeal.tone === "미응답" ? 3 : ward.lastMeal.tone === "소량" ? 2 : 0;
@@ -192,47 +113,24 @@ export function getWardDetail(ward: Ward): WardDetail {
     }
   }
 
-  const nextVisit =
-    ward.status === "확인 필요"
-      ? { date: "2026.07.28", worker: ward.caseWorkerName, type: "방문" as const }
-      : ward.status === "관찰중"
-        ? { date: "2026.08.02", worker: ward.caseWorkerName, type: "전화" as const }
-        : null;
-
-  const visitHistory = [
-    { date: "2026.07.20", worker: ward.caseWorkerName, type: "방문" as const },
-    { date: "2026.07.06", worker: ward.caseWorkerName, type: "전화" as const },
-    ...(nextVisit ? [nextVisit] : []),
-  ];
-
-  const menu = MENU_POOL[dietName] ?? MENU_POOL["일반 균형식"];
-  const todayMenu = {
-    photoEmoji: menu.photoEmoji,
-    items: menu.items.map((name, i) => ({ id: `${ward.id}-menu-${i}`, name })),
-  };
-
   const deliveryEta = ward.status === "확인 필요" ? "12:30" : "12:00";
 
   const leftoverPercent =
     ward.lastMeal.tone === "미응답" ? 100 : ward.lastMeal.tone === "소량" ? 55 : 5;
 
+  // 다음 배송일 — 실제 예정된 배송이 있으면 그 날짜를, 없으면 오늘 기준 가까운 날짜를 대략 보여준다.
+  const nextScheduled = wardDeliveries(deliveryStore.read(), ward.id).find((d) => d.status === "예정");
+  const nextDeliveryDate = nextScheduled?.scheduledDate ?? "2026.07.29";
+
   return {
     allergies,
     medications,
     chewingNote,
-    checkup: {
-      date: "2026.05.14",
-      systolicBP,
-      fastingGlucose,
-      hba1c,
-      weightKg: Number(weightKg.toFixed(1)),
-    },
-    diet: { name: dietName, sodiumMg, proteinG, kcal, reasons },
-    todayMenu,
+    healthProfile,
+    recommendedCombo,
     deliveryEta,
     leftoverPercent,
     mealHistory,
-    nextVisit,
-    visitHistory,
+    nextDeliveryDate,
   };
 }

@@ -16,6 +16,8 @@ import {
 import { toast } from "sonner";
 
 import { Ward, WardDetail, WardStatus } from "@/lib/wards";
+import { getPartnerStore } from "@/lib/partner-stores";
+import { getDish } from "@/lib/dishes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
-import { getDeliveryHistory } from "@/lib/delivery";
+import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
   addMessage,
   chatStore,
@@ -66,7 +68,11 @@ export function WardDetailView({
   const smallCount = detail.mealHistory.filter((m) => m === "소량").length;
   const noResponseCount = detail.mealHistory.filter((m) => m === "미응답").length;
   const dislikedIds = wardDislikes(useLocalStore(dislikesStore), ward.id);
-  const dislikedItems = detail.todayMenu.items.filter((i) => dislikedIds.includes(i.id));
+  const dislikedItems = detail.recommendedCombo.items.filter((i) => dislikedIds.includes(i.dishId));
+  const partnerStore = getPartnerStore(ward.partnerStoreId);
+  const representativeDish =
+    detail.recommendedCombo.items.map((i) => getDish(i.dishId)).find((d) => d?.category === "메인") ??
+    getDish(detail.recommendedCombo.items[0]?.dishId);
 
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestNote, setRequestNote] = useState("");
@@ -80,7 +86,7 @@ export function WardDetailView({
     const note =
       requestNote.trim() ||
       (dislikedItems.length > 0
-        ? `${dislikedItems.map((i) => i.name).join(", ")} 대신 다른 메뉴로 바꿔주세요.`
+        ? `${dislikedItems.map((i) => i.name).join(", ")} 대신 다른 반찬으로 바꿔주세요.`
         : "다음 식단 조정을 요청해요.");
     requestDietChange(ward.id, guardianName, note);
     toast.success("영양사에게 식단 변경을 요청했어요.");
@@ -129,7 +135,7 @@ export function WardDetailView({
                 {ward.age}세 · {ward.gender} · {ward.address}
               </span>
               <span className="text-xs text-muted-foreground">
-                {ward.facility} · 담당 {ward.caseWorkerName}
+                {partnerStore?.name ?? "담당 반찬가게"}
               </span>
             </div>
           </div>
@@ -146,17 +152,17 @@ export function WardDetailView({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => toast.success(`${ward.caseWorkerName}님께 전화 연결을 요청했어요.`)}
+              onClick={() => toast.success(`${partnerStore?.name ?? "담당 반찬가게"}에 전화 연결을 요청했어요.`)}
             >
               <PhoneCall />
-              담당자 연결
+              매장 연결
             </Button>
             <Button
               size="sm"
-              onClick={() => toast.success(`${ward.name}님 방문 확인을 요청했어요.`)}
+              onClick={() => toast.success(`${ward.name}님 안부 확인을 요청했어요.`)}
             >
               <MessageCircle />
-              방문 요청
+              안부 확인 요청
             </Button>
             <Button
               variant="outline"
@@ -201,7 +207,7 @@ export function WardDetailView({
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-baseline justify-between">
             <span className="text-xs font-bold text-foreground">
-              {detail.todayMenu.photoEmoji} 오늘의 식사
+              {representativeDish?.imageEmoji ?? "🍽️"} 오늘의 식사
             </span>
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Truck className="h-3.5 w-3.5" />
@@ -219,14 +225,14 @@ export function WardDetailView({
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {detail.todayMenu.items.map((item) => (
+            {detail.recommendedCombo.items.map((item) => (
               <Badge
-                key={item.id}
-                variant={dislikedIds.includes(item.id) ? "default" : "secondary"}
-                className={dislikedIds.includes(item.id) ? "bg-destructive/10 text-destructive" : ""}
+                key={item.dishId}
+                variant={dislikedIds.includes(item.dishId) ? "default" : "secondary"}
+                className={dislikedIds.includes(item.dishId) ? "bg-destructive/10 text-destructive" : ""}
               >
                 {item.name}
-                {dislikedIds.includes(item.id) ? " · 기피" : ""}
+                {dislikedIds.includes(item.dishId) ? " · 기피" : ""}
               </Badge>
             ))}
           </div>
@@ -268,28 +274,28 @@ export function WardDetailView({
 
         <div className="flex flex-col gap-2 rounded-2xl bg-sidebar p-5 text-sidebar-foreground shadow-sm">
           <span className="text-xs font-bold tracking-wide text-sidebar-primary">
-            배정 식단
+            AI 반찬 매칭
           </span>
-          <span className="text-xl font-extrabold">{detail.diet.name}</span>
+          <span className="text-xl font-extrabold">오늘의 추천 반찬 조합</span>
           <div className="flex gap-4 pt-1 text-xs">
             <div className="flex flex-col">
               <span className="text-sidebar-foreground/60">나트륨</span>
-              <span className="font-semibold">{detail.diet.sodiumMg}mg</span>
+              <span className="font-semibold">{detail.recommendedCombo.totalSodiumMg}mg</span>
             </div>
             <div className="flex flex-col">
               <span className="text-sidebar-foreground/60">단백질</span>
-              <span className="font-semibold">{detail.diet.proteinG}g</span>
+              <span className="font-semibold">{detail.recommendedCombo.totalProteinG}g</span>
             </div>
             <div className="flex flex-col">
               <span className="text-sidebar-foreground/60">열량</span>
-              <span className="font-semibold">{detail.diet.kcal}kcal</span>
+              <span className="font-semibold">{detail.recommendedCombo.totalKcal}kcal</span>
             </div>
           </div>
         </div>
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <span className="text-xs font-bold text-foreground">왜 이 식단인가요</span>
-          {detail.diet.reasons.map((reason, i) => (
+          <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
+          {detail.recommendedCombo.reasons.map((reason, i) => (
             <div
               key={i}
               className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"
@@ -367,41 +373,27 @@ export function WardDetailView({
 
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-baseline justify-between pb-1">
-            <h2 className="text-sm font-bold text-foreground">건강검진 데이터</h2>
+            <h2 className="text-sm font-bold text-foreground">건강 프로필</h2>
             <span className="text-xs text-muted-foreground">
-              {detail.checkup.date} 국가검진 연계
+              {detail.healthProfile.source === "mydata_linked" ? "마이데이터 연동" : "자가 입력"}
             </span>
           </div>
-          <DetailRow label="수축기 혈압">{detail.checkup.systolicBP} mmHg</DetailRow>
-          <DetailRow label="공복혈당">{detail.checkup.fastingGlucose} mg/dL</DetailRow>
-          <DetailRow label="당화혈색소">{detail.checkup.hba1c} %</DetailRow>
-          <DetailRow label="체중">{detail.checkup.weightKg} kg</DetailRow>
+          <DetailRow label="수축기 혈압">{detail.healthProfile.systolicBP} mmHg</DetailRow>
+          <DetailRow label="공복혈당">{detail.healthProfile.fastingGlucose} mg/dL</DetailRow>
+          <DetailRow label="당화혈색소">{detail.healthProfile.hba1c} %</DetailRow>
+          <DetailRow label="체중">{detail.healthProfile.weightKg} kg</DetailRow>
         </div>
 
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <h2 className="pb-1 text-sm font-bold text-foreground">배송 일정 · 이력</h2>
-          {getDeliveryHistory().map((d, i) => (
+          {wardDeliveries(useLocalStore(deliveryStore), ward.id).map((d) => (
             <div
-              key={i}
+              key={d.id}
               className="flex items-center justify-between border-b border-border py-2 text-sm last:border-0"
             >
-              <span className="text-muted-foreground">{d.date}</span>
-              <span className="text-foreground">{d.time}</span>
+              <span className="text-muted-foreground">{d.scheduledDate}</span>
+              <span className="text-foreground">{d.scheduledTime}</span>
               <Badge variant={d.status === "예정" ? "outline" : "secondary"}>{d.status}</Badge>
-            </div>
-          ))}
-        </div>
-
-        <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="pb-1 text-sm font-bold text-foreground">방문 · 상담 일정</h2>
-          {detail.visitHistory.map((v, i) => (
-            <div
-              key={i}
-              className="flex items-center justify-between border-b border-border py-2 text-sm last:border-0"
-            >
-              <span className="text-muted-foreground">{v.date}</span>
-              <span className="text-foreground">{v.worker}</span>
-              <Badge variant="outline">{v.type}</Badge>
             </div>
           ))}
         </div>

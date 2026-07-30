@@ -1,4 +1,4 @@
-import { WARDS } from "@/lib/wards";
+import { WARDS } from "@/lib/ward-registry";
 import { GuardianWardDetailPageClient } from "./page-client";
 
 // static export는 서버가 없어 런타임에 임의의 id를 처리할 수 없다 — 빌드 시점에 알고 있는

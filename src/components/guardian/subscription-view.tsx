@@ -7,8 +7,10 @@ import { TopBar } from "@/components/app/top-bar";
 import { Button } from "@/components/ui/button";
 import { PLANS, PAYMENT_METHOD, subscriptionStore, formatWon } from "@/lib/subscription";
 import { useLocalStore } from "@/lib/use-store";
+import type { Ward } from "@/lib/wards";
+import { getPartnerStore } from "@/lib/partner-stores";
 
-export function SubscriptionView() {
+export function SubscriptionView({ wards }: { wards: Ward[] }) {
   const currentPlanId = useLocalStore(subscriptionStore);
 
   return (
@@ -58,6 +60,21 @@ export function SubscriptionView() {
             </div>
           );
         })}
+
+        <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <span className="text-xs font-bold text-foreground">배송 파트너 매장</span>
+          <div className="flex flex-col gap-1">
+            {wards.map((ward) => {
+              const store = getPartnerStore(ward.partnerStoreId);
+              return (
+                <div key={ward.id} className="flex justify-between text-sm">
+                  <span className="text-foreground">{ward.name}</span>
+                  <span className="text-muted-foreground">{store?.name ?? "-"}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">결제 수단</span>

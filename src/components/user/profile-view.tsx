@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Account } from "@/lib/auth";
 import { Ward } from "@/lib/wards";
+import { getPartnerStore } from "@/lib/partner-stores";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -30,6 +31,7 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
   const { logout } = useSession();
   const [notifyEnabled, setNotifyEnabled] = useState(true);
   const a11y = useLocalStore(accessibilityStore);
+  const partnerStore = getPartnerStore(ward.partnerStoreId);
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -56,18 +58,18 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
           <Separator />
           <InfoRow label="거주지" value={ward.address} />
           <Separator />
-          <InfoRow label="소속 기관" value={ward.facility} />
+          <InfoRow label="담당 반찬가게" value={partnerStore?.name ?? "-"} />
           <Separator />
-          <InfoRow label="담당자" value={ward.caseWorkerName} />
+          <InfoRow label="매장 연락처" value={partnerStore?.supportPhone ?? "-"} />
         </div>
 
         <Button
           variant="outline"
           className="w-full justify-center"
-          onClick={() => toast.success(`${ward.caseWorkerName}님께 연락 요청을 보냈어요.`)}
+          onClick={() => toast.success(`${partnerStore?.name ?? "담당 반찬가게"}에 연락 요청을 보냈어요.`)}
         >
           <Phone />
-          담당자에게 전화 연결 요청하기
+          매장에 전화 연결 요청하기
         </Button>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
@@ -129,7 +131,7 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
           <div className="flex flex-col">
             <span className="text-sm font-semibold text-foreground">알림 받기</span>
             <span className="text-xs text-muted-foreground">
-              방문 · 검진 · 공지 알림을 받아요
+              배송 · 레시피 추천 · 공지 알림을 받아요
             </span>
           </div>
           <Switch checked={notifyEnabled} onCheckedChange={setNotifyEnabled} />

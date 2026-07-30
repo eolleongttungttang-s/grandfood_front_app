@@ -100,27 +100,21 @@ export function RecordsView({
 
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-baseline justify-between pb-1">
-            <h2 className="text-sm font-bold text-foreground">건강검진 데이터</h2>
+            <h2 className="text-sm font-bold text-foreground">건강 프로필</h2>
             <span className="text-xs text-muted-foreground">
-              {detail.checkup.date} 국가검진 연계
+              {detail.healthProfile.source === "mydata_linked" ? "마이데이터 연동" : "자가 입력"}
             </span>
           </div>
-          <DetailRow label="수축기 혈압">{detail.checkup.systolicBP} mmHg</DetailRow>
-          <DetailRow label="공복혈당">{detail.checkup.fastingGlucose} mg/dL</DetailRow>
-          <DetailRow label="당화혈색소">{detail.checkup.hba1c} %</DetailRow>
-          <DetailRow label="체중">{detail.checkup.weightKg} kg</DetailRow>
+          <DetailRow label="수축기 혈압">{detail.healthProfile.systolicBP} mmHg</DetailRow>
+          <DetailRow label="공복혈당">{detail.healthProfile.fastingGlucose} mg/dL</DetailRow>
+          <DetailRow label="당화혈색소">{detail.healthProfile.hba1c} %</DetailRow>
+          <DetailRow label="체중">{detail.healthProfile.weightKg} kg</DetailRow>
         </div>
 
-        {detail.nextVisit && (
-          <div className="flex flex-col gap-1 rounded-2xl bg-muted p-5">
-            <span className="text-xs font-semibold text-muted-foreground">
-              다음 방문 · 상담 예정
-            </span>
-            <span className="text-sm font-semibold text-foreground">
-              {detail.nextVisit.date} · {detail.nextVisit.worker} ({detail.nextVisit.type})
-            </span>
-          </div>
-        )}
+        <div className="flex flex-col gap-1 rounded-2xl bg-muted p-5">
+          <span className="text-xs font-semibold text-muted-foreground">다음 배송 예정</span>
+          <span className="text-sm font-semibold text-foreground">{detail.nextDeliveryDate}</span>
+        </div>
       </div>
     </div>
   );

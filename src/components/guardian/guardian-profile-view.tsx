@@ -14,11 +14,8 @@ import { Switch } from "@/components/ui/switch";
 import { TopBar } from "@/components/app/top-bar";
 import { useSession } from "@/lib/session";
 import { PLANS, subscriptionStore } from "@/lib/subscription";
+import { createGuardianInvite, guardianInviteStore } from "@/lib/guardian-invite";
 import { useLocalStore } from "@/lib/use-store";
-
-function randomInviteCode() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
-}
 
 export function GuardianProfileView({
   account,
@@ -30,18 +27,19 @@ export function GuardianProfileView({
   const router = useRouter();
   const { logout } = useSession();
   const [notifyEnabled, setNotifyEnabled] = useState(true);
-  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  // useState로만 관리하면 새로고침할 때 발급받은 코드가 사라졌었는데, 다른 store들처럼
+  // localStorage 기반 store(guardian-invite.ts)로 바꿔서 새로고침해도 유지되게 했다.
+  const invite = useLocalStore(guardianInviteStore);
   const currentPlanId = useLocalStore(subscriptionStore);
   const currentPlan = PLANS.find((p) => p.id === currentPlanId);
 
-  function createInvite() {
-    const code = randomInviteCode();
-    setInviteCode(code);
+  async function createInvite() {
+    await createGuardianInvite({ wardIds: wards.map((w) => w.id) });
   }
 
   function copyInvite() {
-    if (!inviteCode) return;
-    navigator.clipboard.writeText(inviteCode);
+    if (!invite) return;
+    navigator.clipboard.writeText(invite.code);
     toast.success("초대 코드를 복사했어요.");
   }
 
@@ -96,10 +94,10 @@ export function GuardianProfileView({
           <p className="text-xs text-muted-foreground">
             형제자매도 초대 코드로 같은 대상자의 알림을 함께 받을 수 있어요.
           </p>
-          {inviteCode ? (
+          {invite ? (
             <div className="flex items-center justify-between rounded-lg bg-muted px-3 py-2">
               <span className="text-sm font-bold tracking-widest text-foreground">
-                {inviteCode}
+                {invite.code}
               </span>
               <Button variant="ghost" size="sm" onClick={copyInvite}>
                 <Copy />
@@ -133,7 +131,7 @@ export function GuardianProfileView({
           <div className="flex flex-col">
             <span className="text-sm font-semibold text-foreground">알림 받기</span>
             <span className="text-xs text-muted-foreground">
-              미응답 · 방문 · 검진 알림을 받아요
+              미응답 · 배송 · 잔반이상 알림을 받아요
             </span>
           </div>
           <Switch checked={notifyEnabled} onCheckedChange={setNotifyEnabled} />
