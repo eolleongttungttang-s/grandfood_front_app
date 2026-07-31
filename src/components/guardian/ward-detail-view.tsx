@@ -319,7 +319,7 @@ export function WardDetailView({
           <div className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold text-muted-foreground">진단 질환</span>
             <div className="flex flex-wrap gap-1.5">
-              {ward.conditions.map((c) => (
+              {detail.conditions.map((c) => (
                 <Badge key={c} variant="secondary">
                   {c}
                 </Badge>

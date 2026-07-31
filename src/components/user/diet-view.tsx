@@ -144,8 +144,8 @@ export function DietView({
         </div>
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <span className="text-xs font-bold text-foreground">식사 체크인 · 잔반 분석</span>
-          <p className="text-xs text-muted-foreground">
+          <span className="text-base font-bold text-foreground">식사 체크인 · 잔반 분석</span>
+          <p className="text-sm text-muted-foreground">
             식사 전/후 사진을 찍어 올리면 반찬별 잔반율을 분석해드려요.
           </p>
           <div className="flex gap-2">
@@ -221,7 +221,7 @@ export function DietView({
           <div className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold text-muted-foreground">진단 질환</span>
             <div className="flex flex-wrap gap-1.5">
-              {ward.conditions.map((c) => (
+              {detail.conditions.map((c) => (
                 <Badge key={c} variant="secondary">
                   {c}
                 </Badge>

@@ -10,6 +10,7 @@
 
 import { seedFromId } from "@/lib/seed";
 import { getHealthProfile, type HealthProfileView } from "@/lib/health-profile";
+import { getCareProfile } from "@/lib/care-profile";
 import { matchDishes, type DishCombo } from "@/lib/recommendation";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import type { AllergyTag } from "@/lib/dishes";
@@ -19,6 +20,8 @@ export { WARDS, getWard };
 export type { Ward, WardStatus, MealTone };
 
 export type WardDetail = {
+  /** 진단 질환 — 설문(care-profile.ts)에 응답이 있으면 그걸, 없으면 ward-registry.ts의 대체값을 쓴다. */
+  conditions: string[];
   allergies: string[];
   medications: { name: string; schedule: string }[];
   chewingNote: string;
@@ -44,21 +47,85 @@ function labelToAllergyTag(label: string): AllergyTag | null {
   return ALLERGY_TAG_KEYWORDS.find((tag) => label.includes(tag)) ?? null;
 }
 
+// 설문(care-profile.ts)의 알레르기/기피재료는 자유 텍스트나 넓은 카테고리("해산물 · 생선")라
+// dishes.ts의 좁은 AllergyTag 그대로 안 적히는 경우가 많다. 흔한 재료명 몇 개를 태그로
+// 미리 매핑해둬서, "새우 알레르기 있어요" 같은 답도 실제 반찬 필터링(갑각류)에 반영되게 한다.
+const ALLERGEN_KEYWORD_TO_TAG: Record<string, AllergyTag> = {
+  새우: "갑각류",
+  게: "갑각류",
+  랍스터: "갑각류",
+  가재: "갑각류",
+  고등어: "해산물",
+  생선: "해산물",
+  오징어: "해산물",
+  조개: "해산물",
+  모밀: "메밀",
+  치즈: "우유",
+  요거트: "우유",
+  땅콩: "견과류",
+  호두: "견과류",
+  아몬드: "견과류",
+};
+
+function textToAllergyTags(text: string): AllergyTag[] {
+  const found = new Set<AllergyTag>();
+  const direct = labelToAllergyTag(text);
+  if (direct) found.add(direct);
+  for (const [keyword, tag] of Object.entries(ALLERGEN_KEYWORD_TO_TAG)) {
+    if (text.includes(keyword)) found.add(tag);
+  }
+  return [...found];
+}
+
 export function getWardDetail(ward: Ward): WardDetail {
   const s = seedFromId(ward.id);
-  const has = (keyword: string) => ward.conditions.some((c) => c.includes(keyword));
-  const allergies = [ALLERGY_POOL[s % ALLERGY_POOL.length]];
-  const allergyTags = allergies.map(labelToAllergyTag).filter((t): t is AllergyTag => t !== null);
+
+  // 설문(care-profile.ts)을 끝까지 마친 응답이 있으면 그게 진짜 정보고, ward-registry.ts의
+  // conditions/시드 기반 값들은 "아직 아무도 설문에 응답 안 했을 때"의 대체값으로만 쓴다.
+  const careProfile = getCareProfile(ward.id);
+  const hasSurveyData = careProfile?.completed === true;
+
+  const conditions = hasSurveyData ? careProfile.conditions : ward.conditions;
+  const has = (keyword: string) => conditions.some((c) => c.includes(keyword));
+
+  const allergies = hasSurveyData
+    ? careProfile.hasAllergy && careProfile.allergyNote.trim()
+      ? careProfile.allergyNote
+          .split(/[,·/]/)
+          .map((s2) => s2.trim())
+          .filter(Boolean)
+      : ["없음"]
+    : [ALLERGY_POOL[s % ALLERGY_POOL.length]];
+
+  const allergyTags = hasSurveyData
+    ? [
+        ...(careProfile.hasAllergy ? textToAllergyTags(careProfile.allergyNote) : []),
+        ...careProfile.dislikedIngredients.flatMap(textToAllergyTags),
+      ].filter((tag, i, arr) => arr.indexOf(tag) === i)
+    : allergies.map(labelToAllergyTag).filter((t): t is AllergyTag => t !== null);
 
   const medications: { name: string; schedule: string }[] = [];
-  if (has("고혈압")) medications.push({ name: "암로디핀 5mg", schedule: "1일 1회 · 아침" });
-  if (has("당뇨")) medications.push({ name: "메트포르민 500mg", schedule: "1일 2회 · 식후" });
-  if (has("심부전")) medications.push({ name: "이뇨제", schedule: "1일 1회 · 아침" });
-  if (medications.length === 0)
-    medications.push({ name: "특이 복약 없음", schedule: "-" });
+  if (hasSurveyData) {
+    if (careProfile.takesMedication) {
+      medications.push({
+        name: careProfile.medicationNote.trim() || "복용 중 (상세 미입력)",
+        schedule: "설문 응답 기준",
+      });
+    } else {
+      medications.push({ name: "특이 복약 없음", schedule: "-" });
+    }
+  } else {
+    if (has("고혈압")) medications.push({ name: "암로디핀 5mg", schedule: "1일 1회 · 아침" });
+    if (has("당뇨")) medications.push({ name: "메트포르민 500mg", schedule: "1일 2회 · 식후" });
+    if (has("심부전")) medications.push({ name: "이뇨제", schedule: "1일 1회 · 아침" });
+    if (medications.length === 0) medications.push({ name: "특이 복약 없음", schedule: "-" });
+  }
 
-  const chewingNote =
-    ward.age >= 85
+  const chewingNote = hasSurveyData
+    ? careProfile.chewingDifficulty
+      ? "설문에서 씹거나 삼키는 게 불편하다고 답하셨어요"
+      : "설문에서 저작 · 삼킴에 불편함이 없다고 답하셨어요"
+    : ward.age >= 85
       ? "틀니 사용 · 질긴 육류는 다짐육으로 대체하고 있어요"
       : ward.age >= 80
         ? "일반식 가능 · 질긴 음식만 주의하고 있어요"
@@ -88,7 +155,7 @@ export function getWardDetail(ward: Ward): WardDetail {
   const combo = matchDishes({
     wardId: ward.id,
     storeId: ward.partnerStoreId,
-    conditions: ward.conditions,
+    conditions,
     allergyTags,
     statusHint: ward.status,
   });
@@ -123,6 +190,7 @@ export function getWardDetail(ward: Ward): WardDetail {
   const nextDeliveryDate = nextScheduled?.scheduledDate ?? "2026.07.29";
 
   return {
+    conditions,
     allergies,
     medications,
     chewingNote,
