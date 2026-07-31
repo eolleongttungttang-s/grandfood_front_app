@@ -70,6 +70,16 @@ export function getDish(id: string): Dish | undefined {
   return DISH_CATALOG.find((d) => d.id === id);
 }
 
+// 조합을 대표할 반찬 하나 — "메인" 반찬이 있으면 그걸, 없으면 첫 반찬을 대표로 삼는다.
+// DishCombo 타입을 직접 import하면 recommendation.ts <-> dishes.ts 순환 참조가 생기므로,
+// 여기선 필요한 모양(items: {dishId}[])만 구조적으로 받는다.
+export function getRepresentativeDish(combo: { items: { dishId: string }[] }): Dish | undefined {
+  return (
+    combo.items.map((i) => getDish(i.dishId)).find((d) => d?.category === "메인") ??
+    getDish(combo.items[0]?.dishId)
+  );
+}
+
 // TODO(backend): GET /stores/:storeId/dishes — 파트너 매장이 실제로 등록한 반찬 목록 조회.
 // 지금은 매장마다 등록 화면이 없어 전역 DISH_CATALOG를 storeId로 필터링하는 것으로 대신한다.
 export async function fetchDishCatalog(storeId: string): Promise<Dish[]> {

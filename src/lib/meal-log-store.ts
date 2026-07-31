@@ -22,6 +22,14 @@ export function setQuickMealCheck(wardId: string, status: QuickMealStatus) {
 
 export type MealSlot = "아침" | "점심" | "저녁";
 
+/** 현재 시각 기준 식사 시간대 (11시 이전=아침, 11~17시=점심, 그 외=저녁). */
+export function getCurrentMealSlot(): MealSlot {
+  const hour = new Date().getHours();
+  if (hour < 11) return "아침";
+  if (hour < 17) return "점심";
+  return "저녁";
+}
+
 /** 반찬 하나(칸 하나)의 잔반율. 실제로는 비전 모델이 식전/식후 사진을 비교해 계산한다. */
 export type MealLogCompartment = {
   dishId: string;

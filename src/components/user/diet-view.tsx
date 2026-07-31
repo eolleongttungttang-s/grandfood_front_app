@@ -5,8 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Camera, Stethoscope } from "lucide-react";
 
 import { Ward, WardDetail } from "@/lib/wards";
-import { getDish } from "@/lib/dishes";
-import { mealLogStore, submitMealLogPhotos, wardMealLogs } from "@/lib/meal-log-store";
+import { getRepresentativeDish } from "@/lib/dishes";
+import { getCurrentMealSlot, mealLogStore, submitMealLogPhotos, wardMealLogs } from "@/lib/meal-log-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
@@ -35,11 +35,7 @@ export function DietView({
   detail: WardDetail;
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
-  // 조합을 대표할 이모지 하나 — "메인" 반찬이 있으면 그걸, 없으면 첫 반찬을 대표로 보여준다.
-  // (DishComboItem 자체엔 이모지가 없어서, 카탈로그 원본(dishes.ts)에서 다시 찾아온다.)
-  const representativeDish =
-    detail.recommendedCombo.items.map((i) => getDish(i.dishId)).find((d) => d?.category === "메인") ??
-    getDish(detail.recommendedCombo.items[0]?.dishId);
+  const representativeDish = getRepresentativeDish(detail.recommendedCombo);
 
   // 식사 체크인 · 잔반 분석 — 실제 카메라/파일로 찍은 사진을 진짜 fetch()로 백엔드에 올린다
   // (meal-log-store.ts 참고). 백엔드에 해당 엔드포인트가 아직 없어서 지금은 요청이 실패하는 게 정상이다.
@@ -59,7 +55,7 @@ export function DietView({
     try {
       await submitMealLogPhotos({
         wardId: ward.id,
-        mealSlot: "점심",
+        mealSlot: getCurrentMealSlot(),
         comboId: detail.recommendedCombo.comboId,
         beforePhoto,
         afterPhoto,

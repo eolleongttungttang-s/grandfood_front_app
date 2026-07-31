@@ -17,7 +17,13 @@ import { toast } from "sonner";
 
 import { Ward, WardDetail, WardStatus } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
-import { getDish } from "@/lib/dishes";
+import { getRepresentativeDish } from "@/lib/dishes";
+import {
+  careProfileStore,
+  getCareProfile,
+  LIVING_ARRANGEMENT_LABEL,
+  MOBILITY_LABEL,
+} from "@/lib/care-profile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,9 +76,9 @@ export function WardDetailView({
   const dislikedIds = wardDislikes(useLocalStore(dislikesStore), ward.id);
   const dislikedItems = detail.recommendedCombo.items.filter((i) => dislikedIds.includes(i.dishId));
   const partnerStore = getPartnerStore(ward.partnerStoreId);
-  const representativeDish =
-    detail.recommendedCombo.items.map((i) => getDish(i.dishId)).find((d) => d?.category === "메인") ??
-    getDish(detail.recommendedCombo.items[0]?.dishId);
+  const representativeDish = getRepresentativeDish(detail.recommendedCombo);
+  useLocalStore(careProfileStore);
+  const careProfile = getCareProfile(ward.id);
 
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestNote, setRequestNote] = useState("");
@@ -343,6 +349,50 @@ export function WardDetailView({
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs font-bold text-foreground">생활 정보</span>
+            {careProfile && !careProfile.completed && (
+              <Badge className="bg-risk-caution text-risk-caution-foreground">설문 미완료</Badge>
+            )}
+          </div>
+          {careProfile ? (
+            <>
+              <DetailRow label="하루 식사 횟수">{careProfile.mealsPerDay}회</DetailRow>
+              <DetailRow label="동거 형태">
+                {LIVING_ARRANGEMENT_LABEL[careProfile.livingArrangement]}
+              </DetailRow>
+              <DetailRow label="거동 상태">{MOBILITY_LABEL[careProfile.mobilityLevel]}</DetailRow>
+              <DetailRow label="저작·삼킴">
+                {careProfile.chewingDifficulty ? "불편함" : "괜찮음"}
+              </DetailRow>
+              <DetailRow label="비상연락처">
+                {careProfile.emergencyContactPhone
+                  ? `${careProfile.emergencyContactName}(${careProfile.emergencyContactRelation}) ${careProfile.emergencyContactPhone}`
+                  : "미입력"}
+              </DetailRow>
+              {careProfile.dislikedIngredients.length > 0 && (
+                <div className="flex flex-col gap-1.5 pt-1">
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    못 먹거나 싫어하는 재료
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {careProfile.dislikedIngredients.map((name) => (
+                      <Badge key={name} variant="secondary">
+                        {name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {ward.name}님이 아직 생활 정보를 입력하지 않으셨어요.
+            </p>
+          )}
         </div>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
