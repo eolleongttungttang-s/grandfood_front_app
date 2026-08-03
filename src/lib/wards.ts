@@ -52,7 +52,9 @@ function labelToAllergyTag(label: string): AllergyTag | null {
 // 미리 매핑해둬서, "새우 알레르기 있어요" 같은 답도 실제 반찬 필터링(갑각류)에 반영되게 한다.
 const ALLERGEN_KEYWORD_TO_TAG: Record<string, AllergyTag> = {
   새우: "갑각류",
-  게: "갑각류",
+  꽃게: "갑각류",
+  대게: "갑각류",
+  게살: "갑각류",
   랍스터: "갑각류",
   가재: "갑각류",
   고등어: "해산물",
