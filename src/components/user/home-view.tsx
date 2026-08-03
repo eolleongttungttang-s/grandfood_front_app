@@ -14,7 +14,7 @@ import { toast } from "sonner";
 
 import { Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
-import { getDish } from "@/lib/dishes";
+import { getRepresentativeDish } from "@/lib/dishes";
 import { USER_NOTIFICATIONS, notificationBadgeClass } from "@/lib/notifications";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,9 +38,7 @@ export function HomeView({
   const mealCheck = useLocalStore(quickMealCheckStore)[ward.id] ?? null;
   const [listening, setListening] = useState(false);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
-  const representativeDish =
-    detail.recommendedCombo.items.map((i) => getDish(i.dishId)).find((d) => d?.category === "메인") ??
-    getDish(detail.recommendedCombo.items[0]?.dishId);
+  const representativeDish = getRepresentativeDish(detail.recommendedCombo);
 
   function checkMeal(status: "완식" | "남김") {
     setQuickMealCheck(ward.id, status);

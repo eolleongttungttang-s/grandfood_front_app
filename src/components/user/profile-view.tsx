@@ -1,14 +1,21 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { LogOut, Phone, Volume2 } from "lucide-react";
+import { ClipboardEdit, LogOut, Phone, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Account } from "@/lib/auth";
 import { Ward } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
+import {
+  careProfileStore,
+  getCareProfile,
+  LIVING_ARRANGEMENT_LABEL,
+} from "@/lib/care-profile";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -32,6 +39,8 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
   const [notifyEnabled, setNotifyEnabled] = useState(true);
   const a11y = useLocalStore(accessibilityStore);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
+  useLocalStore(careProfileStore);
+  const careProfile = getCareProfile(ward.id);
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -61,6 +70,47 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
           <InfoRow label="담당 반찬가게" value={partnerStore?.name ?? "-"} />
           <Separator />
           <InfoRow label="매장 연락처" value={partnerStore?.supportPhone ?? "-"} />
+        </div>
+
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs font-bold text-foreground">생활 정보</span>
+            {careProfile && !careProfile.completed && (
+              <Badge className="bg-risk-caution text-risk-caution-foreground">입력 중단됨</Badge>
+            )}
+          </div>
+          {careProfile ? (
+            <div className="flex flex-col gap-0.5">
+              <InfoRow label="하루 식사 횟수" value={`${careProfile.mealsPerDay}회`} />
+              <Separator />
+              <InfoRow
+                label="동거 형태"
+                value={LIVING_ARRANGEMENT_LABEL[careProfile.livingArrangement]}
+              />
+              <Separator />
+              <InfoRow
+                label="비상연락처"
+                value={
+                  careProfile.emergencyContactPhone
+                    ? `${careProfile.emergencyContactName}(${careProfile.emergencyContactRelation}) ${careProfile.emergencyContactPhone}`
+                    : "미입력"
+                }
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              아직 생활 정보를 입력하지 않으셨어요.
+            </p>
+          )}
+          <Button
+            variant="outline"
+            className="w-full justify-center"
+            nativeButton={false}
+            render={<Link href="/user/survey" />}
+          >
+            <ClipboardEdit />
+            {careProfile ? "생활 정보 다시 입력하기" : "생활 정보 입력하기"}
+          </Button>
         </div>
 
         <Button

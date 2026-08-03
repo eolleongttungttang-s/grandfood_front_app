@@ -8,8 +8,10 @@ export type AccessibilitySettings = {
   voiceGuidance: boolean;
 };
 
+// largeText는 기본값부터 켜둔다 — 어르신 대상 서비스라 "찾아서 켜야 하는 옵션"이 아니라
+// 기본 화면 자체가 커야 한다는 피드백에 따른 것. 끄고 싶은 사람(보호자 등)은 마이 화면에서 끌 수 있다.
 const DEFAULT_SETTINGS: AccessibilitySettings = {
-  largeText: false,
+  largeText: true,
   highContrast: false,
   voiceGuidance: false,
 };

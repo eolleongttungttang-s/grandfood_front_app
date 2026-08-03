@@ -20,6 +20,26 @@
 > API 서버 주소는 `NEXT_PUBLIC_API_BASE_URL` 환경변수로 잡는다 (기본값 `http://localhost:8000`,
 > `.env.local.example` 참고). 정적 export(`output:"export"`) 앱이라 이 값은 **빌드 시점에** 확정돼야
 > 하고, 배포 후 런타임에는 못 바꾼다.
+>
+> **프로덕션 값은 코드/문서에 적혀있지 않다** — GitHub repo의 Settings > Secrets and variables >
+> Actions > Variables에 등록된 `NEXT_PUBLIC_API_BASE_URL` 값을 CI 빌드(`azure-static-web-apps-*.yml`)가
+> 읽어서 번들에 박는다. Web App 주소가 바뀌면 코드가 아니라 그 repo variable을 갱신해야 한다.
+
+> **Blob Storage 경로 컨벤션** (`grandfoodstorage01` 스토리지 계정, `grandfood-files` 컨테이너):
+> 이미 존재하는 `gov/` 폴더(정부 앱 쪽 파일)와 섞이지 않도록, 사용자 앱(어르신·보호자)이 올리는
+> 파일은 전부 `user/` 아래에 모은다. 폴더는 미리 만들어두는 게 아니라 — Blob Storage는 빈 디렉터리가
+> 없는 flat 구조라 — 백엔드가 업로드 시점에 아래 경로 문자열을 코드로 생성해서 첫 파일을 올리는
+> 순간 자동으로 생긴다.
+>
+> ```
+> user/meal-photos/{wardId}/{mealLogId}/before.jpg
+> user/meal-photos/{wardId}/{mealLogId}/after.jpg
+> user/health-checkup/{wardId}/{healthCheckupId}.jpg
+> ```
+>
+> `{wardId}`/`{mealLogId}`/`{healthCheckupId}`는 각 DB 레코드의 PK를 그대로 써서, 같은 어르신의
+> 여러 끼니·여러 날짜 사진이 파일명 충돌 없이 쌓이게 한다. 아래 4번 항목의 `beforePhotoRef`/
+> `afterPhotoRef`, `HEALTH_CHECKUP.image_blob_url`이 이 경로를 가리키는 값이다.
 
 ---
 
@@ -124,7 +144,7 @@ type MealLogEntry = {
   wardId: string;
   mealSlot: MealSlot;
   loggedAt: string; // ISO datetime
-  beforePhotoRef: string | null; // Blob Storage 등 사진 경로/URL
+  beforePhotoRef: string | null; // Blob Storage 경로 — 위 "Blob Storage 경로 컨벤션" 참고 (user/meal-photos/...)
   afterPhotoRef: string | null;
   leftoverRatePercent: number; // 전체 평균 잔반율
   compartments: MealLogCompartment[];

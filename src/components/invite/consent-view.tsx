@@ -50,8 +50,8 @@ export function ConsentView({
       // 데모 목적: 실제 계정 생성 API가 없어, 이미 등록된 어르신 데모 계정으로 바로 로그인 처리한다.
       const elderAccount = ACCOUNTS.find((a) => a.role === "user");
       if (elderAccount) login(elderAccount.loginId, elderAccount.password);
-      toast.success("환영해요! 서비스를 시작할게요.");
-      router.push("/user/home");
+      toast.success("환영해요! 몇 가지만 더 여쭤볼게요.");
+      router.push("/invite/survey");
     } finally {
       setSubmitting(false);
     }

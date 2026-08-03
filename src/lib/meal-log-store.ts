@@ -22,6 +22,14 @@ export function setQuickMealCheck(wardId: string, status: QuickMealStatus) {
 
 export type MealSlot = "아침" | "점심" | "저녁";
 
+/** 현재 시각 기준 식사 시간대 (11시 이전=아침, 11~17시=점심, 그 외=저녁). */
+export function getCurrentMealSlot(): MealSlot {
+  const hour = new Date().getHours();
+  if (hour < 11) return "아침";
+  if (hour < 17) return "점심";
+  return "저녁";
+}
+
 /** 반찬 하나(칸 하나)의 잔반율. 실제로는 비전 모델이 식전/식후 사진을 비교해 계산한다. */
 export type MealLogCompartment = {
   dishId: string;
@@ -54,8 +62,9 @@ export function wardMealLogs(all: Record<string, MealLogEntry[]>, wardId: string
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 // POST /wards/:id/meal-logs — 식전/식후 사진을 실제로 백엔드에 업로드해서 잔반 분석을 요청한다.
-// grandfood_backend에는 아직 이 엔드포인트가 없어서(팀원이 구현 예정), 지금은 호출하면 연결 실패/404가
-// 나는 게 정상이다 — docs/backend-api-contract.md의 4번 항목대로 엔드포인트가 생기면 그대로 연결된다.
+// grandfood_backend에 배포되어 있는 실제 엔드포인트 (2026-08-03 main 머지, ACR/Web App 배포 완료,
+// 운영 서버에 직접 요청 보내 확인함). leftoverRatePercent/compartments는 아직 Vision 분석이
+// 붙지 않아 백엔드에서 0/[]로 고정 응답한다.
 export async function submitMealLogPhotos(params: {
   wardId: string;
   mealSlot: MealSlot;
