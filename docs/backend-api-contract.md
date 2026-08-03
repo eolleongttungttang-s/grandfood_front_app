@@ -20,6 +20,10 @@
 > API 서버 주소는 `NEXT_PUBLIC_API_BASE_URL` 환경변수로 잡는다 (기본값 `http://localhost:8000`,
 > `.env.local.example` 참고). 정적 export(`output:"export"`) 앱이라 이 값은 **빌드 시점에** 확정돼야
 > 하고, 배포 후 런타임에는 못 바꾼다.
+>
+> **프로덕션 값은 코드/문서에 적혀있지 않다** — GitHub repo의 Settings > Secrets and variables >
+> Actions > Variables에 등록된 `NEXT_PUBLIC_API_BASE_URL` 값을 CI 빌드(`azure-static-web-apps-*.yml`)가
+> 읽어서 번들에 박는다. Web App 주소가 바뀌면 코드가 아니라 그 repo variable을 갱신해야 한다.
 
 > **Blob Storage 경로 컨벤션** (`grandfoodstorage01` 스토리지 계정, `grandfood-files` 컨테이너):
 > 이미 존재하는 `gov/` 폴더(정부 앱 쪽 파일)와 섞이지 않도록, 사용자 앱(어르신·보호자)이 올리는
