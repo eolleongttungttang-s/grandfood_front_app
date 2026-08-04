@@ -45,7 +45,37 @@ export type CareProfileView = RegisterCareProfileCommand & {
   /** 설문을 끝까지 마쳤는지. "나중에 할게요"로 건너뛴 경우 false로 남아 보호자 화면에 미완료로 보인다. */
   completed: boolean;
   updatedAt: string;
+  /**
+   * "나중에 할게요"로 건너뛸 때, 실제로 답하고 지나간 단계 수(0~CARE_SURVEY_TOTAL_STEPS).
+   * 이 값보다 뒤에 있는 단계의 필드는 사용자가 답한 게 아니라 EMPTY_CARE_PROFILE_COMMAND의
+   * 기본값이 그대로 들어있는 것이므로, 화면에서 실제 답변처럼 보여주면 안 된다.
+   * completed:true(끝까지 완료)면 전 단계가 답변된 것으로 취급한다.
+   */
+  answeredStep: number;
 };
+
+// care-survey-view.tsx의 각 설문 단계(step)가 어떤 필드를 채우는지에 대한 단일 소스.
+// 두 파일이 어긋나면 진행도 판정이 틀어지므로, step 번호를 직접 쓰지 말고 이 상수를 참조할 것.
+export const CARE_SURVEY_STEP = {
+  mealsPerDay: 0,
+  livingArrangement: 1,
+  dislikedIngredients: 2,
+  allergy: 3,
+  conditions: 4,
+  medication: 5,
+  chewingDifficulty: 6,
+  mobility: 7,
+  emergencyContact: 8,
+} as const;
+
+export const CARE_SURVEY_TOTAL_STEPS = Object.keys(CARE_SURVEY_STEP).length;
+
+export function isCareProfileStepAnswered(
+  profile: CareProfileView,
+  step: number
+): boolean {
+  return profile.completed || profile.answeredStep > step;
+}
 
 export const EMPTY_CARE_PROFILE_COMMAND: RegisterCareProfileCommand = {
   wardId: "",
@@ -89,7 +119,12 @@ export function getCareProfile(wardId: string): CareProfileView | undefined {
 
 // TODO(backend): POST /wards/:id/care-profile — 최초 설문(생활·돌봄 정보) 등록.
 export async function registerCareProfile(cmd: RegisterCareProfileCommand): Promise<CareProfileView> {
-  const view: CareProfileView = { ...cmd, completed: true, updatedAt: new Date().toISOString() };
+  const view: CareProfileView = {
+    ...cmd,
+    completed: true,
+    answeredStep: CARE_SURVEY_TOTAL_STEPS,
+    updatedAt: new Date().toISOString(),
+  };
   careProfileStore.update((prev) => ({ ...prev, [cmd.wardId]: view }));
   return view;
 }
@@ -98,9 +133,15 @@ export async function registerCareProfile(cmd: RegisterCareProfileCommand): Prom
 // 지금까지 입력한 값은 남기되 completed만 false로 저장해, 보호자 화면에 "설문 미완료"로 표시할 수 있게 한다.
 export async function skipCareProfile(
   wardId: string,
-  partial: RegisterCareProfileCommand
+  partial: RegisterCareProfileCommand,
+  answeredStep: number
 ): Promise<CareProfileView> {
-  const view: CareProfileView = { ...partial, completed: false, updatedAt: new Date().toISOString() };
+  const view: CareProfileView = {
+    ...partial,
+    completed: false,
+    answeredStep,
+    updatedAt: new Date().toISOString(),
+  };
   careProfileStore.update((prev) => ({ ...prev, [wardId]: view }));
   return view;
 }

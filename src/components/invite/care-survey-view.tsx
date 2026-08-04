@@ -3,6 +3,8 @@
 import { useState } from "react";
 
 import {
+  CARE_SURVEY_STEP,
+  CARE_SURVEY_TOTAL_STEPS,
   CONDITION_POOL,
   DISLIKED_INGREDIENT_POOL,
   EMPTY_CARE_PROFILE_COMMAND,
@@ -16,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-const TOTAL_STEPS = 9;
+const TOTAL_STEPS = CARE_SURVEY_TOTAL_STEPS;
 
 function OptionButton({
   selected,
@@ -75,7 +77,7 @@ export function CareSurveyView({
   wardName: string;
   initialValues?: RegisterCareProfileCommand;
   onComplete: (cmd: RegisterCareProfileCommand) => void | Promise<void>;
-  onSkip: (partial: RegisterCareProfileCommand) => void | Promise<void>;
+  onSkip: (partial: RegisterCareProfileCommand, answeredStep: number) => void | Promise<void>;
 }) {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<RegisterCareProfileCommand>(
@@ -132,7 +134,7 @@ export function CareSurveyView({
     if (submitting) return;
     setSubmitting(true);
     try {
-      await onSkip(form);
+      await onSkip(form, step);
     } finally {
       setSubmitting(false);
     }
@@ -161,7 +163,7 @@ export function CareSurveyView({
       </div>
 
       <div className="flex flex-1 flex-col gap-5 px-5 py-6">
-        {step === 0 && (
+        {step === CARE_SURVEY_STEP.mealsPerDay && (
           <>
             <StepHeading
               title={`${wardName}님은 하루에 식사를 몇 번 하세요?`}
@@ -181,7 +183,7 @@ export function CareSurveyView({
           </>
         )}
 
-        {step === 1 && (
+        {step === CARE_SURVEY_STEP.livingArrangement && (
           <>
             <StepHeading title={`${wardName}님은 지금 어떻게 지내고 계세요?`} />
             <div className="flex flex-col gap-3">
@@ -198,7 +200,7 @@ export function CareSurveyView({
           </>
         )}
 
-        {step === 2 && (
+        {step === CARE_SURVEY_STEP.dislikedIngredients && (
           <>
             <StepHeading
               title="못 먹거나 싫어하는 재료가 있으세요?"
@@ -230,7 +232,7 @@ export function CareSurveyView({
           </>
         )}
 
-        {step === 3 && (
+        {step === CARE_SURVEY_STEP.allergy && (
           <>
             <StepHeading title="음식 알레르기가 있으세요?" />
             <div className="flex gap-3">
@@ -261,7 +263,7 @@ export function CareSurveyView({
           </>
         )}
 
-        {step === 4 && (
+        {step === CARE_SURVEY_STEP.conditions && (
           <>
             <StepHeading
               title="진단받은 질환이 있으세요?"
@@ -293,7 +295,7 @@ export function CareSurveyView({
           </>
         )}
 
-        {step === 5 && (
+        {step === CARE_SURVEY_STEP.medication && (
           <>
             <StepHeading title="지금 드시고 있는 약이 있으세요?" />
             <div className="flex gap-3">
@@ -327,7 +329,7 @@ export function CareSurveyView({
           </>
         )}
 
-        {step === 6 && (
+        {step === CARE_SURVEY_STEP.chewingDifficulty && (
           <>
             <StepHeading title="씹거나 삼키는 게 불편하세요?" />
             <div className="flex gap-3">
@@ -347,7 +349,7 @@ export function CareSurveyView({
           </>
         )}
 
-        {step === 7 && (
+        {step === CARE_SURVEY_STEP.mobility && (
           <>
             <StepHeading title="거동은 어떠세요?" />
             <div className="flex flex-col gap-3">
@@ -364,7 +366,7 @@ export function CareSurveyView({
           </>
         )}
 
-        {step === 8 && (
+        {step === CARE_SURVEY_STEP.emergencyContact && (
           <>
             <StepHeading
               title="비상시 연락할 분을 알려주세요"

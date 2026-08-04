@@ -10,8 +10,10 @@ import { Account } from "@/lib/auth";
 import { Ward } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 import {
+  CARE_SURVEY_STEP,
   careProfileStore,
   getCareProfile,
+  isCareProfileStepAnswered,
   LIVING_ARRANGEMENT_LABEL,
 } from "@/lib/care-profile";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -81,11 +83,22 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
           </div>
           {careProfile ? (
             <div className="flex flex-col gap-0.5">
-              <InfoRow label="하루 식사 횟수" value={`${careProfile.mealsPerDay}회`} />
+              <InfoRow
+                label="하루 식사 횟수"
+                value={
+                  isCareProfileStepAnswered(careProfile, CARE_SURVEY_STEP.mealsPerDay)
+                    ? `${careProfile.mealsPerDay}회`
+                    : "미입력"
+                }
+              />
               <Separator />
               <InfoRow
                 label="동거 형태"
-                value={LIVING_ARRANGEMENT_LABEL[careProfile.livingArrangement]}
+                value={
+                  isCareProfileStepAnswered(careProfile, CARE_SURVEY_STEP.livingArrangement)
+                    ? LIVING_ARRANGEMENT_LABEL[careProfile.livingArrangement]
+                    : "미입력"
+                }
               />
               <Separator />
               <InfoRow
