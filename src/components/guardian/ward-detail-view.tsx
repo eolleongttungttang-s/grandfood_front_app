@@ -19,8 +19,10 @@ import { Ward, WardDetail, WardStatus } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import {
+  CARE_SURVEY_STEP,
   careProfileStore,
   getCareProfile,
+  isCareProfileStepAnswered,
   LIVING_ARRANGEMENT_LABEL,
   MOBILITY_LABEL,
 } from "@/lib/care-profile";
@@ -360,13 +362,27 @@ export function WardDetailView({
           </div>
           {careProfile ? (
             <>
-              <DetailRow label="하루 식사 횟수">{careProfile.mealsPerDay}회</DetailRow>
-              <DetailRow label="동거 형태">
-                {LIVING_ARRANGEMENT_LABEL[careProfile.livingArrangement]}
+              <DetailRow label="하루 식사 횟수">
+                {isCareProfileStepAnswered(careProfile, CARE_SURVEY_STEP.mealsPerDay)
+                  ? `${careProfile.mealsPerDay}회`
+                  : "미입력"}
               </DetailRow>
-              <DetailRow label="거동 상태">{MOBILITY_LABEL[careProfile.mobilityLevel]}</DetailRow>
+              <DetailRow label="동거 형태">
+                {isCareProfileStepAnswered(careProfile, CARE_SURVEY_STEP.livingArrangement)
+                  ? LIVING_ARRANGEMENT_LABEL[careProfile.livingArrangement]
+                  : "미입력"}
+              </DetailRow>
+              <DetailRow label="거동 상태">
+                {isCareProfileStepAnswered(careProfile, CARE_SURVEY_STEP.mobility)
+                  ? MOBILITY_LABEL[careProfile.mobilityLevel]
+                  : "미입력"}
+              </DetailRow>
               <DetailRow label="저작·삼킴">
-                {careProfile.chewingDifficulty ? "불편함" : "괜찮음"}
+                {isCareProfileStepAnswered(careProfile, CARE_SURVEY_STEP.chewingDifficulty)
+                  ? careProfile.chewingDifficulty
+                    ? "불편함"
+                    : "괜찮음"
+                  : "미입력"}
               </DetailRow>
               <DetailRow label="비상연락처">
                 {careProfile.emergencyContactPhone

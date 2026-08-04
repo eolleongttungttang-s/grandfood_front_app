@@ -6,10 +6,12 @@ import { useRouter } from "next/navigation";
 import { Volume2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { ACCOUNTS } from "@/lib/auth";
+import { registerAccount } from "@/lib/auth";
 import { InviteFormState, submitInviteConsent, submitInviteDecline } from "@/lib/invite";
+import { WARDS } from "@/lib/wards";
 import { speakOnDemand } from "@/lib/accessibility";
 import { useSession } from "@/lib/session";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,23 +37,50 @@ export function ConsentView({
   const router = useRouter();
   const { login } = useSession();
   const [form, setForm] = useState(defaultValues);
+  const [birthDate, setBirthDate] = useState("");
   const [agreed, setAgreed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   function updateField<K extends keyof InviteFormState>(key: K, value: InviteFormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  const generatedLoginId = form.elderName.trim();
+  const generatedPassword = form.elderPhone.replace(/\D/g, "").slice(-4);
+
   async function handleAccept() {
     if (!agreed || submitting) return;
+    setError(null);
+    if (generatedPassword.length !== 4) {
+      setError("연락처를 정확히 입력해 주세요.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       await submitInviteConsent(form);
-      // 데모 목적: 실제 계정 생성 API가 없어, 이미 등록된 어르신 데모 계정으로 바로 로그인 처리한다.
-      const elderAccount = ACCOUNTS.find((a) => a.role === "user");
-      if (elderAccount) login(elderAccount.loginId, elderAccount.password);
-      toast.success("환영해요! 몇 가지만 더 여쭤볼게요.");
-      router.push("/invite/survey");
+      // 실제 연동 시 백엔드가 초대 코드에 연결된 user_id(UUID)를 반환한다.
+      const linkedWard = WARDS.find((ward) => ward.name === form.elderName);
+      const result = registerAccount({
+        loginId: generatedLoginId,
+        password: generatedPassword,
+        role: "user",
+        name: form.elderName,
+        phone: form.elderPhone,
+        birthDate,
+        address: `${form.address} ${form.addressDetail}`.trim(),
+        planType: "basic",
+        selfWardId: linkedWard?.id,
+      });
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+
+      login(result.account.loginId, generatedPassword);
+      toast.success("회원가입이 완료됐어요.");
+      router.push(linkedWard ? "/invite/survey" : "/user/home");
     } finally {
       setSubmitting(false);
     }
@@ -70,15 +99,15 @@ export function ConsentView({
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
-      <TopBar title="정보 확인·동의" subtitle="GrandFood" />
+      <TopBar title="가입 정보 확인" subtitle="GrandFood" />
 
       <div className="flex flex-col gap-4 px-5">
         <div className="flex flex-col items-center gap-1.5 text-center">
           <p className="text-lg leading-relaxed text-foreground">
-            <b className="text-accent">{guardianName}</b>님이 어르신을 위해 신청했어요
+            <b className="text-accent">{guardianName}</b>님이 가입을 도와드리고 있어요
           </p>
           <p className="text-sm text-muted-foreground">
-            도시락 배송 알림 서비스를 시작해도 될까요?
+            정보를 확인하고 서비스를 시작해볼까요?
           </p>
         </div>
 
@@ -118,6 +147,34 @@ export function ConsentView({
               value={form.addressDetail}
               onChange={(e) => updateField("addressDetail", e.target.value)}
             />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <span className="text-xs font-bold text-foreground">로그인 정보 만들기</span>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-foreground">아이디</span>
+            <span className="text-base font-semibold text-foreground">{generatedLoginId}</span>
+            <p className="text-xs text-muted-foreground">
+              아이디는 본인 성함으로 저장돼요.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="consent-birth-date">생년월일</Label>
+            <Input
+              id="consent-birth-date"
+              type="date"
+              value={birthDate}
+              onChange={(e) => setBirthDate(e.target.value)}
+              autoComplete="bday"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-foreground">비밀번호</span>
+            <span className="text-base font-semibold text-foreground">{generatedPassword}</span>
+            <p className="text-xs text-muted-foreground">
+              비밀번호는 본인 연락처 뒷자리로 설정돼요.
+            </p>
           </div>
         </div>
 
@@ -170,14 +227,20 @@ export function ConsentView({
           내용 들려주기
         </Button>
 
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
         <div className="flex flex-col gap-2">
           <Button
             size="lg"
             className="w-full"
-            disabled={!agreed || submitting}
+            disabled={!agreed || submitting || !birthDate || generatedPassword.length !== 4}
             onClick={handleAccept}
           >
-            시작할게요
+            동의하고 가입하기
           </Button>
           <Button
             variant="outline"

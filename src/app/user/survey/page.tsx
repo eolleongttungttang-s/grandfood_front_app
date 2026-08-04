@@ -38,8 +38,8 @@ export default function UserSurveyPage() {
           toast.success("생활 정보를 저장했어요.");
           router.push("/user/profile");
         }}
-        onSkip={async (partial) => {
-          await skipCareProfile(wardId, partial);
+        onSkip={async (partial, answeredStep) => {
+          await skipCareProfile(wardId, partial, answeredStep);
           router.push("/user/profile");
         }}
       />

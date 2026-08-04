@@ -38,13 +38,23 @@ export default function Home() {
         </div>
 
         {!isLoading && account ? (
-          <Button size="lg" className="w-full max-w-xs" nativeButton={false} render={<Link href={homeHref} />}>
+          <div className="flex w-full max-w-xs flex-col gap-2">
+            <Button size="lg" nativeButton={false} render={<Link href={homeHref} />}>
             {account.name}님으로 계속하기
-          </Button>
+            </Button>
+            <Button variant="outline" size="lg" nativeButton={false} render={<Link href="/login" />}>
+              다른 계정으로 로그인
+            </Button>
+          </div>
         ) : (
-          <Button size="lg" className="w-full max-w-xs" nativeButton={false} render={<Link href="/login" />}>
-            로그인
-          </Button>
+          <div className="flex w-full max-w-xs flex-col gap-2">
+            <Button size="lg" nativeButton={false} render={<Link href="/signup" />}>
+              회원가입
+            </Button>
+            <Button variant="outline" size="lg" nativeButton={false} render={<Link href="/login" />}>
+              로그인
+            </Button>
+          </div>
         )}
       </main>
     </div>

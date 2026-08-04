@@ -7,6 +7,8 @@
 // 분리해서 둔다.
 
 import { createLocalStore } from "@/lib/local-store";
+import { ensureBackendWardId, getBackendGuardianSessionForWard } from "@/lib/backend-auth";
+import { API_BASE_URL } from "@/lib/api-config";
 
 export type QuickMealStatus = "완식" | "남김" | null;
 
@@ -55,32 +57,47 @@ export function wardMealLogs(all: Record<string, MealLogEntry[]>, wardId: string
   return all[wardId] ?? [];
 }
 
-// 실제 백엔드 서버 주소. grandfood_backend는 uvicorn 기본 포트(8000)로 뜨니 그 값을 기본값으로 뒀다.
-// 이 앱은 next.config.ts에서 output:"export"로 정적 export하기 때문에, 이 값은 "실행 중에" 바뀌는
-// 게 아니라 빌드할 때 process.env에서 읽혀 번들에 그대로 박힌다 — 배포 환경마다 API 주소가 다르면
-// 빌드 전에 .env.local(또는 CI 환경변수)에 NEXT_PUBLIC_API_BASE_URL을 설정해야 한다.
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-
 // POST /wards/:id/meal-logs — 식전/식후 사진을 실제로 백엔드에 업로드해서 잔반 분석을 요청한다.
-// grandfood_backend에 배포되어 있는 실제 엔드포인트 (2026-08-03 main 머지, ACR/Web App 배포 완료,
-// 운영 서버에 직접 요청 보내 확인함). leftoverRatePercent/compartments는 아직 Vision 분석이
-// 붙지 않아 백엔드에서 0/[]로 고정 응답한다.
+// grandfood_backend에 배포되어 있는 실제 엔드포인트 (Container App `grandfood`, 2026-08-04 curl로
+// 직접 호출해 확인함). 이 엔드포인트는 로그인한 보호자의 Bearer 토큰 + 실제 UUID ward_id를 요구한다
+// (보호자 본인 소유 어르신이 아니면 403). 그래서 호출 전에 backend-auth.ts로 실제 토큰/UUID를 먼저
+// 확보한다 — 목업 wardId("001" 등)와 로컬 세션(session.tsx)만으로는 이 요청이 통과하지 않는다.
+// leftoverRatePercent/compartments는 아직 Vision 분석이 붙지 않아 백엔드에서 0/[]로 고정 응답한다.
 export async function submitMealLogPhotos(params: {
   wardId: string;
+  wardName: string;
+  wardAge: number;
+  wardAddress: string;
   mealSlot: MealSlot;
   /** 오늘 추천받은 조합 id — 서버가 잔반 사진을 어떤 반찬 구성과 비교해야 하는지 알아야 하므로 함께 보낸다 */
   comboId: string;
   beforePhoto: File;
   afterPhoto: File;
 }): Promise<MealLogEntry> {
+  const session = getBackendGuardianSessionForWard(params.wardId);
+  if (!session) {
+    throw new Error("이 대상자를 관리하는 보호자 계정으로 로그인해야 사진을 업로드할 수 있어요.");
+  }
+
+  const backendWardId = await ensureBackendWardId({
+    mockWardId: params.wardId,
+    name: params.wardName,
+    age: params.wardAge,
+    address: params.wardAddress,
+  });
+  if (!backendWardId) {
+    throw new Error("대상자 정보를 서버에 등록하지 못했어요. 잠시 후 다시 시도해 주세요.");
+  }
+
   const formData = new FormData();
   formData.append("mealSlot", params.mealSlot);
   formData.append("comboId", params.comboId);
   formData.append("beforePhoto", params.beforePhoto);
   formData.append("afterPhoto", params.afterPhoto);
 
-  const response = await fetch(`${API_BASE_URL}/wards/${params.wardId}/meal-logs`, {
+  const response = await fetch(`${API_BASE_URL}/wards/${backendWardId}/meal-logs`, {
     method: "POST",
+    headers: { Authorization: `Bearer ${session.accessToken}` },
     body: formData,
   });
   if (!response.ok) {

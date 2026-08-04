@@ -28,8 +28,8 @@ export default function InviteSurveyPage() {
           toast.success("입력해주셔서 감사해요!");
           router.push("/user/home");
         }}
-        onSkip={async (partial) => {
-          await skipCareProfile(wardId, partial);
+        onSkip={async (partial, answeredStep) => {
+          await skipCareProfile(wardId, partial, answeredStep);
           router.push("/user/home");
         }}
       />
