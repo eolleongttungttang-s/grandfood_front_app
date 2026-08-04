@@ -8,7 +8,7 @@ import {
   useSyncExternalStore,
 } from "react";
 
-import { ACCOUNTS, Account, findAccount } from "@/lib/auth";
+import { Account, findAccount, findAccountByLoginId } from "@/lib/auth";
 
 const STORAGE_KEY = "grandfood-app-session";
 
@@ -73,7 +73,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   );
 
   const account = useMemo(
-    () => (loginId ? (ACCOUNTS.find((a) => a.loginId === loginId) ?? null) : null),
+    () => (loginId ? findAccountByLoginId(loginId) : null),
     [loginId]
   );
 

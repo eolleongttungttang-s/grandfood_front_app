@@ -19,6 +19,9 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { BrandHeader } from "@/components/app/brand-header";
 import { useSession } from "@/lib/session";
 import { UserRole } from "@/lib/auth";
+import { loginGuardianBackend } from "@/lib/backend-auth";
+
+const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
 
 const DEMO_CREDENTIALS: Record<UserRole, { loginId: string; password: string }> = {
   user: { loginId: "gf-user01", password: "1234" },
@@ -51,10 +54,10 @@ export default function LoginPage() {
     }
 
     setSubmitting(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       const account = login(loginId.trim(), password);
-      setSubmitting(false);
       if (!account) {
+        setSubmitting(false);
         setError("아이디 또는 비밀번호가 올바르지 않아요.");
         return;
       }
@@ -63,6 +66,15 @@ export default function LoginPage() {
           `이 계정은 ${account.org} 구분이에요. 해당 화면으로 안내할게요.`
         );
       }
+
+      // 보호자가 이메일 형식 아이디로 로그인했다면, 실제 백엔드 로그인도 best-effort로 같이
+      // 시도해서 토큰을 갱신해둔다 — 사진 업로드 함수 호출에 필요하다. 실패해도(예: 데모용
+      // gf-guardian01처럼 백엔드엔 없는 계정) 로컬 로그인 자체는 막지 않는다.
+      if (account.role === "guardian" && EMAIL_PATTERN.test(loginId.trim())) {
+        await loginGuardianBackend(loginId.trim(), password);
+      }
+
+      setSubmitting(false);
       toast.success(`${account.name}님, 안녕하세요!`);
       router.push(account.role === "guardian" ? "/guardian/home" : "/user/home");
     }, 500);
@@ -107,7 +119,7 @@ export default function LoginPage() {
 
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="loginId">아이디</Label>
+                <Label htmlFor="loginId">이메일 또는 아이디</Label>
                 <Input
                   id="loginId"
                   value={loginId}

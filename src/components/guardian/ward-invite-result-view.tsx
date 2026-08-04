@@ -105,6 +105,16 @@ export function WardInviteResultView() {
           size="lg"
           className="w-full"
           nativeButton={false}
+          render={<Link href={`/invite/consent?code=${currentInvite.code}`} />}
+        >
+          이용자 회원가입으로 이동
+        </Button>
+
+        {/* 테스트 진입점: 실제 QR 스캔도 동일한 초대 링크로 이동한다. 테스트 종료 후 이 버튼만 제거하면 된다. */}
+        <Button
+          variant="outline"
+          className="w-full"
+          nativeButton={false}
           render={<Link href="/guardian/profile" />}
         >
           완료

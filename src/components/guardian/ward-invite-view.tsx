@@ -82,6 +82,7 @@ export function WardInviteView() {
         >
           초대코드 발급하기
         </Button>
+
       </div>
     </div>
   );
