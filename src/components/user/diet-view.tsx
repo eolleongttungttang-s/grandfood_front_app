@@ -38,7 +38,8 @@ export function DietView({
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
 
   // 식사 체크인 · 잔반 분석 — 실제 카메라/파일로 찍은 사진을 진짜 fetch()로 백엔드에 올린다
-  // (meal-log-store.ts 참고). 백엔드에 해당 엔드포인트가 아직 없어서 지금은 요청이 실패하는 게 정상이다.
+  // (meal-log-store.ts 참고). 이 브라우저에서 보호자로 실제 로그인한 적이 없으면(backend-auth.ts)
+  // 업로드가 막힌다 — 그땐 우선 보호자 계정으로 로그인해서 실제 토큰을 받아둬야 한다.
   const [beforePhoto, setBeforePhoto] = useState<File | null>(null);
   const [afterPhoto, setAfterPhoto] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -55,6 +56,9 @@ export function DietView({
     try {
       await submitMealLogPhotos({
         wardId: ward.id,
+        wardName: ward.name,
+        wardAge: ward.age,
+        wardAddress: ward.address,
         mealSlot: getCurrentMealSlot(),
         comboId: detail.recommendedCombo.comboId,
         beforePhoto,
