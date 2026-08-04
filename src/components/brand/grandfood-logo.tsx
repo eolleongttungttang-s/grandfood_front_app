@@ -1,27 +1,16 @@
 export function GrandFoodMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
-      <rect width="64" height="64" rx="16" fill="#B96843" />
+    <svg viewBox="0 0 100 100" className={className} aria-hidden="true">
+      <rect width="100" height="100" rx="23.6" fill="#F7F2EB" />
       <path
-        d="M24 20 C22 17 26 15 24 12"
-        stroke="#FFF6F0"
-        strokeWidth="2.6"
-        strokeLinecap="round"
+        d="M12 58 Q32 58 38 36 T62 46 Q72 58 88 58"
         fill="none"
-        opacity="0.85"
-      />
-      <path
-        d="M34 20 C32 17 36 15 34 12"
-        stroke="#FFF6F0"
-        strokeWidth="2.6"
+        stroke="#B96843"
+        strokeWidth="11"
         strokeLinecap="round"
-        fill="none"
-        opacity="0.6"
+        strokeLinejoin="round"
       />
-      <path
-        d="M13 29 C13 29 13 48 32 48 C51 48 51 29 51 29 C51 33.5 43.5 38 32 38 C20.5 38 13 33.5 13 29 Z"
-        fill="#FFF6F0"
-      />
+      <path d="M16 70 H84 A34 34 0 0 1 16 70 Z" fill="#2E241F" />
     </svg>
   );
 }

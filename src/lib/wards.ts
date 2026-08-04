@@ -10,7 +10,7 @@
 
 import { seedFromId } from "@/lib/seed";
 import { getHealthProfile, type HealthProfileView } from "@/lib/health-profile";
-import { getCareProfile } from "@/lib/care-profile";
+import { CARE_SURVEY_STEP, getCareProfile, isCareProfileStepAnswered } from "@/lib/care-profile";
 import { matchDishes, type DishCombo } from "@/lib/recommendation";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import type { AllergyTag } from "@/lib/dishes";
@@ -82,35 +82,46 @@ function textToAllergyTags(text: string): AllergyTag[] {
 export function getWardDetail(ward: Ward): WardDetail {
   const s = seedFromId(ward.id);
 
-  // 설문(care-profile.ts)을 끝까지 마친 응답이 있으면 그게 진짜 정보고, ward-registry.ts의
-  // conditions/시드 기반 값들은 "아직 아무도 설문에 응답 안 했을 때"의 대체값으로만 쓴다.
+  // 설문(care-profile.ts)에 실제로 답한 문항만 진짜 정보로 쓰고, ward-registry.ts의
+  // conditions/시드 기반 값들은 "그 문항까지 아직 답 안 했을 때"의 대체값으로만 쓴다.
+  // 예전엔 completed(끝까지 다 마쳤는지) 하나로만 갈랐는데, 그러면 "나중에 할게요"로
+  // 건너뛰기 전에 실제로 답한 문항(예: 진단 질환에서 관절염 선택)까지도 전부 무시되고
+  // ward-registry.ts의 가짜 값(고혈압/당뇨 등)이 뜨는 버그가 있었다 — 문항 단위로 갈라야 한다.
   const careProfile = getCareProfile(ward.id);
-  const hasSurveyData = careProfile?.completed === true;
+  const isAnswered = (step: number) => careProfile !== undefined && isCareProfileStepAnswered(careProfile, step);
 
-  const conditions = hasSurveyData ? careProfile.conditions : ward.conditions;
+  const hasConditionsData = isAnswered(CARE_SURVEY_STEP.conditions);
+  const hasAllergyData = isAnswered(CARE_SURVEY_STEP.allergy);
+  const hasDislikedIngredientsData = isAnswered(CARE_SURVEY_STEP.dislikedIngredients);
+  const hasMedicationData = isAnswered(CARE_SURVEY_STEP.medication);
+  const hasChewingData = isAnswered(CARE_SURVEY_STEP.chewingDifficulty);
+
+  const conditions = hasConditionsData ? careProfile!.conditions : ward.conditions;
   const has = (keyword: string) => conditions.some((c) => c.includes(keyword));
 
-  const allergies = hasSurveyData
-    ? careProfile.hasAllergy && careProfile.allergyNote.trim()
-      ? careProfile.allergyNote
+  const allergies = hasAllergyData
+    ? careProfile!.hasAllergy && careProfile!.allergyNote.trim()
+      ? careProfile!.allergyNote
           .split(/[,·/]/)
           .map((s2) => s2.trim())
           .filter(Boolean)
       : ["없음"]
     : [ALLERGY_POOL[s % ALLERGY_POOL.length]];
 
-  const allergyTags = hasSurveyData
-    ? [
-        ...(careProfile.hasAllergy ? textToAllergyTags(careProfile.allergyNote) : []),
-        ...careProfile.dislikedIngredients.flatMap(textToAllergyTags),
-      ].filter((tag, i, arr) => arr.indexOf(tag) === i)
-    : allergies.map(labelToAllergyTag).filter((t): t is AllergyTag => t !== null);
+  const allergyTags = [
+    ...(hasAllergyData
+      ? careProfile!.hasAllergy
+        ? textToAllergyTags(careProfile!.allergyNote)
+        : []
+      : allergies.map(labelToAllergyTag).filter((t): t is AllergyTag => t !== null)),
+    ...(hasDislikedIngredientsData ? careProfile!.dislikedIngredients.flatMap(textToAllergyTags) : []),
+  ].filter((tag, i, arr) => arr.indexOf(tag) === i);
 
   const medications: { name: string; schedule: string }[] = [];
-  if (hasSurveyData) {
-    if (careProfile.takesMedication) {
+  if (hasMedicationData) {
+    if (careProfile!.takesMedication) {
       medications.push({
-        name: careProfile.medicationNote.trim() || "복용 중 (상세 미입력)",
+        name: careProfile!.medicationNote.trim() || "복용 중 (상세 미입력)",
         schedule: "설문 응답 기준",
       });
     } else {
@@ -123,8 +134,8 @@ export function getWardDetail(ward: Ward): WardDetail {
     if (medications.length === 0) medications.push({ name: "특이 복약 없음", schedule: "-" });
   }
 
-  const chewingNote = hasSurveyData
-    ? careProfile.chewingDifficulty
+  const chewingNote = hasChewingData
+    ? careProfile!.chewingDifficulty
       ? "설문에서 씹거나 삼키는 게 불편하다고 답하셨어요"
       : "설문에서 저작 · 삼킴에 불편함이 없다고 답하셨어요"
     : ward.age >= 85
