@@ -1,23 +1,6 @@
-<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-  <rect width="64" height="64" rx="16" fill="#B96843" />
-  <path
-    d="M24 20 C22 17 26 15 24 12"
-    stroke="#FFF6F0"
-    stroke-width="2.6"
-    stroke-linecap="round"
-    fill="none"
-    opacity="0.85"
-  />
-  <path
-    d="M34 20 C32 17 36 15 34 12"
-    stroke="#FFF6F0"
-    stroke-width="2.6"
-    stroke-linecap="round"
-    fill="none"
-    opacity="0.6"
-  />
-  <path
-    d="M13 29 C13 29 13 48 32 48 C51 48 51 29 51 29 C51 33.5 43.5 38 32 38 C20.5 38 13 33.5 13 29 Z"
-    fill="#FFF6F0"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64" role="img" aria-label="Grandfood">
+  <title>Grandfood</title>
+  <rect width="100" height="100" rx="23.6" fill="#F7F2EB"></rect>
+  <path d="M12 58 Q32 58 38 36 T62 46 Q72 58 88 58" fill="none" stroke="#B96843" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"></path>
+  <path d="M16 70 H84 A34 34 0 0 1 16 70 Z" fill="#2E241F"></path>
 </svg>
