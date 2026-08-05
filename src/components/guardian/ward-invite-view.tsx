@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { createWardInvite } from "@/lib/ward-invite";
+import { useSession } from "@/lib/session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,18 +13,19 @@ import { TopBar } from "@/components/app/top-bar";
 
 export function WardInviteView() {
   const router = useRouter();
+  const { account } = useSession();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const canSubmit = name.trim().length > 0 && phone.trim().length > 0 && confirmed;
+  const canSubmit = name.trim().length > 0 && phone.trim().length > 0 && confirmed && !!account;
 
   async function handleSubmit() {
-    if (!canSubmit || submitting) return;
+    if (!canSubmit || submitting || !account) return;
     setSubmitting(true);
     try {
-      await createWardInvite({ name: name.trim(), phone: phone.trim() });
+      await createWardInvite({ name: name.trim(), phone: phone.trim() }, account.loginId);
       router.push("/guardian/wards/new/result");
     } finally {
       setSubmitting(false);

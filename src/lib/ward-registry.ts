@@ -30,6 +30,50 @@ export type Ward = {
   lastMeal: { tone: MealTone; label: string };
 };
 
+const REGISTERED_WARDS_KEY = "grandfood-app-registered-wards";
+
+// 신규 초대로 가입한 어르신의 표시용 필드 기본값. 진단/이력 데이터가 아직 없는
+// 상태라, 보호자 화면에서 "정보 없음"이 아니라 자연스러운 초기 상태로 보이게 한다.
+const NEW_WARD_DEFAULTS = {
+  relationToGuardian: "가족",
+  familyGroup: "본가",
+  coGuardians: [] as string[],
+  conditions: [] as string[],
+  status: "확인 필요" as WardStatus,
+  lastMeal: { tone: "미응답" as MealTone, label: "아직 식사 기록이 없어요" },
+};
+
+export function newWardDefaults() {
+  return NEW_WARD_DEFAULTS;
+}
+
+function readRegisteredWards(): Ward[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const stored = window.localStorage.getItem(REGISTERED_WARDS_KEY);
+    const wards = stored ? (JSON.parse(stored) as unknown) : [];
+    return Array.isArray(wards) ? (wards as Ward[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRegisteredWards(wards: Ward[]) {
+  window.localStorage.setItem(REGISTERED_WARDS_KEY, JSON.stringify(wards));
+}
+
+// 정적 목업 3명 + 실제 초대로 새로 등록된 ward를 합쳐서 돌려준다 (auth.ts의
+// ACCOUNTS/getAccounts()와 동일한 패턴 — 빌드 타임 generateStaticParams는
+// WARDS만 보고, 런타임 조회는 이 merge된 목록을 쓴다).
+export function getWards(): Ward[] {
+  return [...WARDS, ...readRegisteredWards()];
+}
+
+export function addWard(ward: Ward): void {
+  writeRegisteredWards([...readRegisteredWards(), ward]);
+}
+
 export const WARDS: Ward[] = [
   {
     id: "001",
@@ -76,5 +120,5 @@ export const WARDS: Ward[] = [
 ];
 
 export function getWard(id: string): Ward | undefined {
-  return WARDS.find((w) => w.id === id);
+  return getWards().find((w) => w.id === id);
 }

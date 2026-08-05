@@ -7,6 +7,7 @@ import { Ward, WardStatus } from "@/lib/wards";
 import { sosStore } from "@/lib/sos-store";
 import { useLocalStore } from "@/lib/use-store";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 
 const STATUS_BADGE_CLASS: Record<WardStatus, string> = {
@@ -37,66 +38,82 @@ export function WardListView({ name, wards }: { name: string; wards: Ward[] }) {
           </Link>
         )}
 
-        <div className="grid grid-cols-2 gap-2.5">
-          <div className="flex flex-col gap-1 rounded-xl bg-muted px-4 py-3">
-            <span className="text-xs font-medium text-muted-foreground">
-              전체 대상자
-            </span>
-            <span className="text-xl font-extrabold text-foreground">
-              {wards.length}명
-            </span>
+        {wards.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card px-5 py-10 text-center">
+            <p className="text-sm font-semibold text-foreground">
+              아직 등록된 대상자가 없어요.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              어르신을 초대하면 식단 · 건강 정보를 여기서 확인할 수 있어요.
+            </p>
+            <Button size="sm" nativeButton={false} render={<Link href="/guardian/wards/new" />}>
+              대상자 추가하기
+            </Button>
           </div>
-          <div className="flex flex-col gap-1 rounded-xl bg-muted px-4 py-3">
-            <span className="text-xs font-medium text-muted-foreground">
-              확인이 필요해요
-            </span>
-            <span className="text-xl font-extrabold text-destructive">
-              {needsAttention}명
-            </span>
-          </div>
-        </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="flex flex-col gap-1 rounded-xl bg-muted px-4 py-3">
+                <span className="text-xs font-medium text-muted-foreground">
+                  전체 대상자
+                </span>
+                <span className="text-xl font-extrabold text-foreground">
+                  {wards.length}명
+                </span>
+              </div>
+              <div className="flex flex-col gap-1 rounded-xl bg-muted px-4 py-3">
+                <span className="text-xs font-medium text-muted-foreground">
+                  확인이 필요해요
+                </span>
+                <span className="text-xl font-extrabold text-destructive">
+                  {needsAttention}명
+                </span>
+              </div>
+            </div>
 
-        {groups.map((group) => (
-          <div key={group} className="flex flex-col gap-3">
-            {groups.length > 1 && (
-              <span className="text-xs font-bold text-muted-foreground">{group}</span>
-            )}
-            {wards
-              .filter((w) => w.familyGroup === group)
-              .map((ward) => (
-                <Link
-                  key={ward.id}
-                  href={`/guardian/wards/${ward.id}`}
-                  className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-muted text-base font-extrabold text-muted-foreground">
-                      {ward.name.slice(0, 1)}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-semibold text-foreground">
-                          {ward.name}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          ({ward.relationToGuardian})
-                        </span>
+            {groups.map((group) => (
+              <div key={group} className="flex flex-col gap-3">
+                {groups.length > 1 && (
+                  <span className="text-xs font-bold text-muted-foreground">{group}</span>
+                )}
+                {wards
+                  .filter((w) => w.familyGroup === group)
+                  .map((ward) => (
+                    <Link
+                      key={ward.id}
+                      href={`/guardian/wards/${ward.id}`}
+                      className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-muted text-base font-extrabold text-muted-foreground">
+                          {ward.name.slice(0, 1)}
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-foreground">
+                              {ward.name}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              ({ward.relationToGuardian})
+                            </span>
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {ward.lastMeal.label}
+                          </span>
+                        </div>
                       </div>
-                      <span className="text-xs text-muted-foreground">
-                        {ward.lastMeal.label}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Badge className={STATUS_BADGE_CLASS[ward.status]}>
-                      {ward.status}
-                    </Badge>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                </Link>
-              ))}
-          </div>
-        ))}
+                      <div className="flex items-center gap-1.5">
+                        <Badge className={STATUS_BADGE_CLASS[ward.status]}>
+                          {ward.status}
+                        </Badge>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    </Link>
+                  ))}
+              </div>
+            ))}
+          </>
+        )}
       </div>
     </div>
   );

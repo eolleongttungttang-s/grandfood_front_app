@@ -6,7 +6,7 @@ import { useState } from "react";
 import { ClipboardEdit, LogOut, Phone, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Account } from "@/lib/auth";
+import { Account, updateAccountTtsCallConsent } from "@/lib/auth";
 import { Ward } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 import {
@@ -39,6 +39,7 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
   const router = useRouter();
   const { logout } = useSession();
   const [notifyEnabled, setNotifyEnabled] = useState(true);
+  const [ttsCallConsent, setTtsCallConsent] = useState(account.ttsCallConsent ?? false);
   const a11y = useLocalStore(accessibilityStore);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   useLocalStore(careProfileStore);
@@ -198,6 +199,22 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
             </span>
           </div>
           <Switch checked={notifyEnabled} onCheckedChange={setNotifyEnabled} />
+        </div>
+
+        <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold text-foreground">안부확인콜</span>
+            <span className="text-xs text-muted-foreground">
+              정해진 시각에 전화로 안부를 여쭤봐요 · 선택
+            </span>
+          </div>
+          <Switch
+            checked={ttsCallConsent}
+            onCheckedChange={(checked) => {
+              setTtsCallConsent(checked);
+              updateAccountTtsCallConsent(account.loginId, checked);
+            }}
+          />
         </div>
 
         <Button

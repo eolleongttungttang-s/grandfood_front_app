@@ -1,3 +1,5 @@
+import { createLocalStore } from "@/lib/local-store";
+
 export type UserRole = "user" | "guardian";
 
 export type Account = {
@@ -20,6 +22,10 @@ export type Account = {
   selfWardId?: string;
   /** role === "guardian" 인 경우 돌보는 대상자 id 목록 */
   wardIds?: string[];
+  /** role === "user"(어르신 본인)만 해당 — 안부확인콜(TTS) 동의 여부.
+   *  TODO(backend): UserModel에 해당 컬럼이 생기면 POST /users 요청 바디에 실어 보내야 함
+   *  (지금은 백엔드에 저장할 자리가 없어서 로컬에만 둠 — docs/backend-api-contract.md 참고). */
+  ttsCallConsent?: boolean;
 };
 
 export type RegisterAccountCommand = {
@@ -35,6 +41,7 @@ export type RegisterAccountCommand = {
   planType?: string;
   selfWardId?: string;
   wardIds?: string[];
+  ttsCallConsent?: boolean;
 };
 
 export type RegisterAccountResult =
@@ -80,8 +87,49 @@ function writeRegisteredAccounts(accounts: Account[]) {
   window.localStorage.setItem(REGISTERED_ACCOUNTS_STORAGE_KEY, JSON.stringify(accounts));
 }
 
+// 안부확인콜 동의는 가입 시점에만 정해지는 게 아니라 마이페이지에서 나중에 바꿀 수 있어야
+// 하고, 보호자가 초대로 새 대상자를 등록시켜도 그 id가 보호자 자신의 wardIds엔 반영 안 되는
+// 문제가 있었다. 둘 다 "ACCOUNTS(목업 3명)는 고정 배열이라 직접 수정 불가, registerAccount()로
+// 새로 가입한 계정도 매번 통째로 다시 쓰기엔 무거움" 이라는 같은 이유로 loginId 기준
+// "덮어쓰기 오버레이"를 localStorage에 따로 저장해뒀다가 getAccounts()에서 얹어주는
+// 패턴을 쓴다. 읽기/쓰기 자체는 local-store.ts의 createLocalStore가 이미 구현해뒀으니 그걸
+// 재사용한다 (SSR 가드·JSON 파싱 실패 처리까지 한 곳에서만 관리됨).
+const ttsConsentOverridesStore = createLocalStore<Record<string, boolean>>(
+  "grandfood-app-tts-consent-overrides",
+  {}
+);
+
+export function updateAccountTtsCallConsent(loginId: string, consent: boolean): void {
+  ttsConsentOverridesStore.update((prev) => ({ ...prev, [loginId]: consent }));
+}
+
+const wardLinkOverridesStore = createLocalStore<Record<string, string[]>>(
+  "grandfood-app-guardian-ward-links",
+  {}
+);
+
+export function linkWardToGuardian(guardianLoginId: string, wardId: string): void {
+  wardLinkOverridesStore.update((prev) => {
+    const existing = prev[guardianLoginId] ?? [];
+    if (existing.includes(wardId)) return prev;
+    return { ...prev, [guardianLoginId]: [...existing, wardId] };
+  });
+}
+
 export function getAccounts(): Account[] {
-  return [...ACCOUNTS, ...readRegisteredAccounts()];
+  const ttsOverrides = ttsConsentOverridesStore.read();
+  const wardLinkOverrides = wardLinkOverridesStore.read();
+  return [...ACCOUNTS, ...readRegisteredAccounts()].map((account) => {
+    let next = account;
+    if (account.loginId in ttsOverrides) {
+      next = { ...next, ttsCallConsent: ttsOverrides[account.loginId] };
+    }
+    const linkedWardIds = wardLinkOverrides[account.loginId];
+    if (next.role === "guardian" && linkedWardIds?.length) {
+      next = { ...next, wardIds: [...new Set([...(next.wardIds ?? []), ...linkedWardIds])] };
+    }
+    return next;
+  });
 }
 
 export function findAccountByLoginId(loginId: string): Account | null {
@@ -134,7 +182,12 @@ export function registerAccount(command: RegisterAccountCommand): RegisterAccoun
     phone,
     ...(command.role === "guardian" ? { email: loginId, relationship } : {}),
     ...(command.role === "user"
-      ? { birthDate: command.birthDate, address, planType: command.planType ?? "basic" }
+      ? {
+          birthDate: command.birthDate,
+          address,
+          planType: command.planType ?? "basic",
+          ttsCallConsent: command.ttsCallConsent ?? false,
+        }
       : {}),
     ...(command.role === "user"
       ? { selfWardId: command.selfWardId }

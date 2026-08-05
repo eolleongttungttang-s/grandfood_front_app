@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { UserRole, registerAccount } from "@/lib/auth";
 import { registerGuardianBackend } from "@/lib/backend-auth";
 import { useSession } from "@/lib/session";
+import { addWard, createSelfWard } from "@/lib/wards";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -26,6 +27,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [relationship, setRelationship] = useState("");
   const [birthDate, setBirthDate] = useState("");
+  const [gender, setGender] = useState<"여" | "남">("여");
   const [address, setAddress] = useState("");
   const [planType, setPlanType] = useState("basic");
   const [password, setPassword] = useState("");
@@ -48,13 +50,33 @@ export default function SignupPage() {
     }
 
     setSubmitting(true);
+
+    // 이용자 본인이 (보호자 초대 없이) 직접 가입하는 경우, 자신을 돌봄 대상자(Ward)로도
+    // 함께 등록해야 한다 — 안 그러면 /user/home이 selfWardId를 못 찾아 식단/섭취기록 없이
+    // "가입이 완료되었어요" 안내만 계속 보여주는 막다른 화면에 갇힌다. 보호자가 있는
+    // consent-view.tsx의 초대 가입 흐름과 동일하게 Ward를 만들되, 담당 매장은 실제로
+    // 고를 사람(보호자)이 없으니 첫 번째 파트너 매장으로 기본 지정한다.
+    //
+    // 알려진 한계: 이렇게 만든 Ward는 어떤 보호자의 wardIds에도 속하지 않는다(coGuardians
+    // 없음). meal-log-store.ts의 submitMealLogPhotos()는 wardId로 "이 대상자를 관리하는
+    // 보호자"를 찾아 그 보호자의 백엔드 로그인 토큰으로 사진을 업로드하는 구조라(보호자
+    // 없이는 업로드 API를 호출할 방법이 없음), 이 경로로 가입한 이용자는 홈 화면은 정상
+    // 이지만 식사 사진(잔반 분석) 업로드는 항상 실패한다. 의도적으로 아직 손대지 않음 —
+    // 고치려면 보호자 계정과 연결하는 방법(가입 시 지정 등)을 먼저 설계해야 한다.
+    let selfWardId: string | undefined;
+    if (role === "user") {
+      const newWard = createSelfWard({ id: crypto.randomUUID(), name, birthDate, gender, address });
+      addWard(newWard);
+      selfWardId = newWard.id;
+    }
+
     const result = registerAccount({
       loginId: role === "guardian" ? email : loginId,
       password,
       role,
       name,
       phone,
-      ...(role === "guardian" ? { email, relationship } : { birthDate, address, planType }),
+      ...(role === "guardian" ? { email, relationship } : { birthDate, address, planType, selfWardId }),
     });
 
     if ("error" in result) {
@@ -83,7 +105,7 @@ export default function SignupPage() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <BrandHeader />
+      <BrandHeader onBack={() => router.push("/")} />
       <main className="flex flex-1 flex-col items-center px-5 py-10">
         <Card className="w-full max-w-[420px] border-none shadow-none">
           <CardHeader className="gap-2 text-center">
@@ -135,6 +157,9 @@ export default function SignupPage() {
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="signup-email">이메일</Label>
                     <Input id="signup-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="name@example.com" required />
+                    <p className="text-xs text-muted-foreground">
+                      나중에 로그인할 때 이 이메일이 아이디가 돼요.
+                    </p>
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="signup-relationship">대상자와의 관계</Label>
@@ -146,6 +171,27 @@ export default function SignupPage() {
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="signup-birth-date">생년월일</Label>
                     <Input id="signup-birth-date" type="date" value={birthDate} onChange={(event) => setBirthDate(event.target.value)} autoComplete="bday" required />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>성별</Label>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant={gender === "여" ? "default" : "outline"}
+                        className="flex-1"
+                        onClick={() => setGender("여")}
+                      >
+                        여성
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={gender === "남" ? "default" : "outline"}
+                        className="flex-1"
+                        onClick={() => setGender("남")}
+                      >
+                        남성
+                      </Button>
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="signup-address">주소</Label>
