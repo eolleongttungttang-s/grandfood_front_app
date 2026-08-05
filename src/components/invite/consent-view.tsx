@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation";
 import { Volume2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { registerAccount } from "@/lib/auth";
+import { linkWardToGuardian, registerAccount } from "@/lib/auth";
 import { InviteFormState, submitInviteConsent, submitInviteDecline } from "@/lib/invite";
-import { WARDS } from "@/lib/wards";
+import { consumeWardInvite } from "@/lib/ward-invite";
+import { addWard, createSelfWard } from "@/lib/wards";
+import { createBackendWard } from "@/lib/backend-auth";
 import { speakOnDemand } from "@/lib/accessibility";
 import { useSession } from "@/lib/session";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -27,18 +29,32 @@ function readAloudText(guardianName: string) {
   );
 }
 
+function ttsCallConsentReadAloudText() {
+  return (
+    "정해진 시각에 전화로 안부를 여쭤보는 안부확인콜 서비스예요. " +
+    "동의하지 않으셔도 도시락 배송이나 식사 기록 같은 다른 서비스는 그대로 이용하실 수 있어요. " +
+    "선택 사항이니 편하게 결정하시면 돼요. 안부확인콜에도 동의하시겠어요?"
+  );
+}
+
 export function ConsentView({
   guardianName,
+  guardianLoginId,
+  code,
   defaultValues,
 }: {
   guardianName: string;
+  guardianLoginId: string;
+  code: string;
   defaultValues: InviteFormState;
 }) {
   const router = useRouter();
   const { login } = useSession();
   const [form, setForm] = useState(defaultValues);
   const [birthDate, setBirthDate] = useState("");
+  const [gender, setGender] = useState<"여" | "남" | null>(null);
   const [agreed, setAgreed] = useState(false);
+  const [ttsCallConsent, setTtsCallConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -56,12 +72,35 @@ export function ConsentView({
       setError("연락처를 정확히 입력해 주세요.");
       return;
     }
+    if (!gender) {
+      setError("성별을 선택해 주세요.");
+      return;
+    }
 
     setSubmitting(true);
     try {
       await submitInviteConsent(form);
-      // 실제 연동 시 백엔드가 초대 코드에 연결된 user_id(UUID)를 반환한다.
-      const linkedWard = WARDS.find((ward) => ward.name === form.elderName);
+
+      const address = `${form.address} ${form.addressDetail}`.trim();
+
+      // 실제 백엔드(grandfood_backend)엔 초대 개념이 없다 — 이 초대를 발급한 보호자의
+      // 실제 세션으로 POST /users를 호출해야 진짜 ward가 생긴다. 실패하면 로컬에만
+      // 존재하는 "가짜로 연결된" ward를 만들지 않고 여기서 바로 멈춘다.
+      const wardResult = await createBackendWard({
+        guardianLoginId,
+        name: form.elderName,
+        birthDate,
+        phone: form.elderPhone,
+        address,
+      });
+      if ("error" in wardResult) {
+        setError(wardResult.error);
+        return;
+      }
+
+      const newWard = createSelfWard({ id: wardResult.userId, name: form.elderName, birthDate, gender, address });
+      addWard(newWard);
+
       const result = registerAccount({
         loginId: generatedLoginId,
         password: generatedPassword,
@@ -69,18 +108,28 @@ export function ConsentView({
         name: form.elderName,
         phone: form.elderPhone,
         birthDate,
-        address: `${form.address} ${form.addressDetail}`.trim(),
+        address,
         planType: "basic",
-        selfWardId: linkedWard?.id,
+        selfWardId: newWard.id,
+        ttsCallConsent,
       });
       if ("error" in result) {
         setError(result.error);
         return;
       }
 
+      // 새 대상자를 초대한 보호자의 wardIds에도 반영해야, 그 보호자의 홈/마이 화면에
+      // 이번에 등록된 대상자가 보인다 — registerAccount()는 새 이용자 계정만 만들 뿐
+      // 초대한 보호자 쪽 계정은 건드리지 않는다.
+      linkWardToGuardian(guardianLoginId, newWard.id);
+
+      // 가입이 완전히 끝난 뒤에 지운다 — 같은 링크로 다시 들어와도 더는 유효한 초대를
+      // 못 찾게 해서, 재방문 시 POST /users가 중복 호출되는 걸 막는다.
+      consumeWardInvite(code);
+
       login(result.account.loginId, generatedPassword);
       toast.success("회원가입이 완료됐어요.");
-      router.push(linkedWard ? "/invite/survey" : "/user/home");
+      router.push("/invite/survey");
     } finally {
       setSubmitting(false);
     }
@@ -91,7 +140,11 @@ export function ConsentView({
     setSubmitting(true);
     try {
       await submitInviteDecline();
-      router.push("/invite/declined");
+      // "입력됐던 정보를 지금 바로 삭제했어요"라고 안내하는 화면(declined-view.tsx)이
+      // 실제로 그 말대로 동작하려면, 폼 초안뿐 아니라 이 초대 자체도 없애야 한다 —
+      // 안 그러면 같은 링크로 다시 들어와서 여전히 가입할 수 있는 상태가 남는다.
+      consumeWardInvite(code);
+      router.push(`/invite/declined?guardianName=${encodeURIComponent(guardianName)}`);
     } finally {
       setSubmitting(false);
     }
@@ -170,6 +223,27 @@ export function ConsentView({
             />
           </div>
           <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-foreground">성별</span>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant={gender === "여" ? "default" : "outline"}
+                className="flex-1"
+                onClick={() => setGender("여")}
+              >
+                여성
+              </Button>
+              <Button
+                type="button"
+                variant={gender === "남" ? "default" : "outline"}
+                className="flex-1"
+                onClick={() => setGender("남")}
+              >
+                남성
+              </Button>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">비밀번호</span>
             <span className="text-base font-semibold text-foreground">{generatedPassword}</span>
             <p className="text-xs text-muted-foreground">
@@ -227,6 +301,23 @@ export function ConsentView({
           내용 들려주기
         </Button>
 
+        <label className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5">
+          <Checkbox checked={ttsCallConsent} onCheckedChange={setTtsCallConsent} />
+          <span className="text-sm text-foreground">
+            안부확인콜(전화로 안부를 여쭤보는 서비스)에 동의해요{" "}
+            <span className="text-muted-foreground">· 선택</span>
+          </span>
+        </label>
+
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => speakOnDemand(ttsCallConsentReadAloudText())}
+        >
+          <Volume2 />
+          안부확인콜이 뭔지 들려주기
+        </Button>
+
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -237,7 +328,7 @@ export function ConsentView({
           <Button
             size="lg"
             className="w-full"
-            disabled={!agreed || submitting || !birthDate || generatedPassword.length !== 4}
+            disabled={!agreed || submitting || !birthDate || !gender || generatedPassword.length !== 4}
             onClick={handleAccept}
           >
             동의하고 가입하기

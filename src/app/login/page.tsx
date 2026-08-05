@@ -82,7 +82,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <BrandHeader />
+      <BrandHeader onBack={() => router.push("/")} />
       <main className="flex flex-1 flex-col items-center justify-center px-5 py-10">
         <Card className="w-full max-w-[380px] border-none shadow-none">
           <CardHeader className="flex flex-col items-center gap-2 text-center">
@@ -119,12 +119,13 @@ export default function LoginPage() {
 
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="loginId">이메일 또는 아이디</Label>
+                <Label htmlFor="loginId">{tab === "guardian" ? "이메일" : "아이디"}</Label>
                 <Input
                   id="loginId"
                   value={loginId}
                   onChange={(e) => setLoginId(e.target.value)}
                   autoComplete="username"
+                  placeholder={tab === "guardian" ? "가입할 때 쓴 이메일" : undefined}
                   required
                 />
               </div>

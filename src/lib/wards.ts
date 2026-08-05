@@ -13,11 +13,54 @@ import { getHealthProfile, type HealthProfileView } from "@/lib/health-profile";
 import { CARE_SURVEY_STEP, getCareProfile, isCareProfileStepAnswered } from "@/lib/care-profile";
 import { matchDishes, type DishCombo } from "@/lib/recommendation";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
+import { PARTNER_STORES } from "@/lib/partner-stores";
 import type { AllergyTag } from "@/lib/dishes";
-import { WARDS, getWard, type Ward, type WardStatus, type MealTone } from "@/lib/ward-registry";
+import {
+  WARDS,
+  getWard,
+  getWards,
+  addWard,
+  newWardDefaults,
+  type Ward,
+  type WardStatus,
+  type MealTone,
+} from "@/lib/ward-registry";
 
-export { WARDS, getWard };
+export { WARDS, getWard, getWards, addWard, newWardDefaults };
 export type { Ward, WardStatus, MealTone };
+
+export function calculateAge(birthDate: string): number {
+  const birth = new Date(birthDate);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const hasHadBirthdayThisYear =
+    today.getMonth() > birth.getMonth() ||
+    (today.getMonth() === birth.getMonth() && today.getDate() >= birth.getDate());
+  if (!hasHadBirthdayThisYear) age -= 1;
+  return age;
+}
+
+// 보호자 초대 동의(consent-view.tsx)든 이용자 본인 직접가입(signup/page.tsx)이든, 새 Ward를
+// 만드는 규칙은 똑같다 — 담당 매장을 고를 사람(보호자)이 아직 없거나 알 수 없을 때는 첫 번째
+// 파트너 매장으로 기본 배정하고, 나머지는 newWardDefaults()의 초기값을 그대로 쓴다. 두 곳에서
+// 따로따로 이 리터럴을 만들면 규칙이 바뀔 때 한쪽만 고쳐지는 사고가 나기 쉬워 하나로 합쳤다.
+export function createSelfWard(params: {
+  id: string;
+  name: string;
+  birthDate: string;
+  gender: "여" | "남";
+  address: string;
+}): Ward {
+  return {
+    id: params.id,
+    name: params.name,
+    age: calculateAge(params.birthDate),
+    gender: params.gender,
+    address: params.address,
+    partnerStoreId: PARTNER_STORES[0].id,
+    ...newWardDefaults(),
+  };
+}
 
 export type WardDetail = {
   /** 진단 질환 — 설문(care-profile.ts)에 응답이 있으면 그걸, 없으면 ward-registry.ts의 대체값을 쓴다. */

@@ -1,7 +1,8 @@
 // 보호자가 발급한 "부모님 등록" 요청 1건의 데이터 모델.
 // e-sms → e-consent → e-declined 화면이 이 값을 공유한다.
 
-import { ACCOUNTS } from "@/lib/auth";
+import { getWardInviteByCode, type WardInviteResult } from "@/lib/ward-invite";
+import { ACCOUNTS, findAccountByLoginId } from "@/lib/auth";
 import { getWard } from "@/lib/wards";
 import { createLocalStore } from "@/lib/local-store";
 
@@ -19,8 +20,9 @@ const elderAccount = ACCOUNTS.find((a) => a.role === "user")!;
 const guardianAccount = ACCOUNTS.find((a) => a.role === "guardian")!;
 const elderWard = getWard(elderAccount.selfWardId!)!;
 
-// TODO(backend): GET /invites/:code 로 대체. 지금은 문자/QR 링크로 들어왔다고 가정한 더미 값.
-// 기존 목업 계정(박순자=이용자, 박지훈=보호자)을 그대로 사용해 다른 화면들과 데이터가 어긋나지 않게 한다.
+// 실제 동의(consent) 흐름은 더 이상 이 값을 쓰지 않는다 — 아래 resolveInviteByCode()가
+// ?code= 기준으로 진짜 초대를 조회한다. 이건 /invite/sms, /invite/declined 같은
+// "이런 화면이 보인다"는 걸 보여주는 부가 데모 화면 전용 더미 값으로만 남겨뒀다.
 export const MOCK_INVITE: InviteRequest = {
   id: "inv-mock-01",
   guardianName: guardianAccount.name,
@@ -40,15 +42,6 @@ export type InviteFormState = {
   addressDetail: string;
 };
 
-function toFormState(invite: InviteRequest): InviteFormState {
-  return {
-    elderName: invite.elderName,
-    elderPhone: invite.elderPhone,
-    address: invite.address,
-    addressDetail: invite.addressDetail,
-  };
-}
-
 const EMPTY_FORM_STATE: InviteFormState = {
   elderName: "",
   elderPhone: "",
@@ -58,8 +51,37 @@ const EMPTY_FORM_STATE: InviteFormState = {
 
 export const inviteFormStore = createLocalStore<InviteFormState>(
   "grandfood-app-invite-form",
-  toFormState(MOCK_INVITE)
+  EMPTY_FORM_STATE
 );
+
+// 문자/QR 링크의 ?code=로 들어온 초대를 실제 발급 기록(ward-invite.ts)에서 조회한다.
+// 백엔드에 초대 엔드포인트가 없어서(계약 문서 참고) 로컬에 저장해둔 발급 기록이 곧
+// 진실 소스다 — 코드가 없거나 만료/오타면 null.
+export function resolveInviteByCode(code: string | null): InviteRequest | null {
+  if (!code) return null;
+  const invite: WardInviteResult | null = getWardInviteByCode(code);
+  if (!invite) return null;
+
+  const guardian = findAccountByLoginId(invite.guardianLoginId);
+  return {
+    id: invite.code,
+    guardianName: guardian?.name ?? "보호자",
+    elderName: invite.name,
+    elderPhone: invite.phone,
+    address: "",
+    addressDetail: "",
+    sentAt: invite.issuedAt,
+  };
+}
+
+export function toFormState(invite: InviteRequest): InviteFormState {
+  return {
+    elderName: invite.elderName,
+    elderPhone: invite.elderPhone,
+    address: invite.address,
+    addressDetail: invite.addressDetail,
+  };
+}
 
 // TODO(backend): POST /invites/:id/consent { ...form } 로 대체.
 // 서버가 생기면 동의 시각·체크 여부도 함께 기록해야 한다.

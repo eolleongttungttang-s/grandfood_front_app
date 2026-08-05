@@ -126,6 +126,47 @@ export async function loginGuardianBackend(
   }
 }
 
+// POST /users — 초대에 동의하는 시점에, 그 초대를 발급한 보호자의 백엔드 세션으로
+// 완전히 새로운 어르신(User)을 만든다. ensureBackendWardId()와 달리 "이미 있는 목업
+// ward를 나중에 매핑"하는 게 아니라 여기서 처음 만들어지는 진짜 ward라, 캐시 조회 없이
+// 항상 POST하고 응답 user_id를 그대로 진짜 ward id로 쓴다.
+export async function createBackendWard(params: {
+  guardianLoginId: string;
+  name: string;
+  birthDate: string; // "YYYY-MM-DD"
+  phone: string;
+  address: string;
+}): Promise<{ userId: string } | { error: string }> {
+  const session = backendGuardianSessionStore.read()[params.guardianLoginId];
+  if (!session) {
+    return { error: "보호자가 아직 실제 계정 연동을 완료하지 않았어요. 보호자에게 문의해 주세요." };
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/users`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.accessToken}`,
+      },
+      body: JSON.stringify({
+        name: params.name,
+        birth_date: params.birthDate,
+        phone: params.phone,
+        address: params.address,
+        plan_type: "base",
+      }),
+    });
+    if (!response.ok) {
+      return { error: await parseErrorResponse(response) };
+    }
+    const data = await response.json();
+    return { userId: data.user_id as string };
+  } catch {
+    return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  }
+}
+
 // POST /users — 로그인한 보호자 아래에 실제 어르신(User) 레코드를 만들어 UUID를 확보한다.
 // 목업 Ward에는 phone/정확한 birth_date가 없어서(있는 건 age뿐) 백엔드 필수 필드를 채우기 위한
 // 임시 값을 채운다 — 진짜 개인정보가 아니라, 사진 업로드 함수를 호출하기 위한 최소 더미 데이터.

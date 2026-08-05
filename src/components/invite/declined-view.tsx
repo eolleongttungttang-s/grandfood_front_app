@@ -3,11 +3,10 @@
 import Link from "next/link";
 import { Check } from "lucide-react";
 
-import { MOCK_INVITE } from "@/lib/invite";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 
-export function DeclinedView() {
+export function DeclinedView({ guardianName }: { guardianName: string }) {
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
       <TopBar title="신청 취소" subtitle="GrandFood" />
@@ -32,7 +31,7 @@ export function DeclinedView() {
           <span className="text-sm text-muted-foreground line-through">성함, 연락처</span>
           <span className="text-sm text-muted-foreground line-through">배송지 주소</span>
           <p className="pt-1 text-xs text-muted-foreground">
-            <b className="font-semibold text-foreground">{MOCK_INVITE.guardianName}</b>님께는
+            <b className="font-semibold text-foreground">{guardianName}</b>님께는
             거부 사실만 전달돼요 (내용은 전달되지 않아요)
           </p>
         </div>
