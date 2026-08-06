@@ -10,6 +10,7 @@ import { getCurrentMealSlot, mealLogStore, submitMealLogPhotos, wardMealLogs } f
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
+import { SpeakableCard } from "@/components/app/speakable-card";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
 import { useLocalStore } from "@/lib/use-store";
 
@@ -36,6 +37,19 @@ export function DietView({
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
+
+  // 카드별 TTS(SpeakableCard)가 읽어줄 문장 — 화면에 보이는 값 그대로를 문장으로 풀어 쓴다.
+  const recommendedComboSpeech =
+    `오늘의 추천 반찬 조합이에요. 나트륨 ${detail.recommendedCombo.totalSodiumMg}mg, ` +
+    `단백질 ${detail.recommendedCombo.totalProteinG}g, 열량 ${detail.recommendedCombo.totalKcal}kcal입니다.`;
+  const menuCompositionSpeech = `오늘 메뉴 구성은, ${detail.recommendedCombo.items
+    .map((item) => (dislikes.includes(item.dishId) ? `${item.name}, 기피 표시됨` : item.name))
+    .join(", ")}입니다.`;
+  const reasonsSpeech = detail.recommendedCombo.reasons.join(" ");
+  const conditionsSpeech =
+    `진단 질환은 ${detail.conditions.join(", ") || "없음"}입니다. ` +
+    `알레르기는 ${detail.allergies[0] === "없음" ? "없음" : detail.allergies.join(", ")}입니다. ` +
+    `복약은 ${detail.medications.map((m) => m.name).join(", ")}입니다.`;
 
   // 식사 체크인 · 잔반 분석 — 실제 카메라/파일로 찍은 사진을 진짜 fetch()로 백엔드에 올린다
   // (meal-log-store.ts 참고). 이 브라우저에서 보호자로 실제 로그인한 적이 없으면(backend-auth.ts)
@@ -87,7 +101,12 @@ export function DietView({
       <TopBar title="내 식단" subtitle="오늘의 배정 식단과 근거" />
 
       <div className="flex flex-col gap-4 px-5">
-        <div className="flex flex-col gap-2 rounded-2xl bg-sidebar p-5 text-sidebar-foreground shadow-sm">
+        <SpeakableCard
+          id="diet-recommended-combo"
+          text={recommendedComboSpeech}
+          tone="sidebar"
+          className="flex flex-col gap-2 rounded-2xl bg-sidebar p-5 text-sidebar-foreground shadow-sm"
+        >
           <span className="text-xs font-bold tracking-wide text-sidebar-primary">
             AI 반찬 매칭
           </span>
@@ -106,9 +125,13 @@ export function DietView({
               <span className="font-semibold">{detail.recommendedCombo.totalKcal}kcal</span>
             </div>
           </div>
-        </div>
+        </SpeakableCard>
 
-        <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <SpeakableCard
+          id="diet-menu-composition"
+          text={menuCompositionSpeech}
+          className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
+        >
           <span className="text-xs font-bold text-foreground">
             {representativeDish?.imageEmoji ?? "🍽️"} 오늘 메뉴 구성
           </span>
@@ -127,7 +150,10 @@ export function DietView({
                   </span>
                   <button
                     type="button"
-                    onClick={() => toggleDislike(ward.id, item.dishId)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleDislike(ward.id, item.dishId);
+                    }}
                     className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
                       disliked
                         ? "bg-destructive/10 text-destructive"
@@ -145,7 +171,7 @@ export function DietView({
               기피 표시한 반찬은 보호자와 담당 영양사에게 함께 보여요.
             </p>
           )}
-        </div>
+        </SpeakableCard>
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-base font-bold text-foreground">식사 체크인 · 잔반 분석</span>
@@ -205,7 +231,11 @@ export function DietView({
           )}
         </div>
 
-        <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <SpeakableCard
+          id="diet-reasons"
+          text={reasonsSpeech}
+          className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
+        >
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
           {detail.recommendedCombo.reasons.map((reason, i) => (
             <div
@@ -218,9 +248,13 @@ export function DietView({
               {reason}
             </div>
           ))}
-        </div>
+        </SpeakableCard>
 
-        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <SpeakableCard
+          id="diet-conditions"
+          text={conditionsSpeech}
+          className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm"
+        >
           <span className="text-xs font-bold text-foreground">질환 · 알레르기 · 복약</span>
           <div className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold text-muted-foreground">진단 질환</span>
@@ -261,16 +295,16 @@ export function DietView({
             </span>
             <p className="text-sm text-foreground">{detail.chewingNote}</p>
           </div>
-        </div>
+        </SpeakableCard>
 
         <Button
           variant="outline"
           className="w-full"
           nativeButton={false}
-          render={<Link href="/user/nutritionist" />}
+          render={<Link href="/user/assistant" />}
         >
           <Stethoscope />
-          영양사와 채팅 상담하기
+          AI 도우미와 채팅 상담하기
         </Button>
       </div>
     </div>

@@ -14,6 +14,31 @@
 import { createLocalStore } from "@/lib/local-store";
 import { API_BASE_URL } from "@/lib/api-config";
 import { getAccounts } from "@/lib/auth";
+import { CONDITION_POOL, getCareProfile } from "@/lib/care-profile";
+
+// 설문(care-profile.ts CONDITION_POOL)의 한국어 질환명 -> 백엔드 ConditionFlag(영문 enum) 매핑.
+// 키 타입을 `(typeof CONDITION_POOL)[number]`로 못박아서, 나중에 CONDITION_POOL에 새 질환이
+// 추가되는데 여기 매핑을 깜빡하면 (조용히 필터링되는 게 아니라) 컴파일 에러로 바로 드러나게 한다.
+// PR #10(307f93b)부터 백엔드 ConditionFlag도 6종이라 지금은 1:1로 맞는다.
+const CONDITION_LABEL_TO_BACKEND_FLAG: Record<(typeof CONDITION_POOL)[number], string> = {
+  고혈압: "hypertension",
+  당뇨: "diabetes",
+  심부전: "heart_failure",
+  신장질환: "chronic_kidney_disease",
+  치매: "dementia",
+  관절염: "arthritis",
+};
+
+function getBackendConditionFlags(mockWardId: string): string[] {
+  // conditions는 설문 자유 응답이라 타입상 string[]이지 CONDITION_POOL 리터럴로 좁혀지진 않는다
+  // (UI는 CONDITION_POOL만 고르게 하지만 타입까지 강제하진 않음) — 위 매핑표의 타입 안전성은
+  // "표 자체가 CONDITION_POOL을 다 커버하는지"를 잡아주는 용도라, 여기 조회는 느슨하게 한다.
+  const lookup = CONDITION_LABEL_TO_BACKEND_FLAG as Record<string, string | undefined>;
+  const conditions = getCareProfile(mockWardId)?.conditions ?? [];
+  return conditions
+    .map((c) => lookup[c])
+    .filter((flag): flag is string => flag !== undefined);
+}
 
 export type BackendGuardianSession = {
   accessToken: string;
@@ -126,10 +151,49 @@ export async function loginGuardianBackend(
   }
 }
 
+// createBackendWard()와 ensureBackendWardId() 둘 다 결국 "로그인된 보호자 세션으로 POST /users"를
+// 한다 — 필드 구성(조건 포함 여부 등)만 다를 뿐 요청/에러 처리 로직 자체가 같아서 하나로 묶었다.
+// 예전엔 이 fetch 블록이 두 함수에 각각 따로 있어서, 한쪽만 고치고 다른 쪽을 놓치기 쉬웠다.
+async function postNewBackendUser(params: {
+  accessToken: string;
+  name: string;
+  birthDate: string; // "YYYY-MM-DD"
+  phone: string;
+  address: string;
+  conditionFlags?: string[];
+}): Promise<{ userId: string } | { error: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${params.accessToken}`,
+      },
+      body: JSON.stringify({
+        name: params.name,
+        birth_date: params.birthDate,
+        phone: params.phone,
+        address: params.address,
+        plan_type: "base",
+        condition_flags: params.conditionFlags ?? [],
+      }),
+    });
+    if (!response.ok) {
+      return { error: await parseErrorResponse(response) };
+    }
+    const data = await response.json();
+    return { userId: data.user_id as string };
+  } catch {
+    return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  }
+}
+
 // POST /users — 초대에 동의하는 시점에, 그 초대를 발급한 보호자의 백엔드 세션으로
 // 완전히 새로운 어르신(User)을 만든다. ensureBackendWardId()와 달리 "이미 있는 목업
 // ward를 나중에 매핑"하는 게 아니라 여기서 처음 만들어지는 진짜 ward라, 캐시 조회 없이
-// 항상 POST하고 응답 user_id를 그대로 진짜 ward id로 쓴다.
+// 항상 POST하고 응답 user_id를 그대로 진짜 ward id로 쓴다. 이 시점엔 아직 로컬 ward id 자체가
+// 없어(이 호출의 결과가 곧 그 id) care-profile 설문을 조회할 방법이 없으므로 condition_flags는
+// 항상 비어서 나간다 — 설문은 이 다음 화면(/invite/survey)에서 이뤄진다.
 export async function createBackendWard(params: {
   guardianLoginId: string;
   name: string;
@@ -142,30 +206,20 @@ export async function createBackendWard(params: {
     return { error: "보호자가 아직 실제 계정 연동을 완료하지 않았어요. 보호자에게 문의해 주세요." };
   }
 
-  try {
-    const response = await fetch(`${API_BASE_URL}/users`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.accessToken}`,
-      },
-      body: JSON.stringify({
-        name: params.name,
-        birth_date: params.birthDate,
-        phone: params.phone,
-        address: params.address,
-        plan_type: "base",
-      }),
-    });
-    if (!response.ok) {
-      return { error: await parseErrorResponse(response) };
-    }
-    const data = await response.json();
-    return { userId: data.user_id as string };
-  } catch {
-    return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
-  }
+  return postNewBackendUser({
+    accessToken: session.accessToken,
+    name: params.name,
+    birthDate: params.birthDate,
+    phone: params.phone,
+    address: params.address,
+  });
 }
+
+// ensureBackendWardId()는 rag-chat.ts와 meal-log-store.ts 양쪽에서 부른다. 캐시가 아직 비어있는
+// 상태에서 두 곳이 거의 동시에(예: 질문 전송 직후 바로 사진 업로드) 호출하면, 서로 상대방이 이미
+// POST /users를 보낸 걸 모른 채 각자 요청을 보내 같은 어르신이 중복 생성될 수 있다. 같은 mockWardId에
+// 대한 요청이 이미 진행 중이면 새로 fetch하지 않고 그 진행 중인 Promise를 그대로 기다리게 해서 막는다.
+const pendingEnsureRequests = new Map<string, Promise<string | null>>();
 
 // POST /users — 로그인한 보호자 아래에 실제 어르신(User) 레코드를 만들어 UUID를 확보한다.
 // 목업 Ward에는 phone/정확한 birth_date가 없어서(있는 건 age뿐) 백엔드 필수 필드를 채우기 위한
@@ -179,31 +233,41 @@ export async function ensureBackendWardId(params: {
   const cached = backendWardIdMapStore.read()[params.mockWardId];
   if (cached) return cached;
 
+  const pending = pendingEnsureRequests.get(params.mockWardId);
+  if (pending) return pending;
+
+  const request = createBackendWardIdRequest(params);
+  pendingEnsureRequests.set(params.mockWardId, request);
+  try {
+    return await request;
+  } finally {
+    pendingEnsureRequests.delete(params.mockWardId);
+  }
+}
+
+async function createBackendWardIdRequest(params: {
+  mockWardId: string;
+  name: string;
+  age: number;
+  address: string;
+}): Promise<string | null> {
   const session = getBackendGuardianSessionForWard(params.mockWardId);
   if (!session) return null;
 
   const currentYear = new Date().getFullYear();
-  try {
-    const response = await fetch(`${API_BASE_URL}/users`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.accessToken}`,
-      },
-      body: JSON.stringify({
-        name: params.name,
-        birth_date: `${currentYear - params.age}-01-01`,
-        phone: "000-0000-0000",
-        address: params.address,
-        plan_type: "base",
-      }),
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    const userId: string = data.user_id;
-    backendWardIdMapStore.update((prev) => ({ ...prev, [params.mockWardId]: userId }));
-    return userId;
-  } catch {
-    return null;
-  }
+  // 이 시점(첫 RAG 질문/사진 업로드)까지 답한 설문이 있으면 같이 실어서, 백엔드가
+  // health_profiles.condition_flags를 온보딩과 함께 만들도록 한다 — RAG 개인화
+  // (rag/service.py get_user_conditions)가 이 값을 읽는다.
+  const result = await postNewBackendUser({
+    accessToken: session.accessToken,
+    name: params.name,
+    birthDate: `${currentYear - params.age}-01-01`,
+    phone: "000-0000-0000",
+    address: params.address,
+    conditionFlags: getBackendConditionFlags(params.mockWardId),
+  });
+  if ("error" in result) return null;
+
+  backendWardIdMapStore.update((prev) => ({ ...prev, [params.mockWardId]: result.userId }));
+  return result.userId;
 }

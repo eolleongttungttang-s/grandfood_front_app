@@ -25,22 +25,10 @@ export const wardInviteStore = createLocalStore<WardInviteResult | null>(
   null
 );
 
-const INVITES_BY_CODE_KEY = "grandfood-app-ward-invites";
-
-function readInvitesByCode(): Record<string, WardInviteResult> {
-  if (typeof window === "undefined") return {};
-
-  try {
-    const stored = window.localStorage.getItem(INVITES_BY_CODE_KEY);
-    return stored ? (JSON.parse(stored) as Record<string, WardInviteResult>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeInvitesByCode(invites: Record<string, WardInviteResult>) {
-  window.localStorage.setItem(INVITES_BY_CODE_KEY, JSON.stringify(invites));
-}
+const wardInvitesByCodeStore = createLocalStore<Record<string, WardInviteResult>>(
+  "grandfood-app-ward-invites",
+  {}
+);
 
 // TODO(backend): POST /wards/invites { name, phone } → { code, expiresAt }.
 // 서버가 코드 발급과 어르신 번호로의 SMS 자동 발송을 함께 처리해야 한다. (백엔드에 이
@@ -62,20 +50,21 @@ export async function createWardInvite(
     guardianLoginId,
   };
   wardInviteStore.write(result);
-  writeInvitesByCode({ ...readInvitesByCode(), [result.code]: result });
+  wardInvitesByCodeStore.update((prev) => ({ ...prev, [result.code]: result }));
   return result;
 }
 
 export function getWardInviteByCode(code: string): WardInviteResult | null {
-  return readInvitesByCode()[code] ?? null;
+  return wardInvitesByCodeStore.read()[code] ?? null;
 }
 
 // 동의(가입 성공) 또는 거절 시 호출 — 같은 코드로 다시 들어와도 더는 유효한 초대를 못 찾게
 // 만든다. 이게 없으면 같은 링크를 재방문해서 POST /users가 중복 호출되거나(백엔드에 고아
 // User 레코드가 쌓임), 거절해놓고도 다시 동의할 수 있는 상태가 남는다.
 export function consumeWardInvite(code: string): void {
-  const invites = readInvitesByCode();
-  if (!(code in invites)) return;
-  const { [code]: _removed, ...rest } = invites;
-  writeInvitesByCode(rest);
+  wardInvitesByCodeStore.update((prev) => {
+    if (!(code in prev)) return prev;
+    const { [code]: _removed, ...rest } = prev;
+    return rest;
+  });
 }

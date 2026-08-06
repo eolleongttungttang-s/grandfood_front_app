@@ -10,7 +10,7 @@ import { linkWardToGuardian, registerAccount } from "@/lib/auth";
 import { InviteFormState, submitInviteConsent, submitInviteDecline } from "@/lib/invite";
 import { consumeWardInvite } from "@/lib/ward-invite";
 import { addWard, createSelfWard } from "@/lib/wards";
-import { createBackendWard } from "@/lib/backend-auth";
+import { backendWardIdMapStore, createBackendWard } from "@/lib/backend-auth";
 import { speakOnDemand } from "@/lib/accessibility";
 import { useSession } from "@/lib/session";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -29,7 +29,7 @@ function readAloudText(guardianName: string) {
   );
 }
 
-function ttsCallConsentReadAloudText() {
+export function ttsCallConsentReadAloudText() {
   return (
     "정해진 시각에 전화로 안부를 여쭤보는 안부확인콜 서비스예요. " +
     "동의하지 않으셔도 도시락 배송이나 식사 기록 같은 다른 서비스는 그대로 이용하실 수 있어요. " +
@@ -97,6 +97,12 @@ export function ConsentView({
         setError(wardResult.error);
         return;
       }
+
+      // ensureBackendWardId()(backend-auth.ts)가 "이 목업 ward는 아직 백엔드에 없다"고 착각해서
+      // POST /users를 또 호출해 같은 어르신을 중복 생성하는 걸 막는다 — 여기서 만든 게 이미
+      // 진짜 백엔드 유저이므로, mockWardId(=wardResult.userId, 바로 아래서 그대로 씀) -> 그
+      // userId 매핑을 캐시에 바로 남겨서 나중 호출이 캐시 히트로 끝나게 한다.
+      backendWardIdMapStore.update((prev) => ({ ...prev, [wardResult.userId]: wardResult.userId }));
 
       const newWard = createSelfWard({ id: wardResult.userId, name: form.elderName, birthDate, gender, address });
       addWard(newWard);

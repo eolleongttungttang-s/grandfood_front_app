@@ -3,19 +3,22 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { BrandHeader } from "@/components/app/brand-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { UserRole, registerAccount } from "@/lib/auth";
 import { registerGuardianBackend } from "@/lib/backend-auth";
+import { speakOnDemand } from "@/lib/accessibility";
 import { useSession } from "@/lib/session";
 import { addWard, createSelfWard } from "@/lib/wards";
+import { ttsCallConsentReadAloudText } from "@/components/invite/consent-view";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -30,6 +33,7 @@ export default function SignupPage() {
   const [gender, setGender] = useState<"여" | "남">("여");
   const [address, setAddress] = useState("");
   const [planType, setPlanType] = useState("basic");
+  const [ttsCallConsent, setTtsCallConsent] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +80,9 @@ export default function SignupPage() {
       role,
       name,
       phone,
-      ...(role === "guardian" ? { email, relationship } : { birthDate, address, planType, selfWardId }),
+      ...(role === "guardian"
+        ? { email, relationship }
+        : { birthDate, address, planType, selfWardId, ttsCallConsent }),
     });
 
     if ("error" in result) {
@@ -204,6 +210,22 @@ export default function SignupPage() {
                       <option value="premium">프리미엄</option>
                     </select>
                   </div>
+                  <label className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5">
+                    <Checkbox checked={ttsCallConsent} onCheckedChange={setTtsCallConsent} />
+                    <span className="text-sm text-foreground">
+                      안부확인콜(전화로 안부를 여쭤보는 서비스)에 동의해요{" "}
+                      <span className="text-muted-foreground">· 선택</span>
+                    </span>
+                  </label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => speakOnDemand(ttsCallConsentReadAloudText())}
+                  >
+                    <Volume2 />
+                    안부확인콜이 뭔지 들려주기
+                  </Button>
                 </>
               )}
               <div className="flex flex-col gap-1.5">
