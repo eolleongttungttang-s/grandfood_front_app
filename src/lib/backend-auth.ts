@@ -90,6 +90,13 @@ export function getBackendGuardianSessionForWard(mockWardId: string): BackendGua
   return backendGuardianSessionStore.read()[guardianLoginId] ?? null;
 }
 
+// 초대 동의 화면이 "이 보호자가 실제 백엔드 연동을 마쳤는지"를 네트워크 요청 없이 즉시
+// fail-fast로 확인할 때 쓴다 — 이 시점엔 아직 만들 ward 자체가 없어 getBackendGuardianSessionForWard
+// (mockWardId 기반)를 못 쓴다.
+export function hasBackendGuardianSession(guardianLoginId: string): boolean {
+  return guardianLoginId in backendGuardianSessionStore.read();
+}
+
 function saveGuardianSession(email: string, session: BackendGuardianSession) {
   backendGuardianSessionStore.update((prev) => ({ ...prev, [email]: session }));
 }
@@ -151,9 +158,9 @@ export async function loginGuardianBackend(
   }
 }
 
-// createBackendWard()와 ensureBackendWardId() 둘 다 결국 "로그인된 보호자 세션으로 POST /users"를
-// 한다 — 필드 구성(조건 포함 여부 등)만 다를 뿐 요청/에러 처리 로직 자체가 같아서 하나로 묶었다.
-// 예전엔 이 fetch 블록이 두 함수에 각각 따로 있어서, 한쪽만 고치고 다른 쪽을 놓치기 쉬웠다.
+// ensureBackendWardId()가 결국 하는 일은 "로그인된 보호자 세션으로 POST /users" 하나뿐이라
+// fetch/에러 처리를 별도 함수로 뺐다. (예전엔 초대 동의 화면에도 거의 같은 코드가 따로 있었는데,
+// 그쪽은 이제 실제 백엔드 유저를 안 만들도록 바뀌어서 이 함수 하나만 남았다 — consent-view.tsx 참고.)
 async function postNewBackendUser(params: {
   accessToken: string;
   name: string;
@@ -186,33 +193,6 @@ async function postNewBackendUser(params: {
   } catch {
     return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
   }
-}
-
-// POST /users — 초대에 동의하는 시점에, 그 초대를 발급한 보호자의 백엔드 세션으로
-// 완전히 새로운 어르신(User)을 만든다. ensureBackendWardId()와 달리 "이미 있는 목업
-// ward를 나중에 매핑"하는 게 아니라 여기서 처음 만들어지는 진짜 ward라, 캐시 조회 없이
-// 항상 POST하고 응답 user_id를 그대로 진짜 ward id로 쓴다. 이 시점엔 아직 로컬 ward id 자체가
-// 없어(이 호출의 결과가 곧 그 id) care-profile 설문을 조회할 방법이 없으므로 condition_flags는
-// 항상 비어서 나간다 — 설문은 이 다음 화면(/invite/survey)에서 이뤄진다.
-export async function createBackendWard(params: {
-  guardianLoginId: string;
-  name: string;
-  birthDate: string; // "YYYY-MM-DD"
-  phone: string;
-  address: string;
-}): Promise<{ userId: string } | { error: string }> {
-  const session = backendGuardianSessionStore.read()[params.guardianLoginId];
-  if (!session) {
-    return { error: "보호자가 아직 실제 계정 연동을 완료하지 않았어요. 보호자에게 문의해 주세요." };
-  }
-
-  return postNewBackendUser({
-    accessToken: session.accessToken,
-    name: params.name,
-    birthDate: params.birthDate,
-    phone: params.phone,
-    address: params.address,
-  });
 }
 
 // ensureBackendWardId()는 rag-chat.ts와 meal-log-store.ts 양쪽에서 부른다. 캐시가 아직 비어있는
