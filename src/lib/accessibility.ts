@@ -1,6 +1,8 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { API_BASE_URL } from "@/lib/api-config";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { createLocalStore } from "@/lib/local-store";
 
 export type AccessibilitySettings = {
@@ -50,10 +52,51 @@ export function useSpeakingCardId(): string | null {
   );
 }
 
-function speakRaw(text: string, cardId?: string) {
+// 지금 재생 중인 Azure 음성(Audio 엘리먼트)을 들고 있는다 — 브라우저 음성(speechSynthesis)은
+// window가 자체적으로 재생 상태를 들고 있어서 별도 추적이 필요 없지만, Audio는 우리가 직접
+// 참조를 갖고 있어야 다음 재생 시작 전에, 또는 stopSpeaking()에서 멈출 수 있다.
+let currentAzureAudio: HTMLAudioElement | null = null;
+// 백엔드가 준 오디오 바이트로 만든 임시 재생 URL(createObjectURL) — 브라우저 메모리에만
+// 존재하고 우리가 명시적으로 revokeObjectURL()로 해제해야 새는 걸 막을 수 있다. Blob
+// Storage를 거치지 않게 되면서 생긴 정리 대상.
+let currentObjectUrl: string | null = null;
+// 진행 중인 TTS 합성 요청을 취소할 수 있게 들고 있는다 — 새 카드를 연달아 탭하면 이전
+// 요청은 더 이상 필요 없으니 끊는다. 다만 백엔드가 이미 Azure Speech 변환을 시작한 뒤라면
+// 그 작업 자체는 서버에서 끝까지 진행된다(스레드 강제 중단 불가) — 아직 처리 시작 전인
+// 요청의 비용만 절약되는, 부분적인 최적화다.
+let currentAbortController: AbortController | null = null;
+
+// speakRaw가 네트워크 왕복(fetch)을 거치는 동안 다른 카드가 연달아 탭되거나 stopSpeaking()이
+// 불릴 수 있다 — 이 함수를 거칠 때마다 토큰을 올려서, 이미 나가있는 fetch가 나중에 응답을
+// 받아도 "그 사이 취소/대체됐다"는 걸 알고 재생을 포기하게 한다.
+let playbackToken = 0;
+
+function stopCurrentPlayback() {
+  playbackToken++;
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+  if (currentAzureAudio) {
+    // pause()는 ended/error 이벤트를 안 일으킨다 — 그 이벤트에 걸려있는 clearIfStillCurrent
+    // (speakingCardId 정리)가 안 불릴 수 있으므로, 여기서 직접 지운다. speechSynthesis는
+    // cancel()이 onerror를 안정적으로 발생시켜서 원래 문제없었지만 Audio는 그렇지 않다.
+    currentAzureAudio.pause();
+    currentAzureAudio = null;
+  }
+  setSpeakingCardId(null);
+  if (currentObjectUrl) {
+    URL.revokeObjectURL(currentObjectUrl);
+    currentObjectUrl = null;
+  }
+  if (currentAbortController) {
+    currentAbortController.abort();
+    currentAbortController = null;
+  }
+}
+
+function speakWithBrowserVoice(text: string, cardId?: string) {
   if (typeof window === "undefined") return;
   if (!("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "ko-KR";
   if (cardId) {
@@ -69,6 +112,76 @@ function speakRaw(text: string, cardId?: string) {
     utterance.onerror = clearIfStillCurrent;
   }
   window.speechSynthesis.speak(utterance);
+}
+
+// 카드 문구는 챗봇 답변(rag-chat.ts, 30초)보다 훨씬 짧아 정상적으로는 금방 끝난다 — 그보다
+// 짧게 잡아서, 응답이 안 오는 상황(백엔드 다운 등)에서 어르신이 카드를 눌러도 아무 반응 없이
+// 오래 멈춰있는 시간을 줄인다.
+const TTS_REQUEST_TIMEOUT_MS = 10_000;
+
+// 백엔드 Azure Speech 엔드포인트로 음성을 합성해 재생한다. 실패(백엔드 다운, Azure 설정
+// 누락, 타임아웃 등)하면 지금까지 쓰던 브라우저 내장 음성으로 폴백한다 — 이 함수 하나만
+// 이렇게 바꾸면 speak/speakOnDemand/speakCard 등 호출부는 손댈 필요 없다.
+async function speakRaw(text: string, cardId?: string) {
+  if (typeof window === "undefined") return;
+  stopCurrentPlayback();
+  const myToken = playbackToken; // stopCurrentPlayback()이 이미 올려둔 값 = 이 호출의 신분증
+
+  const { promise, controller, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/health/tts/synthesize`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    },
+    TTS_REQUEST_TIMEOUT_MS
+  );
+  // fetch가 끝나기 전부터(await 전에) 바로 잡아둔다 — 그래야 이 fetch가 진행되는 동안 다른
+  // 카드가 탭돼도 stopCurrentPlayback()이 이 요청을 바로 취소할 수 있다.
+  currentAbortController = controller;
+
+  try {
+    let audioBlob: Blob;
+    try {
+      const response = await promise;
+      if (!response.ok) throw new Error(`TTS 합성 실패 (${response.status})`);
+      // 타임아웃을 이 바디 다운로드가 끝날 때까지 살려둔다 — 헤더는 빨리 왔는데 바디
+      // 스트리밍이 멈추는 경우도 커버해야 한다.
+      audioBlob = await response.blob();
+    } finally {
+      clearRequestTimeout();
+    }
+    if (myToken !== playbackToken) return; // 그 사이 더 최신 요청이 들어옴 — 이 응답은 버림
+
+    const objectUrl = URL.createObjectURL(audioBlob);
+    currentObjectUrl = objectUrl;
+    const audio = new Audio(objectUrl);
+    currentAzureAudio = audio;
+    // 재생이 끝나거나(정상/에러 모두) object URL을 해제한다. currentObjectUrl이 그 사이 다른
+    // 재생으로 이미 바뀌었다면(stopCurrentPlayback에서 이미 revoke됐을 것) 자기 것일 때만
+    // 지워서 중복 해제를 피한다.
+    const revokeIfStillCurrent = () => {
+      if (currentObjectUrl === objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        currentObjectUrl = null;
+      }
+    };
+    audio.addEventListener("ended", revokeIfStillCurrent);
+    audio.addEventListener("error", revokeIfStillCurrent);
+    if (cardId) {
+      const clearIfStillCurrent = () => {
+        if (speakingCardId === cardId) setSpeakingCardId(null);
+      };
+      audio.onplay = () => setSpeakingCardId(cardId);
+      audio.onended = clearIfStillCurrent;
+      audio.onerror = clearIfStillCurrent;
+    }
+    await audio.play();
+  } catch {
+    if (myToken !== playbackToken) return;
+    // 백엔드/Azure 실패 시 브라우저 음성으로 폴백
+    speakWithBrowserVoice(text, cardId);
+  }
 }
 
 export function speak(text: string) {
@@ -88,11 +201,21 @@ export function speakCard(id: string, text: string) {
   speakRaw(text, id);
 }
 
+// SOS 확인 음성처럼 "즉시 들려야" 하는 안내 전용 — speak()/speakOnDemand()와 달리 Azure
+// 네트워크 TTS를 아예 시도하지 않고 브라우저 내장 음성으로 곧바로 재생한다. speakRaw()로
+// 통일하면서 카드 읽어주기 등은 더 자연스러운 Azure 목소리를 우선 쓰게 됐는데, 그 대가로
+// 응답이 없으면 최대 TTS_REQUEST_TIMEOUT_MS(10초)까지 무음일 수 있다 — 응급 상황일수록
+// 네트워크가 불안정하기 쉬운 상황에서 안내가 늦게 나가는 건 받아들일 수 없어서 이 경로는
+// 분리한다.
+export function speakUrgent(text: string) {
+  if (typeof window === "undefined") return;
+  stopCurrentPlayback();
+  speakWithBrowserVoice(text);
+}
+
 // 재생 중이던 카드를 직접 멈출 때(같은 카드 재탭 토글) 쓴다.
 export function stopSpeaking() {
-  if (typeof window !== "undefined" && "speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
-  }
+  stopCurrentPlayback();
   setSpeakingCardId(null);
 }
 

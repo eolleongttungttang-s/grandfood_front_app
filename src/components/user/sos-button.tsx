@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 import { ConfirmOverlay } from "@/components/app/confirm-overlay";
 import { raiseSos } from "@/lib/sos-store";
-import { speak } from "@/lib/accessibility";
+import { speakUrgent } from "@/lib/accessibility";
 
 export function SosButton({ wardId, wardName }: { wardId: string; wardName: string }) {
   const [open, setOpen] = useState(false);
@@ -32,7 +32,8 @@ export function SosButton({ wardId, wardName }: { wardId: string; wardName: stri
           raiseSos(wardId, wardName);
           setOpen(false);
           toast.success("보호자에게 SOS를 보냈어요.");
-          speak("보호자에게 에스오에스를 보냈어요.");
+          // 응급 확인 안내라 네트워크 TTS를 기다리지 않고 즉시 재생한다 (speakUrgent 참고).
+          speakUrgent("보호자에게 에스오에스를 보냈어요.");
         }}
         onCancel={() => setOpen(false)}
       />
