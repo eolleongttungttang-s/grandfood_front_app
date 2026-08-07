@@ -60,6 +60,18 @@ export function SpeakableCard({
       tabIndex={0}
       onClick={handleTap}
       onKeyDown={(e) => {
+        // 안쪽 실제 버튼(다 먹었어요/이거 싫어요 등)에서 Enter·Space를 누르면 keydown이
+        // 이 div까지 버블링돼서 handleTap()이 중복 실행되는 문제가 있었다(카드 TTS가
+        // 방금 누른 버튼과 동시에 읽힘). target === currentTarget일 때만, 즉 카드 자신이
+        // 포커스를 받은 상태에서 눌렸을 때만 반응하도록 해서 막는다.
+        //
+        // 버튼마다 onKeyDown에 stopPropagation()을 넣는 방식으로 "완전히" 막지는 않는다 —
+        // 그러면 (1) 실수로 preventDefault()까지 같이 넣을 경우 버튼의 네이티브 Enter→click
+        // 합성 자체가 취소돼 키보드로 버튼이 아예 안 눌리는 회귀가 생기고, (2) Enter/Space로
+        // 범위를 좁히지 않으면 Tab/Escape 등 다른 키의 버블링까지 막혀 나중에 상위에 추가될
+        // 키보드 기능(예: Escape로 닫기)이 이 카드 안에서만 조용히 안 먹는 버그가 생기고,
+        // (3) 버튼이 늘어날 때마다 매번 이 패치를 빼먹지 않아야 하는 유지보수 부담이 생긴다.
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           handleTap();
