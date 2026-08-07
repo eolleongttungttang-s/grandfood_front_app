@@ -6,6 +6,7 @@
 
 import { API_BASE_URL } from "@/lib/api-config";
 import { ensureBackendWardId, getBackendGuardianSessionForWard } from "@/lib/backend-auth";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
 export type HealthAnswer = {
   answer: string;
@@ -47,12 +48,9 @@ export async function askHealthQuestion(params: {
     throw new Error(GUARDIAN_SESSION_REQUIRED_MESSAGE);
   }
 
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), REQUEST_TIMEOUT_MS);
-
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}/rag/users/${backendUserId}/ask`, {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/rag/users/${backendUserId}/ask`,
+    {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -60,21 +58,28 @@ export async function askHealthQuestion(params: {
       },
       // with_audio는 지금은 안 씀 — 백엔드 TTS 연동은 별도로 진행 예정.
       body: JSON.stringify({ query: params.query, with_audio: false }),
-      signal: timeoutController.signal,
-    });
+    },
+    REQUEST_TIMEOUT_MS
+  );
+
+  let data: { answer: string; sources?: string[]; matched_conditions?: string[] };
+  try {
+    const response = await promise;
+    if (!response.ok) {
+      throw new Error(`AI 도우미 응답 요청이 실패했어요 (status ${response.status})`);
+    }
+    // 타임아웃을 이 응답 본문을 다 읽을 때까지 살려둔다 — 헤더는 빨리 왔는데 본문
+    // 스트리밍이 멈추는 경우도 커버해야 한다.
+    data = await response.json();
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new Error("AI 도우미 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.");
     }
     throw err;
   } finally {
-    clearTimeout(timeoutId);
-  }
-  if (!response.ok) {
-    throw new Error(`AI 도우미 응답 요청이 실패했어요 (status ${response.status})`);
+    clearRequestTimeout();
   }
 
-  const data = await response.json();
   return {
     answer: data.answer,
     sources: data.sources ?? [],
