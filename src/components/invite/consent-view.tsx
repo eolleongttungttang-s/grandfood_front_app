@@ -10,7 +10,7 @@ import { linkWardToGuardian, registerAccount } from "@/lib/auth";
 import { InviteFormState, submitInviteConsent, submitInviteDecline } from "@/lib/invite";
 import { consumeWardInvite } from "@/lib/ward-invite";
 import { addWard, createSelfWard } from "@/lib/wards";
-import { createBackendWard } from "@/lib/backend-auth";
+import { hasBackendGuardianSession } from "@/lib/backend-auth";
 import { speakOnDemand } from "@/lib/accessibility";
 import { useSession } from "@/lib/session";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -29,7 +29,7 @@ function readAloudText(guardianName: string) {
   );
 }
 
-function ttsCallConsentReadAloudText() {
+export function ttsCallConsentReadAloudText() {
   return (
     "정해진 시각에 전화로 안부를 여쭤보는 안부확인콜 서비스예요. " +
     "동의하지 않으셔도 도시락 배송이나 식사 기록 같은 다른 서비스는 그대로 이용하실 수 있어요. " +
@@ -83,22 +83,21 @@ export function ConsentView({
 
       const address = `${form.address} ${form.addressDetail}`.trim();
 
-      // 실제 백엔드(grandfood_backend)엔 초대 개념이 없다 — 이 초대를 발급한 보호자의
-      // 실제 세션으로 POST /users를 호출해야 진짜 ward가 생긴다. 실패하면 로컬에만
-      // 존재하는 "가짜로 연결된" ward를 만들지 않고 여기서 바로 멈춘다.
-      const wardResult = await createBackendWard({
-        guardianLoginId,
-        name: form.elderName,
-        birthDate,
-        phone: form.elderPhone,
-        address,
-      });
-      if ("error" in wardResult) {
-        setError(wardResult.error);
+      // 예전엔 여기서 바로 POST /users(createBackendWard)를 호출해 진짜 백엔드 ward를 만들었다.
+      // 문제는 이 시점엔 아직 다음 화면(/invite/survey)의 질환 설문 전이라 condition_flags가
+      // 항상 비어서 나갈 수밖에 없고, 백엔드엔 나중에 조건을 업데이트하는 API가 없어서 한번
+      // 이렇게 만들어지면 그 어르신은 영영 RAG 개인화 대상에서 빠진다. 그래서 실제 백엔드 유저
+      // 생성은 여기서 안 하고, ensureBackendWardId()(rag-chat.ts/meal-log-store.ts가 이미 쓰고
+      // 있음)가 처음 필요해질 때(설문을 끝낸 뒤 첫 RAG 질문/사진 업로드) 딱 한 번만 만들도록
+      // 미룬다 — 그때는 설문이 끝나있어서 조건이 같이 실린다. "보호자 연동이 안 되어 있으면
+      // 여기서 바로 막는다"는 원래 목적은, 실제로 유저를 만들지 않고 세션 존재 여부만 로컬에서
+      // 확인하는 것으로 그대로 유지한다.
+      if (!hasBackendGuardianSession(guardianLoginId)) {
+        setError("보호자가 아직 실제 계정 연동을 완료하지 않았어요. 보호자에게 문의해 주세요.");
         return;
       }
 
-      const newWard = createSelfWard({ id: wardResult.userId, name: form.elderName, birthDate, gender, address });
+      const newWard = createSelfWard({ id: crypto.randomUUID(), name: form.elderName, birthDate, gender, address });
       addWard(newWard);
 
       const result = registerAccount({
@@ -124,7 +123,7 @@ export function ConsentView({
       linkWardToGuardian(guardianLoginId, newWard.id);
 
       // 가입이 완전히 끝난 뒤에 지운다 — 같은 링크로 다시 들어와도 더는 유효한 초대를
-      // 못 찾게 해서, 재방문 시 POST /users가 중복 호출되는 걸 막는다.
+      // 못 찾게 해서, 재방문 시 같은 어르신 앞으로 로컬 계정/ward가 중복 생성되는 걸 막는다.
       consumeWardInvite(code);
 
       login(result.account.loginId, generatedPassword);

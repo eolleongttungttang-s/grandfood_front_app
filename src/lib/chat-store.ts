@@ -16,6 +16,10 @@ export function nutritionistThreadId(wardId: string) {
   return `nutritionist:${wardId}`;
 }
 
+export function assistantThreadId(wardId: string) {
+  return `assistant:${wardId}`;
+}
+
 export function familyThreadId(wardId: string) {
   return `family:${wardId}`;
 }
