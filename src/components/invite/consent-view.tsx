@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { TopBar } from "@/components/app/top-bar";
+import { BirthDateSelect } from "@/components/app/birth-date-select";
 
 function readAloudText(guardianName: string) {
   return (
@@ -212,14 +213,8 @@ export function ConsentView({
             </p>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="consent-birth-date">생년월일</Label>
-            <Input
-              id="consent-birth-date"
-              type="date"
-              value={birthDate}
-              onChange={(e) => setBirthDate(e.target.value)}
-              autoComplete="bday"
-            />
+            <Label htmlFor="consent-birth-date-year">생년월일</Label>
+            <BirthDateSelect idPrefix="consent-birth-date" value={birthDate} onChange={setBirthDate} />
           </div>
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">성별</span>

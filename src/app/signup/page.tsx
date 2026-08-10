@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BirthDateSelect } from "@/components/app/birth-date-select";
 import { UserRole, registerAccount } from "@/lib/auth";
 import { registerGuardianBackend } from "@/lib/backend-auth";
 import { speakOnDemand } from "@/lib/accessibility";
@@ -175,8 +176,8 @@ export default function SignupPage() {
               ) : (
                 <>
                   <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="signup-birth-date">생년월일</Label>
-                    <Input id="signup-birth-date" type="date" value={birthDate} onChange={(event) => setBirthDate(event.target.value)} autoComplete="bday" required />
+                    <Label htmlFor="signup-birth-date-year">생년월일</Label>
+                    <BirthDateSelect idPrefix="signup-birth-date" value={birthDate} onChange={setBirthDate} />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <Label>성별</Label>
