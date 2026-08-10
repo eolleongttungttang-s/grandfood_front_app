@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ChevronRight,
   Mic,
@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
-import { USER_NOTIFICATIONS, notificationBadgeClass } from "@/lib/notifications";
+import { NotificationItem, fetchElderNotifications, notificationBadgeClass } from "@/lib/notifications";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
@@ -38,6 +38,33 @@ export function HomeView({
   const mealCheck = useLocalStore(quickMealCheckStore)[ward.id] ?? null;
   const [listening, setListening] = useState(false);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
+
+  // null이면 아직 응답 안 옴(로딩 중), 배열이면 로딩 완료(비어있어도) — notifications-view.tsx와
+  // 같은 패턴. 이렇게 구분해야 로딩/에러 중에 "안내 사항 없음"으로 잘못 안내하지 않는다.
+  const [notifications, setNotifications] = useState<NotificationItem[] | null>(null);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchElderNotifications({
+      mockWardId: ward.id,
+      wardName: ward.name,
+      wardAge: ward.age,
+      wardAddress: ward.address,
+    })
+      .then((result) => {
+        if (!cancelled) setNotifications(result);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setNotificationsError(err instanceof Error ? err.message : "안내 사항을 불러오지 못했어요.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ward.id, ward.name, ward.age, ward.address]);
+
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   const recommendedComboSpeech = `오늘의 추천 반찬 조합이에요. ${partnerStore?.name ?? "담당 반찬가게"}에서 준비했어요. ${detail.recommendedCombo.items
     .map((item) => (dislikes.includes(item.dishId) ? `${item.name}, 기피 표시됨` : item.name))
@@ -50,9 +77,16 @@ export function HomeView({
   // 아이콘이 문장 끝과 겹친다. 이 카드는 원래도 맨 앞에 이모지(💬)가 있으니, 그 자리를 스피커
   // 아이콘으로 "교체"하는 variant="leading"을 쓴다 — 카드 높이/줄바꿈에 영향 없음.
   const nutritionTipSpeech = `영양 팁이에요. ${getNutritionTip(detail)}`;
-  const notificationsSpeech = `안내 사항이에요. ${USER_NOTIFICATIONS.slice(0, 3)
-    .map((n) => n.message)
-    .join(". ")}`;
+  const notificationsSpeech = notificationsError
+    ? "안내 사항이에요. 지금은 불러올 수 없어요."
+    : notifications === null
+      ? "안내 사항이에요. 아직 불러오는 중이에요."
+      : notifications.length > 0
+        ? `안내 사항이에요. ${notifications
+            .slice(0, 3)
+            .map((n) => n.message)
+            .join(". ")}`
+        : "안내 사항이에요. 아직 새로운 안내 사항이 없어요.";
 
   function checkMeal(status: "완식" | "남김") {
     setQuickMealCheck(ward.id, status);
@@ -246,7 +280,16 @@ export function HomeView({
           className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
           <span className="text-xs font-bold text-foreground">안내 사항</span>
-          {USER_NOTIFICATIONS.slice(0, 3).map((n) => (
+          {notificationsError && (
+            <span className="text-xs text-muted-foreground">{notificationsError}</span>
+          )}
+          {!notificationsError && notifications === null && (
+            <span className="text-xs text-muted-foreground">불러오는 중이에요...</span>
+          )}
+          {!notificationsError && notifications !== null && notifications.length === 0 && (
+            <span className="text-xs text-muted-foreground">아직 안내 사항이 없어요.</span>
+          )}
+          {(notifications ?? []).slice(0, 3).map((n) => (
             <div key={n.id} className="flex items-start gap-2.5 text-sm">
               <Badge className={`${notificationBadgeClass(n.type)} shrink-0`}>
                 {n.type}

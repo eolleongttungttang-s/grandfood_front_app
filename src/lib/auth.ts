@@ -132,6 +132,52 @@ export function getAccounts(): Account[] {
   });
 }
 
+// 이 브라우저엔 로컬 계정이 없지만(다른 기기에서 가입했거나 저장소가 지워짐) 실제 백엔드
+// 로그인엔 성공한 보호자를 위해, 이 기기에도 로컬 계정을 만들어준다 — login/page.tsx의
+// 크로스디바이스 폴백 로그인에서만 쓴다. 이미 있으면 아무것도 안 한다(이 경로를 타는 건
+// 애초에 findAccountByLoginId가 실패했을 때뿐이라 보통 없겠지만, 방어적으로 확인).
+//
+// wardIds는 빈 배열로 시작한다 — 이 보호자가 실제로 관리하는 대상자 목록은 로컬 저장소에만
+// 있는 정보라(초대 동의 시 linkWardToGuardian으로 기록됨), 백엔드엔 "내 대상자 목록 조회"
+// API가 없어서 여기서 복구할 방법이 없다. 로그인은 되지만 보호자 홈이 빈 상태로 시작하는
+// 것까진 이번 수정의 범위 밖(백엔드에 대상자 목록 API가 생기면 그때 채울 수 있다).
+export function ensureLocalGuardianAccount(params: {
+  loginId: string;
+  password: string;
+  name: string;
+  phone: string;
+  relationship: string;
+}): void {
+  const existing = findAccountByLoginId(params.loginId);
+  if (existing) {
+    // 로컬에 남은 비밀번호가 방금 백엔드 로그인에 성공한 비밀번호와 다르면(다른 기기에서
+    // 비밀번호를 바꾼 경우 등) 여기서 갱신 안 해두면, 이후 login()은 계속 옛 로컬 비밀번호와만
+    // 비교해서 정확한 비밀번호를 넣어도 로컬 로그인이 영구히 실패한다. wardIds 등 로컬에만
+    // 있는 다른 정보는 덮어쓰지 않고 비밀번호만 최신화한다.
+    if (existing.password !== params.password) {
+      writeRegisteredAccounts(
+        readRegisteredAccounts().map((account) =>
+          account.loginId === params.loginId ? { ...account, password: params.password } : account
+        )
+      );
+    }
+    return;
+  }
+
+  const account: Account = {
+    loginId: params.loginId,
+    password: params.password,
+    role: "guardian",
+    org: "가족 · 보호자",
+    name: params.name,
+    phone: params.phone,
+    email: params.loginId,
+    relationship: params.relationship,
+    wardIds: [],
+  };
+  writeRegisteredAccounts([...readRegisteredAccounts(), account]);
+}
+
 export function findAccountByLoginId(loginId: string): Account | null {
   return getAccounts().find((account) => account.loginId === loginId) ?? null;
 }

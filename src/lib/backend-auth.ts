@@ -15,6 +15,10 @@ import { createLocalStore } from "@/lib/local-store";
 import { API_BASE_URL } from "@/lib/api-config";
 import { getAccounts } from "@/lib/auth";
 import { CONDITION_POOL, getCareProfile } from "@/lib/care-profile";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+
+// notifications.ts와 같은 이유로 인증 관련 요청도 무한정 매달리지 않게 상한을 둔다.
+const REQUEST_TIMEOUT_MS = 15_000;
 
 // 설문(care-profile.ts CONDITION_POOL)의 한국어 질환명 -> 백엔드 ConditionFlag(영문 enum) 매핑.
 // 키 타입을 `(typeof CONDITION_POOL)[number]`로 못박아서, 나중에 CONDITION_POOL에 새 질환이
@@ -49,6 +53,21 @@ export type BackendGuardianSession = {
 // 보호자 이메일(=로컬 계정의 loginId) -> 실제 백엔드 세션.
 export const backendGuardianSessionStore = createLocalStore<Record<string, BackendGuardianSession>>(
   "grandfood-app-backend-guardian-sessions",
+  {}
+);
+
+export type BackendUserSession = {
+  accessToken: string;
+  userId: string;
+  name: string;
+};
+
+// 이용자(어르신 본인 직접가입, guardian_id 없는 B2C 계정) loginId -> 실제 백엔드 세션.
+// 보호자 세션 맵과 분리해두는 이유도 동일하다 — 이용자 로그인 아이디와 보호자 이메일은
+// 애초에 겹칠 일이 없지만(auth.ts에서 로그인 아이디 형식이 서로 다름), 개념적으로도
+// "누구의 토큰인지"를 role별로 분리해두는 게 backendWardIdMapStore와의 혼동을 막는다.
+export const backendUserSessionStore = createLocalStore<Record<string, BackendUserSession>>(
+  "grandfood-app-backend-user-sessions",
   {}
 );
 
@@ -99,6 +118,10 @@ export function hasBackendGuardianSession(guardianLoginId: string): boolean {
 
 function saveGuardianSession(email: string, session: BackendGuardianSession) {
   backendGuardianSessionStore.update((prev) => ({ ...prev, [email]: session }));
+}
+
+function saveUserSession(loginId: string, session: BackendUserSession) {
+  backendUserSessionStore.update((prev) => ({ ...prev, [loginId]: session }));
 }
 
 // POST /auth/guardians/register — 보호자 회원가입 + 로그인 토큰 발급을 한 번에 처리한다.
@@ -155,6 +178,125 @@ export async function loginGuardianBackend(
     return { session };
   } catch {
     return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  }
+}
+
+// GET /auth/me — 로그인 성공 직후엔 알 수 없는 보호자 본인 프로필(phone/relationship)을
+// 채워야 할 때 쓴다. login/page.tsx의 크로스디바이스 폴백 로그인(이 기기엔 로컬 계정이 없지만
+// 실제 백엔드엔 있는 경우) 이후 로컬 계정을 만들 때가 유일한 용례.
+export async function fetchGuardianProfile(
+  accessToken: string
+): Promise<{ phone: string; relationship: string } | { error: string }> {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/auth/me`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) {
+      return { error: await parseErrorResponse(response) };
+    }
+    const data = await response.json();
+    return { phone: data.phone, relationship: data.relationship };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return { error: "서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요." };
+    }
+    return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
+// POST /auth/users/register — 어르신 본인 자가등록(B2C, guardian_id 없음). 보호자 초대
+// 경로(consent-view.tsx)와는 별개다 — 그쪽은 나중에 ensureBackendWardId()가 보호자 토큰으로
+// guardian_id 있는 POST /users를 호출해 만들기 때문에, 여기서도 같은 어르신을 또 만들면
+// 백엔드에 guardian_id 없는 고아 레코드가 중복 생성된다. 이 함수는 signup/page.tsx의
+// "이용자 본인" 직접가입(보호자 없음)에서만 호출해야 한다.
+export async function registerUserBackend(input: {
+  loginId: string;
+  password: string;
+  name: string;
+  birthDate: string; // "YYYY-MM-DD"
+  phone: string;
+  address: string;
+  planType: string;
+}): Promise<{ session: BackendUserSession } | { error: string }> {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/auth/users/register`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        login_id: input.loginId,
+        password: input.password,
+        name: input.name,
+        birth_date: input.birthDate,
+        phone: input.phone,
+        address: input.address,
+        plan_type: input.planType,
+      }),
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) {
+      return { error: await parseErrorResponse(response) };
+    }
+    const data = await response.json();
+    const session: BackendUserSession = {
+      accessToken: data.access_token,
+      userId: data.user_id,
+      name: data.name,
+    };
+    saveUserSession(input.loginId, session);
+    return { session };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return { error: "서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요." };
+    }
+    return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
+// POST /auth/users/login
+export async function loginUserBackend(
+  loginId: string,
+  password: string
+): Promise<{ session: BackendUserSession } | { error: string }> {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/auth/users/login`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login_id: loginId, password }),
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) {
+      return { error: await parseErrorResponse(response) };
+    }
+    const data = await response.json();
+    const session: BackendUserSession = {
+      accessToken: data.access_token,
+      userId: data.user_id,
+      name: data.name,
+    };
+    saveUserSession(loginId, session);
+    return { session };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return { error: "서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요." };
+    }
+    return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  } finally {
+    clearRequestTimeout();
   }
 }
 

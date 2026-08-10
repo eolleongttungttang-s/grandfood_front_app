@@ -1,8 +1,20 @@
-// B2G 버전엔 "검진"(국가검진 결과 반영)/"방문"(사회복지사 방문) 타입이 있었는데,
-// B2C 모델엔 그 주체(국가/사회복지사)가 없어져서 대응되는 알림도 사라진다.
-// 대신 배송/구독처럼 파트너 매장 관련 알림과, 이번에 새로 생긴 기능(레시피 추천,
-// 잔반 이상 감지)에 대응하는 타입을 추가했다.
-export type NotificationType = "SOS" | "미응답" | "배송" | "구독" | "레시피추천" | "잔반이상" | "식단변경" | "공지";
+// 실제 grandfood_backend에 알림 목록을 연결한다: 보호자용 GET /app/guardian/notifications,
+// 어르신용 GET /app/elder/{id}/notifications. 두 엔드포인트 다 "이상신호"(health_alert)와
+// "안부확인콜"(tts_call) 두 종류만 합성해서 준다 — 이전 mock에 있던 배송/구독/식단변경/공지는
+// 대응하는 백엔드 테이블 자체가 없어서(범용 공지사항 테이블 없음, meal/service.py 주석 참고)
+// 실제 연동에는 포함될 수 없다.
+import { API_BASE_URL } from "@/lib/api-config";
+import {
+  backendGuardianSessionStore,
+  ensureBackendWardId,
+  getBackendGuardianSessionForWard,
+} from "@/lib/backend-auth";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+
+// "기타"는 백엔드가 지금 두 alert_type(excessive_leftover/nutrition_deficiency) 외의 값을 보내는
+// 경우를 위한 폴백이다 — splitHealthAlertSummary() 참고. 모르는 타입을 그냥 "영양부족"으로
+// 단정하면 실제와 다른 구체적인 건강 정보를 보호자에게 잘못 전달하게 된다.
+export type NotificationType = "SOS" | "잔반이상" | "영양부족" | "안부확인콜" | "기타";
 
 export type NotificationItem = {
   id: string;
@@ -15,89 +27,160 @@ export type NotificationItem = {
 
 const TYPE_STYLE: Record<NotificationType, string> = {
   SOS: "bg-destructive text-white",
-  미응답: "bg-risk-high text-risk-high-foreground",
   잔반이상: "bg-risk-high text-risk-high-foreground",
-  배송: "bg-secondary text-secondary-foreground",
-  구독: "bg-secondary text-secondary-foreground",
-  레시피추천: "bg-risk-normal text-risk-normal-foreground",
-  식단변경: "bg-risk-caution text-risk-caution-foreground",
-  공지: "bg-muted text-muted-foreground",
+  영양부족: "bg-risk-caution text-risk-caution-foreground",
+  안부확인콜: "bg-secondary text-secondary-foreground",
+  기타: "bg-muted text-muted-foreground",
 };
 
 export function notificationBadgeClass(type: NotificationType) {
   return TYPE_STYLE[type];
 }
 
-export const GUARDIAN_NOTIFICATIONS: NotificationItem[] = [
-  {
-    id: "n1",
-    date: "07.27 09:10",
-    type: "미응답",
-    targetName: "박순자",
-    message: "3일째 식사 확인 응답이 없어요. 안부를 확인해 주세요.",
-    read: false,
-  },
-  {
-    id: "n2",
-    date: "07.26 18:40",
-    type: "미응답",
-    targetName: "한상옥",
-    message: "4일째 미응답이라 담당 반찬가게에서 안부 확인 연락을 드릴 예정이에요.",
-    read: false,
-  },
-  {
-    id: "n3",
-    date: "07.25 11:20",
-    type: "잔반이상",
-    targetName: "윤태식",
-    message: "최근 3일간 나트륨이 많은 반찬의 잔반율이 높아요. 건강 리포트를 확인해 주세요.",
-    read: true,
-  },
-  {
-    id: "n4",
-    date: "07.22 09:00",
-    type: "레시피추천",
-    targetName: "박순자",
-    message: "단백질 부족이 감지돼 두부 활용 레시피를 추천해드려요.",
-    read: true,
-  },
-  {
-    id: "n5",
-    date: "07.20 14:00",
-    type: "식단변경",
-    targetName: "윤태식",
-    message: "수분 · 나트륨 제한을 위해 저염 반찬 조합으로 변경됐어요.",
-    read: true,
-  },
-  {
-    id: "n6",
-    date: "07.15 10:00",
-    type: "공지",
-    message: "8월 배송 일정 안내: 광복절(8/15)은 배송이 없어요.",
-    read: true,
-  },
-];
+// AI 도우미(rag-chat.ts)와 같은 이유로 요청이 무한정 매달리지 않게 상한을 둔다.
+const REQUEST_TIMEOUT_MS = 15_000;
 
-export const USER_NOTIFICATIONS: NotificationItem[] = [
-  {
-    id: "u1",
-    date: "07.26 18:00",
-    type: "배송",
-    message: "7월 28일 반찬 배송이 예정되어 있어요.",
-    read: false,
-  },
-  {
-    id: "u2",
-    date: "07.22 09:00",
-    type: "레시피추천",
-    message: "단백질이 부족해 두부 활용 레시피를 추천해드려요.",
-    read: false,
-  },
-  {
-    id: "u3",
-    date: "07.15 10:00",
-    type: "공지",
-    message: "8월 배송 일정 안내: 광복절(8/15)은 배송이 없어요.",
-    read: true,
-  },
-];
+const GUARDIAN_SESSION_REQUIRED_MESSAGE = "실제 백엔드 계정으로 로그인해야 알림을 불러올 수 있어요.";
+const WARD_GUARDIAN_SESSION_REQUIRED_MESSAGE =
+  "이 대상자를 관리하는 보호자 계정으로 로그인해야 알림을 불러올 수 있어요.";
+
+// 백엔드 GuardianNotificationItem / ElderNotificationItem 응답 모양 (snake_case 그대로,
+// 별도 camelCase 변환 없음 — meal/schemas.py 참고). elder_id/elder_name은 보호자용 응답에만 있다.
+type BackendNotificationItem = {
+  type: string; // "health_alert" | "tts_call"
+  elder_id?: string;
+  elder_name?: string | null;
+  occurred_at: string;
+  summary: string;
+  status: string;
+};
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function formatOccurredAt(iso: string): string {
+  const d = new Date(iso);
+  return `${pad(d.getMonth() + 1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// health_alert의 summary는 백엔드가 "excessive_leftover (high) — 잔반율 80%로 기준(70%) 초과"처럼
+// 영문 alert_type + 한글 사유를 한 문자열로 합쳐서 보낸다(구조화된 필드로는 안 옴, meal/service.py
+// get_guardian_notifications 참고) — 배지 종류와 "— " 뒤 사유 문장을 여기서 다시 갈라낸다.
+// 백엔드가 그 포맷을 바꾸면 이 파싱도 같이 깨질 수 있는 약한 결합이지만, 지금은 이 문자열이
+// 유일한 정보 출처라 다른 방법이 없다.
+// alert_type이 정확히 이 두 값 중 하나로 시작할 때만 구체적인 종류를 단정한다(백엔드
+// alerts_service.py의 AlertType enum과 맞춤) — 그 외(장차 세 번째 타입이 추가되는 경우 등)는
+// "기타"로 남겨서, 모르는 걸 아는 것처럼 잘못 라벨링하지 않는다.
+function splitHealthAlertSummary(
+  summary: string
+): { badgeType: "잔반이상" | "영양부족" | "기타"; reason?: string } {
+  const separatorIndex = summary.indexOf(" — ");
+  const reason = separatorIndex === -1 ? undefined : summary.slice(separatorIndex + 3);
+  if (summary.startsWith("excessive_leftover")) return { badgeType: "잔반이상", reason };
+  if (summary.startsWith("nutrition_deficiency")) return { badgeType: "영양부족", reason };
+  return { badgeType: "기타", reason };
+}
+
+const HEALTH_ALERT_LEAD: Record<"잔반이상" | "영양부족" | "기타", string> = {
+  잔반이상: "잔반이 많이 남았어요.",
+  영양부족: "최근 영양 섭취가 부족해요.",
+  기타: "확인이 필요한 이상신호가 있어요.",
+};
+
+const TTS_CALL_STATUS_LABEL: Record<string, string> = {
+  pending: "예정 · 아직 응답 없음",
+  answered: "응답 완료",
+  no_answer: "응답 없음",
+};
+
+function mapBackendItem(item: BackendNotificationItem, id: string): NotificationItem {
+  const date = formatOccurredAt(item.occurred_at);
+  const targetName = item.elder_name ?? undefined;
+
+  if (item.type === "health_alert") {
+    const { badgeType, reason } = splitHealthAlertSummary(item.summary);
+    return {
+      id,
+      date,
+      type: badgeType,
+      targetName,
+      message: reason ? `${HEALTH_ALERT_LEAD[badgeType]} ${reason}` : HEALTH_ALERT_LEAD[badgeType],
+      read: item.status === "resolved",
+    };
+  }
+
+  return {
+    id,
+    date,
+    type: "안부확인콜",
+    targetName,
+    message: `안부확인 콜: ${TTS_CALL_STATUS_LABEL[item.status] ?? item.status}`,
+    read: item.status !== "pending",
+  };
+}
+
+async function fetchNotificationItems(url: string, accessToken: string): Promise<NotificationItem[]> {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    url,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) {
+      throw new Error(`알림을 불러오지 못했어요 (status ${response.status})`);
+    }
+    const data: { items: BackendNotificationItem[] } = await response.json();
+    return data.items.map((item, index) => mapBackendItem(item, `${item.type}-${item.occurred_at}-${index}`));
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("알림을 불러오는 데 시간이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.");
+    }
+    throw err;
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
+// GET /app/guardian/notifications — 로그인한 보호자 본인의 모든 대상자 알림.
+// 보호자 자신의 백엔드 세션을 그대로 쓴다(대상자별 세션 조회인 getBackendGuardianSessionForWard와
+// 달리, 여기선 지금 로그인한 보호자 계정 자체의 토큰이 필요하다).
+export async function fetchGuardianNotifications(guardianLoginId: string): Promise<NotificationItem[]> {
+  const session = backendGuardianSessionStore.read()[guardianLoginId];
+  if (!session) {
+    throw new Error(GUARDIAN_SESSION_REQUIRED_MESSAGE);
+  }
+  return fetchNotificationItems(`${API_BASE_URL}/app/guardian/notifications`, session.accessToken);
+}
+
+// GET /app/elder/{id}/notifications — 어르신 본인 화면(홈)에서 본인 알림만.
+// 어르신 전용 로그인이 없어서(project-self-signup-ward-no-guardian-link 참고) rag-chat.ts의
+// askHealthQuestion()과 동일한 패턴으로, 이 대상자를 관리하는 보호자의 실제 백엔드 세션을 빌려 쓴다.
+// 보호자 없이 직접가입한 이용자는 구조적으로 이 호출이 항상 실패한다 — 알려진 한계.
+export async function fetchElderNotifications(params: {
+  mockWardId: string;
+  wardName: string;
+  wardAge: number;
+  wardAddress: string;
+}): Promise<NotificationItem[]> {
+  const backendUserId = await ensureBackendWardId({
+    mockWardId: params.mockWardId,
+    name: params.wardName,
+    age: params.wardAge,
+    address: params.wardAddress,
+  });
+  if (!backendUserId) {
+    throw new Error(WARD_GUARDIAN_SESSION_REQUIRED_MESSAGE);
+  }
+
+  const guardianSession = getBackendGuardianSessionForWard(params.mockWardId);
+  if (!guardianSession) {
+    throw new Error(WARD_GUARDIAN_SESSION_REQUIRED_MESSAGE);
+  }
+
+  return fetchNotificationItems(
+    `${API_BASE_URL}/app/elder/${backendUserId}/notifications`,
+    guardianSession.accessToken
+  );
+}
