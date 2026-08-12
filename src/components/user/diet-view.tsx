@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 import { SpeakableCard } from "@/components/app/speakable-card";
+import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
 import { useLocalStore } from "@/lib/use-store";
 
@@ -126,6 +127,13 @@ export function DietView({
             </div>
           </div>
         </SpeakableCard>
+
+        <BanchanRecommendationSection
+          wardId={ward.id}
+          wardName={ward.name}
+          wardAge={ward.age}
+          wardAddress={ward.address}
+        />
 
         <SpeakableCard
           id="diet-menu-composition"

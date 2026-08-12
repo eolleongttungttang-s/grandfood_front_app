@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
+import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
   addMessage,
@@ -300,6 +301,13 @@ export function WardDetailView({
             </div>
           </div>
         </div>
+
+        <BanchanRecommendationSection
+          wardId={ward.id}
+          wardName={ward.name}
+          wardAge={ward.age}
+          wardAddress={ward.address}
+        />
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
