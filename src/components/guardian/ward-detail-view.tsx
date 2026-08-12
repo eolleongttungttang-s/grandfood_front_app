@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 
 import { Ward, WardDetail, WardStatus } from "@/lib/wards";
+import { WardMealDashboard } from "@/lib/ward-meal-dashboard";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import {
@@ -67,14 +68,19 @@ export function WardDetailView({
   ward,
   detail,
   guardianName,
+  mealDashboard,
 }: {
   ward: Ward;
   detail: WardDetail;
   guardianName: string;
+  /** null = 아직 실제 백엔드 조회 응답 전(로딩 중). "오늘 잔반율"/"최근 14일 섭취 기록" 두 카드만
+   *  이 값으로 채운다 — 나머지(추천 반찬/건강 프로필 등)는 여전히 detail의 목업값을 쓴다. */
+  mealDashboard: WardMealDashboard | null;
 }) {
-  const completeCount = detail.mealHistory.filter((m) => m === "완식").length;
-  const smallCount = detail.mealHistory.filter((m) => m === "소량").length;
-  const noResponseCount = detail.mealHistory.filter((m) => m === "미응답").length;
+  const mealHistory = mealDashboard?.status === "ready" ? mealDashboard.mealHistory : null;
+  const completeCount = mealHistory?.filter((m) => m === "완식").length ?? 0;
+  const smallCount = mealHistory?.filter((m) => m === "소량").length ?? 0;
+  const noResponseCount = mealHistory?.filter((m) => m === "미응답").length ?? 0;
   const dislikedIds = wardDislikes(useLocalStore(dislikesStore), ward.id);
   const dislikedItems = detail.recommendedCombo.items.filter((i) => dislikedIds.includes(i.dishId));
   const partnerStore = getPartnerStore(ward.partnerStoreId);
@@ -224,13 +230,23 @@ export function WardDetailView({
           </div>
           <div className="flex items-center justify-between rounded-lg bg-muted px-3 py-2">
             <span className="text-sm text-foreground">오늘 잔반율</span>
-            <span
-              className={`text-sm font-bold ${
-                detail.leftoverPercent >= 50 ? "text-destructive" : "text-foreground"
-              }`}
-            >
-              {detail.leftoverPercent}%
-            </span>
+            {mealDashboard === null ? (
+              <span className="text-sm text-muted-foreground">불러오는 중...</span>
+            ) : mealDashboard.status === "not-linked" ? (
+              <span className="text-sm text-muted-foreground">연동된 기록 없음</span>
+            ) : mealDashboard.status === "error" ? (
+              <span className="text-sm text-destructive">불러오기 실패</span>
+            ) : mealDashboard.leftoverPercent === null ? (
+              <span className="text-sm text-muted-foreground">분석 준비 중</span>
+            ) : (
+              <span
+                className={`text-sm font-bold ${
+                  mealDashboard.leftoverPercent >= 50 ? "text-destructive" : "text-foreground"
+                }`}
+              >
+                {Math.round(mealDashboard.leftoverPercent)}%
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap gap-1.5">
             {detail.recommendedCombo.items.map((item) => (
@@ -414,27 +430,39 @@ export function WardDetailView({
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-baseline justify-between">
             <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
-            <span className="text-xs text-muted-foreground">
-              완식 <span className="font-semibold text-foreground">{completeCount}</span> ·
-              소량{" "}
-              <span className="font-semibold text-risk-caution-foreground">
-                {smallCount}
-              </span>{" "}
-              · 미응답{" "}
-              <span className="font-semibold text-risk-high-foreground">
-                {noResponseCount}
+            {mealHistory && (
+              <span className="text-xs text-muted-foreground">
+                완식 <span className="font-semibold text-foreground">{completeCount}</span> ·
+                소량{" "}
+                <span className="font-semibold text-risk-caution-foreground">
+                  {smallCount}
+                </span>{" "}
+                · 미응답{" "}
+                <span className="font-semibold text-risk-high-foreground">
+                  {noResponseCount}
+                </span>
               </span>
-            </span>
+            )}
           </div>
-          <div className="grid grid-cols-7 gap-1.5">
-            {detail.mealHistory.map((tone, i) => (
-              <div
-                key={i}
-                className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]}`}
-                title={tone}
-              />
-            ))}
-          </div>
+          {mealDashboard === null ? (
+            <p className="text-sm text-muted-foreground">불러오는 중이에요...</p>
+          ) : mealDashboard.status === "not-linked" ? (
+            <p className="text-sm text-muted-foreground">
+              아직 실제 백엔드에 연동된 식사 기록이 없어요.
+            </p>
+          ) : mealDashboard.status === "error" ? (
+            <p className="text-sm text-destructive">{mealDashboard.message}</p>
+          ) : (
+            <div className="grid grid-cols-7 gap-1.5">
+              {mealHistory!.map((tone, i) => (
+                <div
+                  key={i}
+                  className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]}`}
+                  title={tone}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
