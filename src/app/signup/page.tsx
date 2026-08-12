@@ -120,7 +120,12 @@ export default function SignupPage() {
 
     setSubmitting(false);
     toast.success("회원가입이 완료됐어요.");
-    router.push(result.account.role === "guardian" ? "/guardian/wards/new" : "/user/home");
+    // 개인 이용자(자가등록)는 보호자 초대 가입(consent-view.tsx -> /invite/survey)과 달리
+    // 건강 프로필을 채우는 단계가 구조적으로 없어서, 로그인은 되는데 AI 반찬 추천이 항상
+    // 404였다(health-profile 없음). 그래서 여기서도 초대 흐름과 동일하게 설문으로 보낸다 —
+    // onboarding=1은 user/survey/page.tsx가 완료 후 어디로 보낼지(최초 온보딩이면 /user/home,
+    // 나중에 마이 화면에서 재방문한 수정이면 /user/profile) 구분하는 데 쓴다.
+    router.push(result.account.role === "guardian" ? "/guardian/wards/new" : "/user/survey?onboarding=1");
   }
 
   return (

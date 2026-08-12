@@ -560,6 +560,57 @@ export async function registerElderFromInviteBackend(
   }
 }
 
+// POST /users/{user_id}/health-profile — 자가등록(보호자 없는) 이용자 본인이 로그인 후
+// 자기 건강 프로필(질환 체크리스트)을 채운다. register_user(보호자 전용 온보딩)와 달리
+// registerUserBackend(자가등록)는 건강 프로필을 안 만들어서, 이 호출 없이는 AI 반찬 추천이
+// 구조적으로 항상 404였다(health/service.py가 HealthProfile 존재를 요구함). user/survey/page.tsx가
+// "생활 정보" 설문(conditions만 수집)을 마친 직후 이 함수를 불러 그 갭을 메운다.
+export async function submitSelfHealthProfileBackend(params: {
+  mockWardId: string;
+  name: string;
+  age: number;
+  address: string;
+  conditionFlags: string[];
+}): Promise<{ userId: string } | { error: string }> {
+  const access = await resolveBackendWardAccess({
+    mockWardId: params.mockWardId,
+    name: params.name,
+    age: params.age,
+    address: params.address,
+  });
+  if (!access) {
+    return { error: "이 계정으로 로그인해야 건강 프로필을 저장할 수 있어요." };
+  }
+
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/users/${access.backendWardId}/health-profile`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${access.accessToken}`,
+      },
+      body: JSON.stringify({ condition_flags: params.conditionFlags }),
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) {
+      return { error: await parseErrorResponse(response) };
+    }
+    const data = await response.json();
+    return { userId: data.user_id as string };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return { error: "서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요." };
+    }
+    return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
 // 이 mockWardId를 "본인 자신"으로 자가등록(개인 이용자, 보호자 없음)한 로컬 계정의
 // 백엔드 세션을 찾는다. getBackendGuardianSessionForWard와 짝을 이루는 개인 이용자
 // 버전 — 보호자 세션과 달리 이 경로는 backendWardId를 바로 안다(자기 자신의 User가
