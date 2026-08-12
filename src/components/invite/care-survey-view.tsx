@@ -12,13 +12,46 @@ import {
   MobilityLevel,
   RegisterCareProfileCommand,
 } from "@/lib/care-profile";
+import { ACTIVITY_LEVEL_LABEL, ActivityLevel } from "@/lib/health-profile";
+import { formatKoreanPhoneNumber } from "@/lib/phone-format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { NumberWheelSelect } from "@/components/app/number-wheel-select";
 import { cn } from "@/lib/utils";
 
-const TOTAL_STEPS = CARE_SURVEY_TOTAL_STEPS;
+// 키/몸무게/혈압/혈당/활동수준 — care-profile.ts의 "생활 정보"와는 다른 데이터 모델
+// (health-profile.ts의 RegisterHealthProfileCommand)에 저장되지만, 어르신 입장에선 한
+// 설문 흐름으로 이어지는 게 자연스러워서 이 컴포넌트가 두 데이터를 같이 수집한다 — 제출은
+// 호출부(예: invite/survey/page.tsx)가 registerCareProfile()/registerHealthProfile() 둘로
+// 나눠서 각자의 저장소에 넣는다.
+export type HealthMetricsForm = {
+  heightCm?: number;
+  weightKg?: number;
+  systolicBP?: number;
+  diastolicBP?: number;
+  fastingGlucose?: number;
+  activityLevel?: ActivityLevel;
+};
+
+export const EMPTY_HEALTH_METRICS_FORM: HealthMetricsForm = {};
+
+const ACTIVITY_LEVEL_OPTIONS: ActivityLevel[] = ["inactive", "light", "active", "very_active"];
+
+// care-profile.ts의 단계 뒤에 이어 붙인다 — CARE_SURVEY_STEP처럼 값 자체보다 "몇 번째
+// 단계인가"가 중요해서, 상수 하나(HEALTH_STEP_OFFSET)만 바꾸면 전체가 같이 밀리게 했다.
+const HEALTH_STEP_OFFSET = CARE_SURVEY_TOTAL_STEPS;
+const HEALTH_STEP = {
+  height: HEALTH_STEP_OFFSET,
+  weight: HEALTH_STEP_OFFSET + 1,
+  bloodPressure: HEALTH_STEP_OFFSET + 2,
+  glucose: HEALTH_STEP_OFFSET + 3,
+  activityLevel: HEALTH_STEP_OFFSET + 4,
+} as const;
+const HEALTH_METRICS_TOTAL_STEPS = Object.keys(HEALTH_STEP).length;
+
+const TOTAL_STEPS = CARE_SURVEY_TOTAL_STEPS + HEALTH_METRICS_TOTAL_STEPS;
 
 function OptionButton({
   selected,
@@ -70,18 +103,27 @@ export function CareSurveyView({
   wardId,
   wardName,
   initialValues,
+  initialHealthValues,
   onComplete,
   onSkip,
 }: {
   wardId: string;
   wardName: string;
   initialValues?: RegisterCareProfileCommand;
-  onComplete: (cmd: RegisterCareProfileCommand) => void | Promise<void>;
-  onSkip: (partial: RegisterCareProfileCommand, answeredStep: number) => void | Promise<void>;
+  initialHealthValues?: HealthMetricsForm;
+  onComplete: (cmd: RegisterCareProfileCommand, health: HealthMetricsForm) => void | Promise<void>;
+  onSkip: (
+    partial: RegisterCareProfileCommand,
+    answeredStep: number,
+    health: HealthMetricsForm
+  ) => void | Promise<void>;
 }) {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<RegisterCareProfileCommand>(
     initialValues ?? { ...EMPTY_CARE_PROFILE_COMMAND, wardId }
+  );
+  const [healthForm, setHealthForm] = useState<HealthMetricsForm>(
+    initialHealthValues ?? EMPTY_HEALTH_METRICS_FORM
   );
   const [submitting, setSubmitting] = useState(false);
 
@@ -90,6 +132,10 @@ export function CareSurveyView({
     value: RegisterCareProfileCommand[K]
   ) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateHealth<K extends keyof HealthMetricsForm>(key: K, value: HealthMetricsForm[K]) {
+    setHealthForm((prev) => ({ ...prev, [key]: value }));
   }
 
   function toggleIngredient(name: string) {
@@ -120,7 +166,7 @@ export function CareSurveyView({
     if (submitting) return;
     setSubmitting(true);
     try {
-      await onComplete(form);
+      await onComplete(form, healthForm);
     } finally {
       setSubmitting(false);
     }
@@ -134,7 +180,11 @@ export function CareSurveyView({
     if (submitting) return;
     setSubmitting(true);
     try {
-      await onSkip(form, step);
+      // care-profile.ts의 answeredStep은 "care-profile 단계 중 몇 번째까지 답했는지"라는
+      // 의미로 문서화돼 있어(0~CARE_SURVEY_TOTAL_STEPS) — 건강정보 단계(9~13)까지 진행한
+      // 뒤 건너뛰어도 care-profile 쪽엔 그 의미를 벗어나지 않게 상한을 맞춰서 전달한다.
+      // (health는 건너뛴 시점의 값 그대로 partial 저장 — 별도 진행도 추적은 안 함.)
+      await onSkip(form, Math.min(step, CARE_SURVEY_TOTAL_STEPS), healthForm);
     } finally {
       setSubmitting(false);
     }
@@ -406,9 +456,117 @@ export function CareSurveyView({
                   className="h-14 text-lg"
                   placeholder="010-0000-0000"
                   value={form.emergencyContactPhone}
-                  onChange={(e) => update("emergencyContactPhone", e.target.value)}
+                  onChange={(e) => update("emergencyContactPhone", formatKoreanPhoneNumber(e.target.value))}
                 />
               </div>
+            </div>
+          </>
+        )}
+
+        {step === HEALTH_STEP.height && (
+          <>
+            <StepHeading
+              title={`${wardName}님 키가 어떻게 되세요?`}
+              hint="모르시면 그냥 다음으로 넘어가셔도 괜찮아요"
+            />
+            <NumberWheelSelect
+              id="health-height"
+              label="키"
+              value={healthForm.heightCm}
+              onChange={(v) => updateHealth("heightCm", v)}
+              min={130}
+              max={200}
+              unit="cm"
+            />
+          </>
+        )}
+
+        {step === HEALTH_STEP.weight && (
+          <>
+            <StepHeading
+              title={`${wardName}님 몸무게가 어떻게 되세요?`}
+              hint="모르시면 그냥 다음으로 넘어가셔도 괜찮아요"
+            />
+            <NumberWheelSelect
+              id="health-weight"
+              label="몸무게"
+              value={healthForm.weightKg}
+              onChange={(v) => updateHealth("weightKg", v)}
+              min={30}
+              max={150}
+              unit="kg"
+            />
+          </>
+        )}
+
+        {step === HEALTH_STEP.bloodPressure && (
+          <>
+            <StepHeading
+              title="최근 잰 혈압이 있으세요?"
+              hint="혈압계로 잰 두 숫자예요. 모르시면 그냥 다음으로 넘어가셔도 괜찮아요"
+            />
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="health-systolic" className="text-base">
+                혈압 위쪽 숫자 (수축기)
+              </Label>
+              <NumberWheelSelect
+                id="health-systolic"
+                label="혈압 위쪽 숫자 (수축기)"
+                value={healthForm.systolicBP}
+                onChange={(v) => updateHealth("systolicBP", v)}
+                min={80}
+                max={200}
+                unit="mmHg"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="health-diastolic" className="text-base">
+                혈압 아래쪽 숫자 (이완기)
+              </Label>
+              <NumberWheelSelect
+                id="health-diastolic"
+                label="혈압 아래쪽 숫자 (이완기)"
+                value={healthForm.diastolicBP}
+                onChange={(v) => updateHealth("diastolicBP", v)}
+                min={50}
+                max={120}
+                unit="mmHg"
+              />
+            </div>
+          </>
+        )}
+
+        {step === HEALTH_STEP.glucose && (
+          <>
+            <StepHeading
+              title="최근 잰 혈당이 있으세요?"
+              hint="모르시면 그냥 다음으로 넘어가셔도 괜찮아요"
+            />
+            <NumberWheelSelect
+              id="health-glucose"
+              label="혈당"
+              value={healthForm.fastingGlucose}
+              onChange={(v) => updateHealth("fastingGlucose", v)}
+              min={50}
+              max={300}
+              unit="mg/dL"
+            />
+          </>
+        )}
+
+        {step === HEALTH_STEP.activityLevel && (
+          <>
+            <StepHeading title={`${wardName}님은 평소 얼마나 움직이세요?`} />
+            <div className="flex flex-col gap-3">
+              {ACTIVITY_LEVEL_OPTIONS.map((level) => (
+                <OptionButton
+                  key={level}
+                  selected={healthForm.activityLevel === level}
+                  onClick={() => updateHealth("activityLevel", level)}
+                >
+                  {ACTIVITY_LEVEL_LABEL[level]}
+                </OptionButton>
+              ))}
             </div>
           </>
         )}

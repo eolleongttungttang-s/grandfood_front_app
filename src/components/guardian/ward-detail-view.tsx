@@ -17,6 +17,7 @@ import { toast } from "sonner";
 
 import { Ward, WardDetail, WardStatus } from "@/lib/wards";
 import { WardMealDashboard } from "@/lib/ward-meal-dashboard";
+import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import {
@@ -239,13 +240,21 @@ export function WardDetailView({
             ) : mealDashboard.leftoverPercent === null ? (
               <span className="text-sm text-muted-foreground">분석 준비 중</span>
             ) : (
-              <span
-                className={`text-sm font-bold ${
-                  mealDashboard.leftoverPercent >= 50 ? "text-destructive" : "text-foreground"
-                }`}
-              >
-                {Math.round(mealDashboard.leftoverPercent)}%
-              </span>
+              (() => {
+                // 표시값(반올림)과 경고색 기준을 반드시 같은 수치로 맞춘다 — 반올림 전
+                // 원본값으로 비교하면(예: 49.6) 화면엔 "50%"로 보이는데 색은 정상(49.6<50)
+                // 처리되는 불일치가 생긴다.
+                const rounded = Math.round(mealDashboard.leftoverPercent);
+                return (
+                  <span
+                    className={`text-sm font-bold ${
+                      rounded >= 50 ? "text-destructive" : "text-foreground"
+                    }`}
+                  >
+                    {rounded}%
+                  </span>
+                );
+              })()
             )}
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -472,10 +481,22 @@ export function WardDetailView({
               {detail.healthProfile.source === "mydata_linked" ? "마이데이터 연동" : "자가 입력"}
             </span>
           </div>
-          <DetailRow label="수축기 혈압">{detail.healthProfile.systolicBP} mmHg</DetailRow>
+          <DetailRow label="혈압 위쪽 숫자 (수축기)">{detail.healthProfile.systolicBP} mmHg</DetailRow>
+          <DetailRow label="혈압 아래쪽 숫자 (이완기)">
+            {detail.healthProfile.diastolicBP != null
+              ? `${detail.healthProfile.diastolicBP} mmHg`
+              : "미입력"}
+          </DetailRow>
           <DetailRow label="공복혈당">{detail.healthProfile.fastingGlucose} mg/dL</DetailRow>
-          <DetailRow label="당화혈색소">{detail.healthProfile.hba1c} %</DetailRow>
+          <DetailRow label="키">
+            {detail.healthProfile.heightCm != null ? `${detail.healthProfile.heightCm} cm` : "미입력"}
+          </DetailRow>
           <DetailRow label="체중">{detail.healthProfile.weightKg} kg</DetailRow>
+          <DetailRow label="활동 수준">
+            {detail.healthProfile.activityLevel
+              ? ACTIVITY_LEVEL_LABEL[detail.healthProfile.activityLevel]
+              : "미입력"}
+          </DetailRow>
         </div>
 
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">

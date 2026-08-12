@@ -12,6 +12,8 @@ import { WardDetailView } from "@/components/guardian/ward-detail-view";
 export function GuardianWardDetailPageClient() {
   const id = useSearchParams().get("id");
   const { account } = useSession();
+  const ward = id ? getWard(id) : undefined;
+  const canView = !!(ward && account?.wardIds?.includes(ward.id));
 
   // id별로 결과를 태깅해둔다 — id가 바뀌면(다른 대상자로 이동) 아직 새 응답이 안 왔을 때
   // 이전 대상자의 값이 잠깐 보이지 않도록, 아래에서 태그가 현재 id와 다르면 로딩 중으로 취급한다.
@@ -21,7 +23,10 @@ export function GuardianWardDetailPageClient() {
   } | null>(null);
 
   useEffect(() => {
-    if (!id) return;
+    // 권한 확인(canView)보다 먼저 fetch가 나가면 안 된다 — 이 앱은 한 브라우저에 여러 보호자
+    // 계정 세션이 캐시될 수 있는 구조라, URL의 id를 다른 보호자(B)가 관리하는 대상자로 바꾸면
+    // canView가 나중에 거부하기 전에 이미 B 계정의 캐시된 토큰으로 실제 요청이 나갈 수 있었다.
+    if (!id || !canView) return;
     let cancelled = false;
     fetchWardMealDashboard(id).then((result) => {
       if (!cancelled) setMealDashboardState({ id, dashboard: result });
@@ -29,15 +34,12 @@ export function GuardianWardDetailPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, canView]);
 
   // null이면 "아직 응답 안 옴"(로딩 중) — notifications-view.tsx와 같은 패턴.
   const mealDashboard = mealDashboardState?.id === id ? mealDashboardState.dashboard : null;
 
   if (!account) return null;
-
-  const ward = id ? getWard(id) : undefined;
-  const canView = ward && account.wardIds?.includes(ward.id);
 
   if (!ward || !canView) {
     return (

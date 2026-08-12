@@ -3,6 +3,7 @@
 import { Pill } from "lucide-react";
 
 import { WardDetail } from "@/lib/wards";
+import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
 import { TopBar } from "@/components/app/top-bar";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -105,10 +106,22 @@ export function RecordsView({
               {detail.healthProfile.source === "mydata_linked" ? "마이데이터 연동" : "자가 입력"}
             </span>
           </div>
-          <DetailRow label="수축기 혈압">{detail.healthProfile.systolicBP} mmHg</DetailRow>
+          <DetailRow label="혈압 위쪽 숫자 (수축기)">{detail.healthProfile.systolicBP} mmHg</DetailRow>
+          <DetailRow label="혈압 아래쪽 숫자 (이완기)">
+            {detail.healthProfile.diastolicBP != null
+              ? `${detail.healthProfile.diastolicBP} mmHg`
+              : "미입력"}
+          </DetailRow>
           <DetailRow label="공복혈당">{detail.healthProfile.fastingGlucose} mg/dL</DetailRow>
-          <DetailRow label="당화혈색소">{detail.healthProfile.hba1c} %</DetailRow>
+          <DetailRow label="키">
+            {detail.healthProfile.heightCm != null ? `${detail.healthProfile.heightCm} cm` : "미입력"}
+          </DetailRow>
           <DetailRow label="체중">{detail.healthProfile.weightKg} kg</DetailRow>
+          <DetailRow label="활동 수준">
+            {detail.healthProfile.activityLevel
+              ? ACTIVITY_LEVEL_LABEL[detail.healthProfile.activityLevel]
+              : "미입력"}
+          </DetailRow>
         </div>
 
         <div className="flex flex-col gap-1 rounded-2xl bg-muted p-5">

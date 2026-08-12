@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { BirthDateSelect } from "@/components/app/birth-date-select";
 import { UserRole, registerAccount } from "@/lib/auth";
 import { registerGuardianBackend, registerUserBackend } from "@/lib/backend-auth";
+import { formatKoreanPhoneNumber } from "@/lib/phone-format";
 import { speakOnDemand } from "@/lib/accessibility";
 import { useSession } from "@/lib/session";
 import { addWard, createSelfWard } from "@/lib/wards";
@@ -120,7 +121,12 @@ export default function SignupPage() {
 
     setSubmitting(false);
     toast.success("회원가입이 완료됐어요.");
-    router.push(result.account.role === "guardian" ? "/guardian/wards/new" : "/user/home");
+    // 이용자 본인 직접가입도 QR 초대 경로(consent-view.tsx → /invite/survey)와 마찬가지로
+    // 첫 화면부터 생활 정보를 물어보게 한다 — 예전엔 곧장 /user/home으로 가서 생활 정보를
+    // 입력할 계기가 아예 없었다.
+    router.push(
+      result.account.role === "guardian" ? "/guardian/wards/new" : "/user/survey?first=1"
+    );
   }
 
   return (
@@ -170,7 +176,7 @@ export default function SignupPage() {
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="signup-phone">전화번호</Label>
-                <Input id="signup-phone" value={phone} onChange={(event) => setPhone(event.target.value)} autoComplete="tel" inputMode="tel" placeholder="010-0000-0000" required />
+                <Input id="signup-phone" value={phone} onChange={(event) => setPhone(formatKoreanPhoneNumber(event.target.value))} autoComplete="tel" inputMode="tel" placeholder="010-0000-0000" required />
               </div>
               {role === "guardian" ? (
                 <>

@@ -1,6 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { useSession } from "@/lib/session";
@@ -11,38 +12,81 @@ import {
   registerCareProfile,
   skipCareProfile,
 } from "@/lib/care-profile";
-import { CareSurveyView } from "@/components/invite/care-survey-view";
+import { healthProfileStore, registerHealthProfile } from "@/lib/health-profile";
+import { CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
 import { TopBar } from "@/components/app/top-bar";
 import { useLocalStore } from "@/lib/use-store";
 
-export default function UserSurveyPage() {
+function UserSurveyPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // /signup(이용자 본인 직접가입) 직후엔 ?first=1을 달고 이 화면으로 온다 — QR 초대 경로가
+  // 동의 직후 항상 /invite/survey를 거치는 것과 똑같이, 혼자 가입해도 첫 화면부터 생활 정보를
+  // 물어보게 하기 위함. 마이 화면의 "생활 정보 수정" 재방문과는 제목/완료 후 이동 위치만 다르다.
+  const isFirstTime = searchParams.get("first") === "1";
   const { account } = useSession();
   const wardId = account?.selfWardId;
   const ward = wardId ? getWard(wardId) : undefined;
   useLocalStore(careProfileStore);
+  const healthProfiles = useLocalStore(healthProfileStore);
 
   if (!account || !wardId || !ward) return null;
 
   const existing = getCareProfile(wardId);
+  const existingHealth = healthProfiles[wardId];
+  const afterCompleteHref = isFirstTime ? "/user/home" : "/user/profile";
+
+  // invite/survey/page.tsx와 같은 이유(0을 저장하는 대신 기존 값 유지)로 병합해서 저장한다 —
+  // 다만 여기는 재방문(마이 화면)이라 실제 백엔드 User 등록은 이미 끝나 있으므로 그건 안 한다.
+  async function saveHealthMetrics(health: HealthMetricsForm) {
+    if (!wardId) return;
+    const hasAnyValue = Object.values(health).some((v) => v !== undefined);
+    if (!existingHealth && !hasAnyValue) return;
+
+    await registerHealthProfile({
+      wardId,
+      source: "self_reported",
+      systolicBP: health.systolicBP ?? existingHealth?.systolicBP ?? 0,
+      fastingGlucose: health.fastingGlucose ?? existingHealth?.fastingGlucose ?? 0,
+      hba1c: existingHealth?.hba1c ?? 0,
+      weightKg: health.weightKg ?? existingHealth?.weightKg ?? 0,
+      heightCm: health.heightCm ?? existingHealth?.heightCm,
+      diastolicBP: health.diastolicBP ?? existingHealth?.diastolicBP,
+      activityLevel: health.activityLevel ?? existingHealth?.activityLevel,
+    });
+  }
 
   return (
     <div className="flex flex-1 flex-col">
-      <TopBar title="생활 정보 수정" subtitle="언제든 다시 입력하실 수 있어요" />
+      <TopBar
+        title={isFirstTime ? "생활 정보 입력" : "생활 정보 수정"}
+        subtitle={isFirstTime ? "더 꼭 맞는 식단을 위해 몇 가지만 여쭤볼게요" : "언제든 다시 입력하실 수 있어요"}
+      />
       <CareSurveyView
         wardId={wardId}
         wardName={ward.name}
         initialValues={existing}
-        onComplete={async (cmd) => {
+        initialHealthValues={existingHealth}
+        onComplete={async (cmd, health) => {
           await registerCareProfile(cmd);
-          toast.success("생활 정보를 저장했어요.");
-          router.push("/user/profile");
+          await saveHealthMetrics(health);
+          toast.success("입력해주셔서 감사해요!");
+          router.push(afterCompleteHref);
         }}
-        onSkip={async (partial, answeredStep) => {
+        onSkip={async (partial, answeredStep, health) => {
           await skipCareProfile(wardId, partial, answeredStep);
-          router.push("/user/profile");
+          await saveHealthMetrics(health);
+          router.push(afterCompleteHref);
         }}
       />
     </div>
+  );
+}
+
+export default function UserSurveyPage() {
+  return (
+    <Suspense fallback={<div className="flex flex-1 flex-col" />}>
+      <UserSurveyPageContent />
+    </Suspense>
   );
 }

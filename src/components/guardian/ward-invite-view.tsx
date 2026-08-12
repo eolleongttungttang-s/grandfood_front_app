@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { createWardInvite } from "@/lib/ward-invite";
 import { useSession } from "@/lib/session";
+import { formatKoreanPhoneNumber } from "@/lib/phone-format";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,7 +62,7 @@ export function WardInviteView() {
               id="invite-phone"
               placeholder="010-0000-0000"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => setPhone(formatKoreanPhoneNumber(e.target.value))}
             />
           </div>
         </div>

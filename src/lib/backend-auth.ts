@@ -15,6 +15,7 @@ import { createLocalStore } from "@/lib/local-store";
 import { API_BASE_URL } from "@/lib/api-config";
 import { getAccounts } from "@/lib/auth";
 import { CONDITION_POOL, getCareProfile } from "@/lib/care-profile";
+import type { BackendActivityLevel } from "@/lib/health-profile";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
 // notifications.ts와 같은 이유로 인증 관련 요청도 무한정 매달리지 않게 상한을 둔다.
@@ -524,6 +525,12 @@ export async function registerElderFromInviteBackend(
     planType: string;
     conditionFlags?: string[];
     ttsCallConsent?: boolean;
+    // BMR/TDEE 기반 권장 영양성분 계산(health/nutrition_targets.py)에 쓰는 값들 — 전부
+    // optional. 백엔드 UserOnboardingRequest가 이미 받아주는 필드라 그대로 실어 보낸다.
+    gender?: "male" | "female";
+    heightCm?: number;
+    weightKg?: number;
+    activityLevel?: BackendActivityLevel;
   }
 ): Promise<{ userId: string } | { error: string }> {
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
@@ -539,6 +546,10 @@ export async function registerElderFromInviteBackend(
         plan_type: input.planType,
         condition_flags: input.conditionFlags ?? [],
         tts_call_consent: input.ttsCallConsent ?? false,
+        gender: input.gender,
+        height_cm: input.heightCm,
+        weight_kg: input.weightKg,
+        activity_level: input.activityLevel,
       }),
     },
     REQUEST_TIMEOUT_MS

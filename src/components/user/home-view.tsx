@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import {
   ChevronRight,
   Mic,
-  PhoneCall,
   Sparkles,
   Truck,
 } from "lucide-react";
@@ -127,10 +126,23 @@ export function HomeView({
           오늘 점심 배송 예정 · <span className="font-semibold">{detail.deliveryEta}</span>
         </SpeakableCard>
 
+        {/* 배송 알림 바로 아래에 둔다 — 배송예정/영양팁 둘 다 "오늘의 짧은 공지"라 시각적으로
+            묶이는 게 자연스럽다. 각자 별도 SpeakableCard라 text가 안 합쳐지므로, TTS는
+            눌렀을 때 이 카드 내용만 읽는다(배송 정보와 안 섞임). */}
         <SpeakableCard
-          id="home-recommended-combo"
-          text={recommendedComboSpeech}
-          className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm"
+          id="home-nutrition-tip"
+          text={nutritionTipSpeech}
+          tone="sidebar"
+          variant="leading"
+          className="rounded-2xl bg-sidebar p-4 text-sm text-sidebar-foreground shadow-sm"
+        >
+          {getNutritionTip(detail)}
+        </SpeakableCard>
+
+        <SpeakableCard
+          id="home-today-meal"
+          text={`${recommendedComboSpeech} ${mealCheckSpeech}`}
+          className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
           <div className="flex items-center gap-3">
             <span className="text-4xl">{representativeDish?.imageEmoji ?? "🍽️"}</span>
@@ -174,128 +186,100 @@ export function HomeView({
               );
             })}
           </div>
-        </SpeakableCard>
 
-        <SpeakableCard
-          id="home-meal-check"
-          text={mealCheckSpeech}
-          className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-5 shadow-sm"
-        >
-          <span className="text-xs font-semibold text-muted-foreground">
-            식사하셨으면 알려주세요
-          </span>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2.5 border-t border-border pt-4">
+            <span className="text-xs font-semibold text-muted-foreground">
+              식사하셨으면 알려주세요
+            </span>
+            <div className="flex gap-2">
+              <Button
+                size="lg"
+                className="h-14 flex-1 text-base"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  checkMeal("완식");
+                }}
+              >
+                다 먹었어요
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                className="h-14 flex-1 text-base"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  checkMeal("남김");
+                }}
+              >
+                남겼어요
+              </Button>
+            </div>
             <Button
-              size="lg"
-              className="h-14 flex-1 text-base"
+              variant="ghost"
+              className="w-fit self-center text-muted-foreground"
               onClick={(e) => {
                 e.stopPropagation();
-                checkMeal("완식");
+                listenForMealStatus();
               }}
+              disabled={listening}
             >
-              다 먹었어요
+              <Mic className={listening ? "animate-pulse text-destructive" : ""} />
+              {listening ? "듣고 있어요..." : "말로 알려주기"}
             </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="h-14 flex-1 text-base"
-              onClick={(e) => {
-                e.stopPropagation();
-                checkMeal("남김");
-              }}
-            >
-              남겼어요
-            </Button>
+            {mealCheck && (
+              <p className="text-center text-xs text-muted-foreground">
+                오늘 체크: <span className="font-semibold text-foreground">{mealCheck}</span>
+              </p>
+            )}
           </div>
-          <Button
-            variant="ghost"
-            className="w-fit self-center text-muted-foreground"
-            onClick={(e) => {
-              e.stopPropagation();
-              listenForMealStatus();
-            }}
-            disabled={listening}
-          >
-            <Mic className={listening ? "animate-pulse text-destructive" : ""} />
-            {listening ? "듣고 있어요..." : "말로 알려주기"}
-          </Button>
-          {mealCheck && (
-            <p className="text-center text-xs text-muted-foreground">
-              오늘 체크: <span className="font-semibold text-foreground">{mealCheck}</span>
-            </p>
-          )}
-        </SpeakableCard>
-
-        <SpeakableCard
-          id="home-nutrition-tip"
-          text={nutritionTipSpeech}
-          tone="sidebar"
-          variant="leading"
-          className="rounded-2xl bg-sidebar p-4 text-sm text-sidebar-foreground shadow-sm"
-        >
-          {getNutritionTip(detail)}
         </SpeakableCard>
 
         <Button
-          variant="outline"
-          className="h-auto flex-col gap-1.5 py-3"
+          size="lg"
+          className="h-14 w-full text-base"
           nativeButton={false}
           render={<Link href="/user/assistant" />}
         >
-          <Sparkles className="h-5 w-5 text-accent" />
-          <span className="text-sm">AI 도우미와 이야기하기</span>
+          <Sparkles className="h-5 w-5" />
+          AI 도우미와 이야기하기
         </Button>
-
-        {ward.lastMeal.tone !== "완식" && (
-          <Button
-            variant="outline"
-            className="w-fit"
-            onClick={() =>
-              toast.success(`${partnerStore?.name ?? "담당 반찬가게"}에 연락 요청을 보냈어요.`)
-            }
-          >
-            <PhoneCall />
-            매장에 문의하기
-          </Button>
-        )}
 
         <Link
           href="/user/diet"
           className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3"
         >
-          <span className="text-sm font-semibold text-foreground">
-            식단 상세와 건강지표 더보기
-          </span>
+          <span className="text-sm font-semibold text-foreground">식단 상세 보기</span>
           <ChevronRight className="h-4 w-4 text-muted-foreground" />
         </Link>
 
-        <SpeakableCard
-          id="home-notifications"
-          text={notificationsSpeech}
-          className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-5 shadow-sm"
-        >
-          <span className="text-xs font-bold text-foreground">안내 사항</span>
-          {notificationsError && (
-            <span className="text-xs text-muted-foreground">{notificationsError}</span>
-          )}
-          {!notificationsError && notifications === null && (
-            <span className="text-xs text-muted-foreground">불러오는 중이에요...</span>
-          )}
-          {!notificationsError && notifications !== null && notifications.length === 0 && (
-            <span className="text-xs text-muted-foreground">아직 안내 사항이 없어요.</span>
-          )}
-          {(notifications ?? []).slice(0, 3).map((n) => (
-            <div key={n.id} className="flex items-start gap-2.5 text-sm">
-              <Badge className={`${notificationBadgeClass(n.type)} shrink-0`}>
-                {n.type}
-              </Badge>
-              <div className="flex flex-col">
-                <span className="text-foreground">{n.message}</span>
-                <span className="text-xs text-muted-foreground">{n.date}</span>
+        {/* 로딩 중이거나 에러거나 실제 안내가 있을 때만 보여준다 — 다 불러왔는데 그냥
+            아무것도 없는 경우까지 빈 카드로 보여주면 화면만 늘어난다. */}
+        {(notificationsError || notifications === null || notifications.length > 0) && (
+          <SpeakableCard
+            id="home-notifications"
+            text={notificationsSpeech}
+            className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-5 shadow-sm"
+          >
+            <span className="text-xs font-bold text-foreground">안내 사항</span>
+            {notificationsError && (
+              <span className="text-xs text-muted-foreground">{notificationsError}</span>
+            )}
+            {!notificationsError && notifications === null && (
+              <span className="text-xs text-muted-foreground">불러오는 중이에요...</span>
+            )}
+            {(notifications ?? []).slice(0, 3).map((n) => (
+              <div key={n.id} className="flex items-start gap-2.5 text-sm">
+                <Badge className={`${notificationBadgeClass(n.type)} shrink-0`}>
+                  {n.type}
+                </Badge>
+                <div className="flex flex-col">
+                  <span className="text-foreground">{n.message}</span>
+                  <span className="text-xs text-muted-foreground">{n.date}</span>
+                </div>
               </div>
-            </div>
-          ))}
-        </SpeakableCard>
+            ))}
+          </SpeakableCard>
+        )}
       </div>
     </div>
   );

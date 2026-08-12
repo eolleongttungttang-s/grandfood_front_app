@@ -11,6 +11,7 @@ import { InviteFormState, submitInviteConsent, submitInviteDecline } from "@/lib
 import { consumeWardInvite } from "@/lib/ward-invite";
 import { addWard, createSelfWard } from "@/lib/wards";
 import { speakOnDemand } from "@/lib/accessibility";
+import { formatKoreanPhoneNumber } from "@/lib/phone-format";
 import { useSession } from "@/lib/session";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -175,7 +176,7 @@ export function ConsentView({
             <Input
               id="consent-phone"
               value={form.elderPhone}
-              onChange={(e) => updateField("elderPhone", e.target.value)}
+              onChange={(e) => updateField("elderPhone", formatKoreanPhoneNumber(e.target.value))}
             />
           </div>
           <div className="flex flex-col gap-1.5">

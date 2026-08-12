@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Camera, Stethoscope } from "lucide-react";
+import { Camera, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
 
 import { Ward, WardDetail } from "@/lib/wards";
 import { getRepresentativeDish } from "@/lib/dishes";
@@ -62,6 +62,13 @@ export function DietView({
   const afterPreview = useObjectUrl(afterPhoto);
   const mealLogs = wardMealLogs(useLocalStore(mealLogStore), ward.id);
   const latestLog = mealLogs[mealLogs.length - 1];
+  const mealCheckinSpeech = latestLog
+    ? `식사 전후 사진을 찍어서 잔반 분석을 요청할 수 있어요. 최근 분석 결과, 전체 잔반율은 ${latestLog.leftoverRatePercent}%입니다.`
+    : "식사 전후 사진을 찍어서 잔반 분석을 요청할 수 있어요.";
+
+  // "왜 이 조합인가요"/"질환·알레르기·복약"은 매번 볼 필요는 없는 참고 정보라, 기본은 접어두고
+  // 필요할 때만 펼친다 — 화면당 목적을 하나로 유지하기 위함(ATM 화면처럼 한 화면에 결정할 것 하나만).
+  const [showDetails, setShowDetails] = useState(false);
 
   async function analyzeLeftovers() {
     if (!beforePhoto || !afterPhoto) return;
@@ -103,49 +110,40 @@ export function DietView({
       <div className="flex flex-col gap-4 px-5">
         <SpeakableCard
           id="diet-recommended-combo"
-          text={recommendedComboSpeech}
+          text={`${recommendedComboSpeech} ${menuCompositionSpeech}`}
           tone="sidebar"
-          className="flex flex-col gap-2 rounded-2xl bg-sidebar p-5 text-sidebar-foreground shadow-sm"
+          className="flex flex-col gap-3 rounded-2xl bg-sidebar p-5 text-sidebar-foreground shadow-sm"
         >
-          <span className="text-xs font-bold tracking-wide text-sidebar-primary">
-            AI 반찬 매칭
-          </span>
-          <span className="text-xl font-extrabold">오늘의 추천 반찬 조합</span>
-          <div className="flex gap-4 pt-1 text-xs">
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">나트륨</span>
-              <span className="font-semibold">{detail.recommendedCombo.totalSodiumMg}mg</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">단백질</span>
-              <span className="font-semibold">{detail.recommendedCombo.totalProteinG}g</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">열량</span>
-              <span className="font-semibold">{detail.recommendedCombo.totalKcal}kcal</span>
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-bold tracking-wide text-sidebar-primary">
+              {representativeDish?.imageEmoji ?? "🍽️"} AI 반찬 매칭
+            </span>
+            <span className="text-xl font-extrabold">오늘의 추천 반찬 조합</span>
+            <div className="flex gap-4 text-xs">
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">나트륨</span>
+                <span className="font-semibold">{detail.recommendedCombo.totalSodiumMg}mg</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">단백질</span>
+                <span className="font-semibold">{detail.recommendedCombo.totalProteinG}g</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">열량</span>
+                <span className="font-semibold">{detail.recommendedCombo.totalKcal}kcal</span>
+              </div>
             </div>
           </div>
-        </SpeakableCard>
 
-        <SpeakableCard
-          id="diet-menu-composition"
-          text={menuCompositionSpeech}
-          className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
-        >
-          <span className="text-xs font-bold text-foreground">
-            {representativeDish?.imageEmoji ?? "🍽️"} 오늘 메뉴 구성
-          </span>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1.5 border-t border-sidebar-foreground/15 pt-3">
             {detail.recommendedCombo.items.map((item) => {
               const disliked = dislikes.includes(item.dishId);
               return (
                 <div
                   key={item.dishId}
-                  className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2"
+                  className="flex items-center justify-between rounded-lg bg-sidebar-foreground/10 px-3 py-2"
                 >
-                  <span
-                    className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
-                  >
+                  <span className={`text-sm ${disliked ? "line-through opacity-60" : ""}`}>
                     {item.name}
                   </span>
                   <button
@@ -156,8 +154,8 @@ export function DietView({
                     }}
                     className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
                       disliked
-                        ? "bg-destructive/10 text-destructive"
-                        : "bg-transparent text-muted-foreground hover:bg-muted"
+                        ? "bg-destructive/20 text-destructive-foreground"
+                        : "bg-transparent hover:bg-sidebar-foreground/10"
                     }`}
                   >
                     {disliked ? "기피 표시됨" : "이거 싫어요"}
@@ -167,26 +165,33 @@ export function DietView({
             })}
           </div>
           {dislikes.length > 0 && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-sidebar-foreground/60">
               기피 표시한 반찬은 보호자와 담당 영양사에게 함께 보여요.
             </p>
           )}
         </SpeakableCard>
 
-        <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <span className="text-base font-bold text-foreground">식사 체크인 · 잔반 분석</span>
+        <SpeakableCard
+          id="diet-meal-checkin"
+          text={mealCheckinSpeech}
+          className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
+        >
+          <span className="text-lg font-bold text-foreground">식사 체크인 · 잔반 분석</span>
           <p className="text-sm text-muted-foreground">
             식사 전/후 사진을 찍어 올리면 반찬별 잔반율을 분석해드려요.
           </p>
-          <div className="flex gap-2">
-            <label className="flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-border bg-muted/40 p-3 text-center">
+          <div className="flex gap-3">
+            <label
+              className="flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-muted/40 p-5 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
               {beforePreview ? (
                 // eslint-disable-next-line @next/next/no-img-element -- 로컬 blob URL 미리보기라 next/image 최적화 대상이 아님
-                <img src={beforePreview} alt="식전 사진 미리보기" className="h-16 w-16 rounded object-cover" />
+                <img src={beforePreview} alt="식전 사진 미리보기" className="h-24 w-24 rounded-lg object-cover" />
               ) : (
-                <Camera className="h-5 w-5 text-muted-foreground" />
+                <Camera className="h-8 w-8 text-muted-foreground" />
               )}
-              <span className="text-xs text-muted-foreground">식전 사진</span>
+              <span className="text-sm font-semibold text-muted-foreground">식전 사진</span>
               <input
                 type="file"
                 accept="image/*"
@@ -195,14 +200,17 @@ export function DietView({
                 onChange={(e) => setBeforePhoto(e.target.files?.[0] ?? null)}
               />
             </label>
-            <label className="flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-border bg-muted/40 p-3 text-center">
+            <label
+              className="flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-muted/40 p-5 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
               {afterPreview ? (
                 // eslint-disable-next-line @next/next/no-img-element -- 로컬 blob URL 미리보기라 next/image 최적화 대상이 아님
-                <img src={afterPreview} alt="식후 사진 미리보기" className="h-16 w-16 rounded object-cover" />
+                <img src={afterPreview} alt="식후 사진 미리보기" className="h-24 w-24 rounded-lg object-cover" />
               ) : (
-                <Camera className="h-5 w-5 text-muted-foreground" />
+                <Camera className="h-8 w-8 text-muted-foreground" />
               )}
-              <span className="text-xs text-muted-foreground">식후 사진</span>
+              <span className="text-sm font-semibold text-muted-foreground">식후 사진</span>
               <input
                 type="file"
                 accept="image/*"
@@ -212,7 +220,15 @@ export function DietView({
               />
             </label>
           </div>
-          <Button size="sm" disabled={!beforePhoto || !afterPhoto || submitting} onClick={analyzeLeftovers}>
+          <Button
+            size="lg"
+            className="h-14 text-base"
+            disabled={!beforePhoto || !afterPhoto || submitting}
+            onClick={(e) => {
+              e.stopPropagation();
+              analyzeLeftovers();
+            }}
+          >
             {submitting ? "분석 요청 중..." : "잔반 분석하기"}
           </Button>
           {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
@@ -229,82 +245,104 @@ export function DietView({
               ))}
             </div>
           )}
-        </div>
-
-        <SpeakableCard
-          id="diet-reasons"
-          text={reasonsSpeech}
-          className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
-        >
-          <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
-          {detail.recommendedCombo.reasons.map((reason, i) => (
-            <div
-              key={i}
-              className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-bold text-background">
-                {i + 1}
-              </span>
-              {reason}
-            </div>
-          ))}
         </SpeakableCard>
 
-        <SpeakableCard
-          id="diet-conditions"
-          text={conditionsSpeech}
-          className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm"
+        <button
+          type="button"
+          onClick={() => setShowDetails((v) => !v)}
+          className="flex items-center justify-between rounded-2xl border border-border bg-card px-5 py-4 text-left shadow-sm"
         >
-          <span className="text-xs font-bold text-foreground">질환 · 알레르기 · 복약</span>
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-semibold text-muted-foreground">진단 질환</span>
-            <div className="flex flex-wrap gap-1.5">
-              {detail.conditions.map((c) => (
-                <Badge key={c} variant="secondary">
-                  {c}
-                </Badge>
-              ))}
-            </div>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-semibold text-muted-foreground">알레르기 · 금기</span>
-            <div className="flex flex-wrap gap-1.5">
-              {detail.allergies[0] === "없음" ? (
-                <span className="text-sm text-muted-foreground">없음</span>
-              ) : (
-                detail.allergies.map((a) => (
-                  <Badge key={a} className="bg-risk-high text-risk-high-foreground">
-                    {a}
-                  </Badge>
-                ))
-              )}
-            </div>
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted-foreground">복약</span>
-            {detail.medications.map((m) => (
-              <div key={m.name} className="flex justify-between text-sm">
-                <span className="text-foreground">{m.name}</span>
-                <span className="text-muted-foreground">{m.schedule}</span>
-              </div>
-            ))}
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted-foreground">
-              저작 · 연하 상태
+          <span className="flex flex-col gap-0.5">
+            <span className="text-base font-bold text-foreground">
+              왜 이 조합인지, 건강정보 보기
             </span>
-            <p className="text-sm text-foreground">{detail.chewingNote}</p>
-          </div>
-        </SpeakableCard>
+            <span className="text-xs text-muted-foreground">터치하면 자세히 볼 수 있어요</span>
+          </span>
+          {showDetails ? (
+            <ChevronUp className="h-6 w-6 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-6 w-6 shrink-0 text-muted-foreground" />
+          )}
+        </button>
+
+        {showDetails && (
+          <>
+            <SpeakableCard
+              id="diet-reasons"
+              text={reasonsSpeech}
+              className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
+            >
+              <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
+              {detail.recommendedCombo.reasons.map((reason, i) => (
+                <div
+                  key={i}
+                  className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"
+                >
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-bold text-background">
+                    {i + 1}
+                  </span>
+                  {reason}
+                </div>
+              ))}
+            </SpeakableCard>
+
+            <SpeakableCard
+              id="diet-conditions"
+              text={conditionsSpeech}
+              className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm"
+            >
+              <span className="text-xs font-bold text-foreground">질환 · 알레르기 · 복약</span>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold text-muted-foreground">진단 질환</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {detail.conditions.map((c) => (
+                    <Badge key={c} variant="secondary">
+                      {c}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold text-muted-foreground">알레르기 · 금기</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {detail.allergies[0] === "없음" ? (
+                    <span className="text-sm text-muted-foreground">없음</span>
+                  ) : (
+                    detail.allergies.map((a) => (
+                      <Badge key={a} className="bg-risk-high text-risk-high-foreground">
+                        {a}
+                      </Badge>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold text-muted-foreground">복약</span>
+                {detail.medications.map((m) => (
+                  <div key={m.name} className="flex justify-between text-sm">
+                    <span className="text-foreground">{m.name}</span>
+                    <span className="text-muted-foreground">{m.schedule}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold text-muted-foreground">
+                  저작 · 연하 상태
+                </span>
+                <p className="text-sm text-foreground">{detail.chewingNote}</p>
+              </div>
+            </SpeakableCard>
+          </>
+        )}
 
         <Button
-          variant="outline"
-          className="w-full"
+          size="lg"
+          className="h-14 w-full text-base"
           nativeButton={false}
           render={<Link href="/user/assistant" />}
         >
-          <Stethoscope />
-          AI 도우미와 채팅 상담하기
+          <Sparkles className="h-5 w-5" />
+          AI 도우미와 이야기하기
         </Button>
       </div>
     </div>
