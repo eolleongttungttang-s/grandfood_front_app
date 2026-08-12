@@ -7,7 +7,12 @@ import { toast } from "sonner";
 import { useSession } from "@/lib/session";
 import { getWard } from "@/lib/wards";
 import { registerCareProfile, skipCareProfile } from "@/lib/care-profile";
-import { healthProfileStore, registerHealthProfile, toBackendActivityLevel } from "@/lib/health-profile";
+import {
+  healthProfileStore,
+  mergeHealthMetrics,
+  registerHealthProfile,
+  toBackendActivityLevel,
+} from "@/lib/health-profile";
 import {
   backendWardIdMapStore,
   getBackendConditionFlags,
@@ -62,28 +67,16 @@ function InviteSurveyPageContent() {
   // health-profile.ts의 로컬 저장소에도 남겨야 한다 — 두 저장소가 서로 다른 목적이라
   // (health-profile.ts 상단 주석 참고) 하나로 합치지 않고 각자 저장한다.
   //
-  // RegisterHealthProfileCommand의 기존 4개 필드(systolicBP 등)는 옵셔널이 아니라서,
-  // "모르겠어요"로 건너뛴 값을 무작정 0으로 채우면 화면에 "0mmHg" 같은 가짜 숫자가
-  // 뜬다 — 그래서 기존에 저장된 값이 있으면 그 값을 유지하고, 이번에 새로 입력한
-  // 값만 덮어쓴다. (완전 첫 입력이고 전부 건너뛴 경우엔 이 로컬 저장은 그냥 생략해서,
-  // wards.ts의 시드 기반 기본값이 계속 쓰이게 둔다 — 0을 저장하는 것보다 낫다.)
+  // "모르겠어요"로 건너뛴 값은 기존에 저장된 값이 있으면 그 값을 유지하고, 없으면
+  // undefined(미입력)로 그대로 둔다 — 실제 병합은 health-profile.ts의 mergeHealthMetrics()
+  // (user/survey/page.tsx와 공유).
   async function saveHealthMetricsLocally(health: HealthMetricsForm) {
     if (!wardId) return;
     const existing = healthProfileStore.read()[wardId];
     const hasAnyValue = Object.values(health).some((v) => v !== undefined);
     if (!existing && !hasAnyValue) return;
 
-    await registerHealthProfile({
-      wardId,
-      source: "self_reported",
-      systolicBP: health.systolicBP ?? existing?.systolicBP ?? 0,
-      fastingGlucose: health.fastingGlucose ?? existing?.fastingGlucose ?? 0,
-      hba1c: existing?.hba1c ?? 0,
-      weightKg: health.weightKg ?? existing?.weightKg ?? 0,
-      heightCm: health.heightCm ?? existing?.heightCm,
-      diastolicBP: health.diastolicBP ?? existing?.diastolicBP,
-      activityLevel: health.activityLevel ?? existing?.activityLevel,
-    });
+    await registerHealthProfile(mergeHealthMetrics(wardId, health, existing));
   }
 
   return (

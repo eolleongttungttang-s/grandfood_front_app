@@ -14,9 +14,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BirthDateSelect } from "@/components/app/birth-date-select";
+import { PhoneInput } from "@/components/app/phone-input";
 import { UserRole, registerAccount } from "@/lib/auth";
 import { registerGuardianBackend, registerUserBackend } from "@/lib/backend-auth";
-import { formatKoreanPhoneNumber } from "@/lib/phone-format";
 import { speakOnDemand } from "@/lib/accessibility";
 import { useSession } from "@/lib/session";
 import { addWard, createSelfWard } from "@/lib/wards";
@@ -176,7 +176,7 @@ export default function SignupPage() {
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="signup-phone">전화번호</Label>
-                <Input id="signup-phone" value={phone} onChange={(event) => setPhone(formatKoreanPhoneNumber(event.target.value))} autoComplete="tel" inputMode="tel" placeholder="010-0000-0000" required />
+                <PhoneInput id="signup-phone" value={phone} onChange={setPhone} autoComplete="tel" inputMode="tel" placeholder="010-0000-0000" required />
               </div>
               {role === "guardian" ? (
                 <>

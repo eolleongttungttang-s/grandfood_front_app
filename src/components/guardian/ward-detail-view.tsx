@@ -481,17 +481,27 @@ export function WardDetailView({
               {detail.healthProfile.source === "mydata_linked" ? "마이데이터 연동" : "자가 입력"}
             </span>
           </div>
-          <DetailRow label="혈압 위쪽 숫자 (수축기)">{detail.healthProfile.systolicBP} mmHg</DetailRow>
+          <DetailRow label="혈압 위쪽 숫자 (수축기)">
+            {detail.healthProfile.systolicBP != null
+              ? `${detail.healthProfile.systolicBP} mmHg`
+              : "미입력"}
+          </DetailRow>
           <DetailRow label="혈압 아래쪽 숫자 (이완기)">
             {detail.healthProfile.diastolicBP != null
               ? `${detail.healthProfile.diastolicBP} mmHg`
               : "미입력"}
           </DetailRow>
-          <DetailRow label="공복혈당">{detail.healthProfile.fastingGlucose} mg/dL</DetailRow>
+          <DetailRow label="공복혈당">
+            {detail.healthProfile.fastingGlucose != null
+              ? `${detail.healthProfile.fastingGlucose} mg/dL`
+              : "미입력"}
+          </DetailRow>
           <DetailRow label="키">
             {detail.healthProfile.heightCm != null ? `${detail.healthProfile.heightCm} cm` : "미입력"}
           </DetailRow>
-          <DetailRow label="체중">{detail.healthProfile.weightKg} kg</DetailRow>
+          <DetailRow label="체중">
+            {detail.healthProfile.weightKg != null ? `${detail.healthProfile.weightKg} kg` : "미입력"}
+          </DetailRow>
           <DetailRow label="활동 수준">
             {detail.healthProfile.activityLevel
               ? ACTIVITY_LEVEL_LABEL[detail.healthProfile.activityLevel]

@@ -19,3 +19,29 @@ export function formatKoreanPhoneNumber(value: string): string {
   if (digits.length <= 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
   return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 11)}`;
 }
+
+// formatKoreanPhoneNumber()가 매 입력마다 문자열을 통째로 재생성해서, 그냥 두면 브라우저가
+// 커서를 문자열 끝으로 보내버린다 — 중간 자리(예: 가운데 4자리)를 고치는 사람 입장에선
+// 매번 커서를 다시 옮겨야 해서 불편하다(코드 리뷰 지적, 고령층 접근성 기능에서 특히 문제).
+// "이전 커서 앞에 숫자가 몇 개 있었는지"를 세서, 포맷 후 같은 숫자 뒤로 커서를 되돌린다 —
+// 하이픈 자체는 세지 않으니 하이픈이 느는/주는 것과 무관하게 항상 같은 숫자 뒤에 선다.
+export function formatKoreanPhoneNumberWithCursor(
+  rawValue: string,
+  cursorPos: number
+): { formatted: string; cursor: number } {
+  const digitsBeforeCursor = rawValue.slice(0, cursorPos).replace(/\D/g, "").length;
+  const formatted = formatKoreanPhoneNumber(rawValue);
+
+  if (digitsBeforeCursor === 0) return { formatted, cursor: 0 };
+
+  let seenDigits = 0;
+  for (let i = 0; i < formatted.length; i++) {
+    if (/\d/.test(formatted[i])) {
+      seenDigits++;
+      if (seenDigits === digitsBeforeCursor) {
+        return { formatted, cursor: i + 1 };
+      }
+    }
+  }
+  return { formatted, cursor: formatted.length };
+}

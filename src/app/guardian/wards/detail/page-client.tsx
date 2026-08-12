@@ -26,15 +26,21 @@ export function GuardianWardDetailPageClient() {
     // 권한 확인(canView)보다 먼저 fetch가 나가면 안 된다 — 이 앱은 한 브라우저에 여러 보호자
     // 계정 세션이 캐시될 수 있는 구조라, URL의 id를 다른 보호자(B)가 관리하는 대상자로 바꾸면
     // canView가 나중에 거부하기 전에 이미 B 계정의 캐시된 토큰으로 실제 요청이 나갈 수 있었다.
+    // account.loginId도 같이 넘겨서, fetchWardMealDashboard 안쪽(resolveCachedBackendWardAccess)
+    // 에서 한 번 더 확인하게 한다 — 이 useEffect의 가드를 나중에 다른 화면이 깜빡 빠뜨려도
+    // 안전망이 되도록.
     if (!id || !canView) return;
-    let cancelled = false;
-    fetchWardMealDashboard(id).then((result) => {
-      if (!cancelled) setMealDashboardState({ id, dashboard: result });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, canView]);
+    const controller = new AbortController();
+    fetchWardMealDashboard(id, { signal: controller.signal, viewerGuardianLoginId: account?.loginId }).then(
+      (result) => {
+        if (!controller.signal.aborted) setMealDashboardState({ id, dashboard: result });
+      }
+    );
+    // 대상자를 빠르게 넘나들거나 화면을 벗어나면, 아직 안 끝난 이전 요청을 실제로
+    // 취소한다(예전엔 로컬 cancelled 플래그로 "반영만" 막고, 네트워크 요청 자체는 백그라운드에
+    // 계속 남아있었다 — 코드 리뷰 지적).
+    return () => controller.abort();
+  }, [id, canView, account?.loginId]);
 
   // null이면 "아직 응답 안 옴"(로딩 중) — notifications-view.tsx와 같은 패턴.
   const mealDashboard = mealDashboardState?.id === id ? mealDashboardState.dashboard : null;

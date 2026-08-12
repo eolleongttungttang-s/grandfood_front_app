@@ -12,7 +12,7 @@ import {
   registerCareProfile,
   skipCareProfile,
 } from "@/lib/care-profile";
-import { healthProfileStore, registerHealthProfile } from "@/lib/health-profile";
+import { healthProfileStore, mergeHealthMetrics, registerHealthProfile } from "@/lib/health-profile";
 import { CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
 import { TopBar } from "@/components/app/top-bar";
 import { useLocalStore } from "@/lib/use-store";
@@ -36,8 +36,17 @@ function UserSurveyPageContent() {
   const existingHealth = healthProfiles[wardId];
   const afterCompleteHref = isFirstTime ? "/user/home" : "/user/profile";
 
-  // invite/survey/page.tsx와 같은 이유(0을 저장하는 대신 기존 값 유지)로 병합해서 저장한다 —
-  // 다만 여기는 재방문(마이 화면)이라 실제 백엔드 User 등록은 이미 끝나 있으므로 그건 안 한다.
+  // invite/survey/page.tsx와 같은 이유(개별 필드 단위로, 값이 하나도 없으면 0이 아니라
+  // undefined 그대로 유지)로 병합해서 저장한다 — 다만 여기는 재방문(마이 화면)이라 실제
+  // 백엔드 User 등록은 이미 끝나 있으므로 그건 안 한다.
+  //
+  // 자가등록(보호자 없이 /signup으로 직접 가입) 이용자의 경우, 여기서 입력한 키/몸무게/
+  // 활동량은 로컬 healthProfileStore에만 남고 실제 백엔드 User 레코드로는 전달되지
+  // 않는다 — signup/page.tsx가 쓰는 registerUserBackend()가 이 필드들을 아예 안 받는
+  // 스키마라서다(QR 초대 경로의 registerElderFromInviteBackend와 다름). 그래서 이
+  // 이용자의 BMR/TDEE 기반 서버 영양 목표치는 실제 키/몸무게 없이 계산된다 — 프론트만으로는
+  // 못 고치는 백엔드 쪽 갭(자가등록 이용자가 가입 이후 시점에 자기 신체 정보를 갱신할
+  // API가 없음)이라 일단 알고 있는 한계로 남겨둔다.
   async function saveHealthMetrics(health: HealthMetricsForm) {
     if (!wardId) return;
     const hasAnyValue = Object.values(health).some((v) => v !== undefined);
@@ -46,10 +55,10 @@ function UserSurveyPageContent() {
     await registerHealthProfile({
       wardId,
       source: "self_reported",
-      systolicBP: health.systolicBP ?? existingHealth?.systolicBP ?? 0,
-      fastingGlucose: health.fastingGlucose ?? existingHealth?.fastingGlucose ?? 0,
+      systolicBP: health.systolicBP ?? existingHealth?.systolicBP,
+      fastingGlucose: health.fastingGlucose ?? existingHealth?.fastingGlucose,
       hba1c: existingHealth?.hba1c ?? 0,
-      weightKg: health.weightKg ?? existingHealth?.weightKg ?? 0,
+      weightKg: health.weightKg ?? existingHealth?.weightKg,
       heightCm: health.heightCm ?? existingHealth?.heightCm,
       diastolicBP: health.diastolicBP ?? existingHealth?.diastolicBP,
       activityLevel: health.activityLevel ?? existingHealth?.activityLevel,

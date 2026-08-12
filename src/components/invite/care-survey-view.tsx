@@ -13,7 +13,7 @@ import {
   RegisterCareProfileCommand,
 } from "@/lib/care-profile";
 import { ACTIVITY_LEVEL_LABEL, ActivityLevel } from "@/lib/health-profile";
-import { formatKoreanPhoneNumber } from "@/lib/phone-format";
+import { PhoneInput } from "@/components/app/phone-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -451,12 +451,12 @@ export function CareSurveyView({
                 <Label htmlFor="ec-phone" className="text-base">
                   전화번호
                 </Label>
-                <Input
+                <PhoneInput
                   id="ec-phone"
                   className="h-14 text-lg"
                   placeholder="010-0000-0000"
                   value={form.emergencyContactPhone}
-                  onChange={(e) => update("emergencyContactPhone", formatKoreanPhoneNumber(e.target.value))}
+                  onChange={(value) => update("emergencyContactPhone", value)}
                 />
               </div>
             </div>
