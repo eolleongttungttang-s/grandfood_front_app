@@ -81,7 +81,7 @@ export function WardListView({ name, wards }: { name: string; wards: Ward[] }) {
                   .map((ward) => (
                     <Link
                       key={ward.id}
-                      href={`/guardian/wards/${ward.id}`}
+                      href={`/guardian/wards/detail?id=${ward.id}`}
                       className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm"
                     >
                       <div className="flex items-center gap-3">

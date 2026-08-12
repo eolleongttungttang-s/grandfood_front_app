@@ -18,8 +18,8 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { BrandHeader } from "@/components/app/brand-header";
 import { useSession } from "@/lib/session";
-import { UserRole } from "@/lib/auth";
-import { loginGuardianBackend } from "@/lib/backend-auth";
+import { UserRole, ensureLocalGuardianAccount } from "@/lib/auth";
+import { fetchGuardianProfile, loginGuardianBackend, loginUserBackend } from "@/lib/backend-auth";
 
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
 
@@ -55,7 +55,29 @@ export default function LoginPage() {
 
     setSubmitting(true);
     setTimeout(async () => {
-      const account = login(loginId.trim(), password);
+      const trimmedId = loginId.trim();
+      let account = login(trimmedId, password);
+      let backendSessionEstablished = false;
+
+      // 이 브라우저엔 로컬 계정이 없어도(다른 기기에서 가입했거나 저장소가 지워짐) 실제
+      // 백엔드 DB엔 있을 수 있다 — 보호자+이메일 형식 아이디에 한해 실제 백엔드 로그인을
+      // 시도해서, 성공하면 그 결과로 이 기기에 로컬 계정을 새로 만든다.
+      if (!account && tab === "guardian" && EMAIL_PATTERN.test(trimmedId)) {
+        const backendResult = await loginGuardianBackend(trimmedId, password);
+        if ("session" in backendResult) {
+          backendSessionEstablished = true;
+          const profileResult = await fetchGuardianProfile(backendResult.session.accessToken);
+          ensureLocalGuardianAccount({
+            loginId: trimmedId,
+            password,
+            name: backendResult.session.name,
+            phone: "phone" in profileResult ? profileResult.phone : "",
+            relationship: "relationship" in profileResult ? profileResult.relationship : "",
+          });
+          account = login(trimmedId, password);
+        }
+      }
+
       if (!account) {
         setSubmitting(false);
         setError("아이디 또는 비밀번호가 올바르지 않아요.");
@@ -67,11 +89,21 @@ export default function LoginPage() {
         );
       }
 
-      // 보호자가 이메일 형식 아이디로 로그인했다면, 실제 백엔드 로그인도 best-effort로 같이
-      // 시도해서 토큰을 갱신해둔다 — 사진 업로드 함수 호출에 필요하다. 실패해도(예: 데모용
-      // gf-guardian01처럼 백엔드엔 없는 계정) 로컬 로그인 자체는 막지 않는다.
-      if (account.role === "guardian" && EMAIL_PATTERN.test(loginId.trim())) {
-        await loginGuardianBackend(loginId.trim(), password);
+      // 위에서 이미 백엔드 로그인을 마쳤다면(크로스디바이스 폴백) 다시 할 필요 없다. 아니라면
+      // 보호자가 이메일 형식 아이디로 로그인했을 때 best-effort로 같이 시도해서 토큰을
+      // 갱신해둔다 — 사진 업로드 함수 호출에 필요하다. 실패해도(예: 데모용 gf-guardian01처럼
+      // 백엔드엔 없는 계정) 로컬 로그인 자체는 막지 않는다.
+      if (!backendSessionEstablished && account.role === "guardian" && EMAIL_PATTERN.test(trimmedId)) {
+        await loginGuardianBackend(trimmedId, password);
+      }
+
+      // 이용자 본인도 같은 이유로 best-effort 백엔드 로그인을 시도한다 — 직접가입
+      // (signup/page.tsx)으로 만든 계정만 백엔드에 대응 레코드가 있고, 보호자 초대로 만들어진
+      // 계정이나 데모 계정(gf-user01)은 백엔드에 없어서 조용히 실패한다. 크로스디바이스 폴백은
+      // 이용자 쪽엔 없다 — 백엔드가 로그인 응답으로 이름만 돌려주고 생년월일/주소가 없어서,
+      // 로컬 계정을 새로 만들어도 대상자(Ward) 정보가 없는 반쪽짜리 홈 화면이 된다.
+      if (account.role === "user") {
+        await loginUserBackend(trimmedId, password);
       }
 
       setSubmitting(false);

@@ -469,7 +469,7 @@ export function WardDetailView({
             variant="outline"
             className="h-auto flex-col gap-1.5 py-3"
             nativeButton={false}
-            render={<Link href={`/guardian/wards/${ward.id}/report`} />}
+            render={<Link href={`/guardian/wards/detail/report?id=${ward.id}`} />}
           >
             <FileText className="h-5 w-5 text-accent" />
             <span className="text-sm">월간 건강 리포트</span>
@@ -478,7 +478,7 @@ export function WardDetailView({
             variant="outline"
             className="h-auto flex-col gap-1.5 py-3"
             nativeButton={false}
-            render={<Link href={`/guardian/wards/${ward.id}/nutritionist`} />}
+            render={<Link href={`/guardian/wards/detail/nutritionist?id=${ward.id}`} />}
           >
             <Stethoscope className="h-5 w-5 text-accent" />
             <span className="text-sm">영양사 상담 이력</span>

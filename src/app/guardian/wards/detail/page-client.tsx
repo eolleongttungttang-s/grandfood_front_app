@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { useSession } from "@/lib/session";
@@ -8,12 +8,12 @@ import { getWard, getWardDetail } from "@/lib/wards";
 import { WardDetailView } from "@/components/guardian/ward-detail-view";
 
 export function GuardianWardDetailPageClient() {
-  const { id } = useParams<{ id: string }>();
+  const id = useSearchParams().get("id");
   const { account } = useSession();
 
   if (!account) return null;
 
-  const ward = getWard(id);
+  const ward = id ? getWard(id) : undefined;
   const canView = ward && account.wardIds?.includes(ward.id);
 
   if (!ward || !canView) {

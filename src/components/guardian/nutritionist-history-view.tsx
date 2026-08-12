@@ -17,7 +17,7 @@ export function NutritionistHistoryView({ ward }: { ward: Ward }) {
       <div className="flex items-center gap-3 bg-sidebar px-5 py-3 text-sidebar-foreground">
         <GrandFoodMark className="h-6 w-6 shrink-0 rounded-md" />
         <Link
-          href={`/guardian/wards/${ward.id}`}
+          href={`/guardian/wards/detail?id=${ward.id}`}
           className="flex items-center gap-1 text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground"
         >
           <ChevronLeft className="h-4 w-4" />

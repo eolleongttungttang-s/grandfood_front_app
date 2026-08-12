@@ -13,8 +13,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BirthDateSelect } from "@/components/app/birth-date-select";
 import { UserRole, registerAccount } from "@/lib/auth";
-import { registerGuardianBackend } from "@/lib/backend-auth";
+import { registerGuardianBackend, registerUserBackend } from "@/lib/backend-auth";
 import { speakOnDemand } from "@/lib/accessibility";
 import { useSession } from "@/lib/session";
 import { addWard, createSelfWard } from "@/lib/wards";
@@ -93,14 +94,27 @@ export default function SignupPage() {
 
     login(result.account.loginId, password);
 
-    // 보호자는 실제 백엔드에도 같이 가입시켜서, 로그인 토큰을 받아둔다 — 이게 있어야
-    // 나중에 어르신 사진 업로드(잔반 분석) 기능을 실제로 호출할 수 있다. 백엔드 가입이
-    // 실패해도(서버 일시 장애 등) 로컬 가입 자체는 막지 않는다 — 앱은 계속 쓸 수 있어야 하고,
-    // 사진 업로드만 나중에 다시 로그인하면 활성화된다.
+    // 보호자/이용자 둘 다 실제 백엔드에도 같이 가입시켜서, 로그인 토큰을 받아둔다 — 이게
+    // 있어야 나중에 어르신 사진 업로드(잔반 분석)나 알림 조회 같은 기능을 실제로 호출할 수
+    // 있다. 백엔드 가입이 실패해도(서버 일시 장애 등) 로컬 가입 자체는 막지 않는다 — 앱은
+    // 계속 쓸 수 있어야 하고, 해당 기능만 나중에 다시 로그인하면 활성화된다.
     if (role === "guardian") {
       const backendResult = await registerGuardianBackend({ name, phone, email, password, relationship });
       if ("error" in backendResult) {
         toast.info("사진 업로드 같은 일부 기능은 나중에 이 계정으로 다시 로그인하면 활성화돼요.");
+      }
+    } else {
+      const backendResult = await registerUserBackend({
+        loginId: result.account.loginId,
+        password,
+        name,
+        birthDate,
+        phone,
+        address,
+        planType,
+      });
+      if ("error" in backendResult) {
+        toast.info("일부 기능은 나중에 이 계정으로 다시 로그인하면 활성화돼요.");
       }
     }
 
@@ -175,8 +189,8 @@ export default function SignupPage() {
               ) : (
                 <>
                   <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="signup-birth-date">생년월일</Label>
-                    <Input id="signup-birth-date" type="date" value={birthDate} onChange={(event) => setBirthDate(event.target.value)} autoComplete="bday" required />
+                    <Label htmlFor="signup-birth-date-year">생년월일</Label>
+                    <BirthDateSelect idPrefix="signup-birth-date" value={birthDate} onChange={setBirthDate} />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <Label>성별</Label>

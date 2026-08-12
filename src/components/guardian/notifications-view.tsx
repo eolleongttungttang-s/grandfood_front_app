@@ -1,10 +1,11 @@
 "use client";
 
-import { NotificationItem, notificationBadgeClass } from "@/lib/notifications";
+import { useEffect, useState } from "react";
+
+import { NotificationItem, fetchGuardianNotifications, notificationBadgeClass } from "@/lib/notifications";
 import { acknowledgeSos, sosStore } from "@/lib/sos-store";
 import { useLocalStore } from "@/lib/use-store";
 import { useSession } from "@/lib/session";
-import { getWard } from "@/lib/wards";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
@@ -16,24 +17,44 @@ function formatTime(timestamp: number) {
   ).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-export function NotificationsView({ items }: { items: NotificationItem[] }) {
+export function NotificationsView() {
   const { account } = useSession();
   const sosEvents = useLocalStore(sosStore);
+  // items가 null이면 "아직 응답 안 옴"(로딩 중)이고, 응답이 오면 빈 배열이든 아니든 배열로
+  // 바뀐다 — report-view.tsx의 비동기 조회와 같은 패턴(로딩 상태를 별도 boolean으로 안 두고
+  // null 여부로 판단).
+  const [items, setItems] = useState<NotificationItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // 알림 목록(GUARDIAN_NOTIFICATIONS)과 SOS 이벤트는 전역 저장소라 손대지 않고, 여기서
-  // 지금 로그인한 보호자가 실제로 맡은 대상자(wardIds) 것만 걸러서 보여준다. 기존
-  // 목업 계정(gf-guardian01)은 001/006/008을 다 갖고 있어서 걸러도 원래 보이던 항목이
-  // 그대로 보이고, 새로 가입한 보호자는 자기 대상자와 무관한 남의 알림을 안 보게 된다.
-  // targetName이 없는 항목(예: "공지")은 특정 대상자와 무관하니 모두에게 보여준다.
+  // SOS는 여전히 로컬 전역 저장소(sos-store.ts)라 여기서 이 보호자의 대상자(wardIds) 것만
+  // 걸러서 보여준다. 이상신호/안부확인콜 알림은 이제 실제 백엔드가 로그인한 보호자 토큰으로
+  // 이미 본인 대상자 것만 걸러서 주기 때문에(app/guardian/notifications), 클라이언트에서
+  // 다시 거를 필요가 없다.
   const guardianWardIds = account?.wardIds ?? [];
-  const guardianWardNames = new Set(
-    guardianWardIds
-      .map((id) => getWard(id)?.name)
-      .filter((name): name is string => Boolean(name))
-  );
-
   const scopedSosEvents = sosEvents.filter((e) => guardianWardIds.includes(e.wardId));
-  const scopedItems = items.filter((n) => !n.targetName || guardianWardNames.has(n.targetName));
+
+  useEffect(() => {
+    if (!account) return;
+    let cancelled = false;
+    fetchGuardianNotifications(account.loginId)
+      .then((result) => {
+        // 이전 시도(예: account가 바뀌어 effect가 재실행된 경우)에서 남은 에러가 있으면
+        // 같이 지운다 — 안 그러면 재시도가 성공해도 옛 에러 배너가 새로 온 목록 위에
+        // 계속 남는다.
+        if (!cancelled) {
+          setItems(result);
+          setError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "알림을 불러오지 못했어요.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [account]);
 
   const sosItems: (NotificationItem & { sosId?: string })[] = scopedSosEvents.map((e) => ({
     id: e.id,
@@ -45,13 +66,23 @@ export function NotificationsView({ items }: { items: NotificationItem[] }) {
     read: e.acknowledged,
   }));
 
-  const merged = [...sosItems, ...scopedItems];
+  const loading = items === null && !error;
+  const merged = [...sosItems, ...(items ?? [])];
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
       <TopBar title="알림" subtitle="대상자 소식을 모아봐요" />
 
       <div className="flex flex-col gap-2.5 px-5">
+        {loading && (
+          <p className="py-6 text-center text-sm text-muted-foreground">알림을 불러오는 중이에요...</p>
+        )}
+        {!loading && error && (
+          <p className="rounded-xl bg-muted px-4 py-3 text-sm text-destructive">{error}</p>
+        )}
+        {!loading && !error && merged.length === 0 && (
+          <p className="py-6 text-center text-sm text-muted-foreground">아직 알림이 없어요.</p>
+        )}
         {merged.map((n) => (
           <div
             key={n.id}
