@@ -10,7 +10,6 @@ import { linkWardToGuardian, registerAccount } from "@/lib/auth";
 import { InviteFormState, submitInviteConsent, submitInviteDecline } from "@/lib/invite";
 import { consumeWardInvite } from "@/lib/ward-invite";
 import { addWard, createSelfWard } from "@/lib/wards";
-import { hasBackendGuardianSession } from "@/lib/backend-auth";
 import { speakOnDemand } from "@/lib/accessibility";
 import { useSession } from "@/lib/session";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -84,20 +83,13 @@ export function ConsentView({
 
       const address = `${form.address} ${form.addressDetail}`.trim();
 
-      // 예전엔 여기서 바로 POST /users(createBackendWard)를 호출해 진짜 백엔드 ward를 만들었다.
-      // 문제는 이 시점엔 아직 다음 화면(/invite/survey)의 질환 설문 전이라 condition_flags가
-      // 항상 비어서 나갈 수밖에 없고, 백엔드엔 나중에 조건을 업데이트하는 API가 없어서 한번
-      // 이렇게 만들어지면 그 어르신은 영영 RAG 개인화 대상에서 빠진다. 그래서 실제 백엔드 유저
-      // 생성은 여기서 안 하고, ensureBackendWardId()(rag-chat.ts/meal-log-store.ts가 이미 쓰고
-      // 있음)가 처음 필요해질 때(설문을 끝낸 뒤 첫 RAG 질문/사진 업로드) 딱 한 번만 만들도록
-      // 미룬다 — 그때는 설문이 끝나있어서 조건이 같이 실린다. "보호자 연동이 안 되어 있으면
-      // 여기서 바로 막는다"는 원래 목적은, 실제로 유저를 만들지 않고 세션 존재 여부만 로컬에서
-      // 확인하는 것으로 그대로 유지한다.
-      if (!hasBackendGuardianSession(guardianLoginId)) {
-        setError("보호자가 아직 실제 계정 연동을 완료하지 않았어요. 보호자에게 문의해 주세요.");
-        return;
-      }
-
+      // 실제 백엔드 User는 여기서 만들지 않는다 — 이 시점엔 아직 다음 화면(/invite/survey)의
+      // 질환 설문 전이라 condition_flags가 항상 비어서 나갈 수밖에 없다. 대신 코드를
+      // "accepted"로 소비만 해두고(consumeWardInvite), 실제 생성은 설문까지 끝낸 뒤
+      // invite/survey/page.tsx가 POST /wards/invites/{code}/register로 한다 — 이 엔드포인트는
+      // 코드 자체에 저장된 guardian_id만으로 만들어져서 보호자 로그인 세션이 필요 없다
+      // (예전엔 hasBackendGuardianSession()으로 "이 기기에 보호자 세션이 있는지" 확인했는데,
+      // 초대받은 기기엔 애초에 그게 없어서 다른 기기로 넘어오면 항상 여기서 막혔다).
       const newWard = createSelfWard({ id: crypto.randomUUID(), name: form.elderName, birthDate, gender, address });
       addWard(newWard);
 
@@ -125,11 +117,13 @@ export function ConsentView({
 
       // 가입이 완전히 끝난 뒤에 지운다 — 같은 링크로 다시 들어와도 더는 유효한 초대를
       // 못 찾게 해서, 재방문 시 같은 어르신 앞으로 로컬 계정/ward가 중복 생성되는 걸 막는다.
-      consumeWardInvite(code);
+      await consumeWardInvite(code, true);
 
       login(result.account.loginId, generatedPassword);
       toast.success("회원가입이 완료됐어요.");
-      router.push("/invite/survey");
+      // code를 그대로 들고 넘어간다 — invite/survey/page.tsx가 설문 완료 시점에
+      // POST /wards/invites/{code}/register로 실제 백엔드 User를 만드는 데 필요하다.
+      router.push(`/invite/survey?code=${encodeURIComponent(code)}`);
     } finally {
       setSubmitting(false);
     }
@@ -143,7 +137,7 @@ export function ConsentView({
       // "입력됐던 정보를 지금 바로 삭제했어요"라고 안내하는 화면(declined-view.tsx)이
       // 실제로 그 말대로 동작하려면, 폼 초안뿐 아니라 이 초대 자체도 없애야 한다 —
       // 안 그러면 같은 링크로 다시 들어와서 여전히 가입할 수 있는 상태가 남는다.
-      consumeWardInvite(code);
+      await consumeWardInvite(code, false);
       router.push(`/invite/declined?guardianName=${encodeURIComponent(guardianName)}`);
     } finally {
       setSubmitting(false);

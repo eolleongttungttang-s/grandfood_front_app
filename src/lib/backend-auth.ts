@@ -33,7 +33,8 @@ const CONDITION_LABEL_TO_BACKEND_FLAG: Record<(typeof CONDITION_POOL)[number], s
   관절염: "arthritis",
 };
 
-function getBackendConditionFlags(mockWardId: string): string[] {
+// invite/survey/page.tsx도 register-elder-from-invite 호출 시 같은 매핑이 필요해서 export한다.
+export function getBackendConditionFlags(mockWardId: string): string[] {
   // conditions는 설문 자유 응답이라 타입상 string[]이지 CONDITION_POOL 리터럴로 좁혀지진 않는다
   // (UI는 CONDITION_POOL만 고르게 하지만 타입까지 강제하진 않음) — 위 매핑표의 타입 안전성은
   // "표 자체가 CONDITION_POOL을 다 커버하는지"를 잡아주는 용도라, 여기 조회는 느슨하게 한다.
@@ -401,4 +402,160 @@ async function createBackendWardIdRequest(params: {
 
   backendWardIdMapStore.update((prev) => ({ ...prev, [params.mockWardId]: result.userId }));
   return result.userId;
+}
+
+// POST /wards/invites — 보호자가 "부모님 등록"을 누를 때 호출. 이 코드를 서버 DB에
+// 저장해서, 발급한 기기가 아닌 다른 기기(어르신 휴대폰이 QR을 스캔하는 경우)에서도
+// GET /wards/invites/{code}로 조회가 된다 — 예전엔 ward-invite.ts가 로컬(브라우저)
+// localStorage에만 저장해서 같은 브라우저에서만 동작했다.
+export async function createWardInviteBackend(
+  guardianLoginId: string,
+  input: { name: string; phone: string }
+): Promise<{ code: string; expiresAt: string } | { error: string }> {
+  const session = backendGuardianSessionStore.read()[guardianLoginId];
+  if (!session) {
+    return { error: "보호자가 아직 실제 계정 연동을 완료하지 않았어요. 다시 로그인해 주세요." };
+  }
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/wards/invites`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.accessToken}`,
+      },
+      body: JSON.stringify(input),
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) {
+      return { error: await parseErrorResponse(response) };
+    }
+    const data = await response.json();
+    return { code: data.code as string, expiresAt: data.expires_at as string };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return { error: "서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요." };
+    }
+    return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
+export type BackendWardInviteDetail = {
+  code: string;
+  name: string;
+  phone: string;
+  guardianName: string | null;
+  // 보호자 loginId(=가입 시 email)와 같은 값 — 이 기기의 backendGuardianSessionStore를
+  // 바로 찾는 키로 그대로 쓸 수 있다(consent-view.tsx의 guardianLoginId prop).
+  guardianLoginId: string | null;
+  issuedAt: string;
+  expiresAt: string;
+};
+
+// GET /wards/invites/{code} — 비로그인 공개 엔드포인트. 어르신 기기가 QR을 스캔하자마자
+// 호출한다. 코드가 없거나 만료됐거나 이미 처리됐으면 null.
+export async function fetchWardInviteBackend(code: string): Promise<BackendWardInviteDetail | null> {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/wards/invites/${encodeURIComponent(code)}`,
+    {},
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) return null;
+    const data = await response.json();
+    return {
+      code: data.code as string,
+      name: data.name as string,
+      phone: data.phone as string,
+      guardianName: (data.guardian_name as string | null) ?? null,
+      guardianLoginId: (data.guardian_email as string | null) ?? null,
+      issuedAt: data.issued_at as string,
+      expiresAt: data.expires_at as string,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
+// POST /wards/invites/{code}/consume — 동의(accepted=true) 또는 거절(accepted=false) 시
+// 호출. 같은 코드로 다시 들어와도 더는 유효한 초대를 못 찾게 만든다(consumeWardInvite와
+// 동일 목적). 소비 자체가 실패해도(네트워크 등) 로컬 가입/거절 흐름은 막지 않는다 — 최악의
+// 경우 같은 코드가 서버에서 조금 더 유효해 보이는 정도라, 사용자를 막다른 화면에 가두는
+// 것보다 낫다.
+export async function consumeWardInviteBackend(code: string, accepted: boolean): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/wards/invites/${encodeURIComponent(code)}/consume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accepted }),
+    });
+  } catch {
+    // 위 주석 참고 — 조용히 무시.
+  }
+}
+
+// POST /wards/invites/{code}/register — 동의(accepted) 처리된 초대로부터 실제
+// User(+건강 프로필)를 만든다. 보호자 토큰이 전혀 필요 없다 — 코드 자체가 서버에
+// guardian_id를 이미 들고 있어서, 어르신 기기가 보호자의 백엔드 세션을 빌릴 필요가
+// 없다(예전엔 ensureBackendWardId()가 getBackendGuardianSessionForWard()로 이 기기의
+// 로컬 세션을 찾았는데, 초대받은 기기엔 그게 애초에 없어서 여기서도 cross-device가
+// 막혀 있었다).
+//
+// 동의 직후가 아니라 질환 설문(/invite/survey)까지 끝난 뒤에 불러야 한다 — 그래야
+// condition_flags를 같이 실어 보낼 수 있다(동의 시점엔 아직 설문 전이라 항상 비어
+// 나갈 수밖에 없고, 나중에 채워 넣는 API가 없어 그 어르신은 영영 RAG 개인화에서
+// 빠지는 문제가 있었다 — consent-view.tsx의 관련 주석 참고). 같은 code로 여러 번
+// 불러도 서버가 멱등적으로 처리해서 어르신이 같은 코드가 중복 User를 만들지 않는다.
+export async function registerElderFromInviteBackend(
+  code: string,
+  input: {
+    name: string;
+    birthDate: string; // "YYYY-MM-DD"
+    phone: string;
+    address: string;
+    planType: string;
+    conditionFlags?: string[];
+    ttsCallConsent?: boolean;
+  }
+): Promise<{ userId: string } | { error: string }> {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/wards/invites/${encodeURIComponent(code)}/register`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: input.name,
+        birth_date: input.birthDate,
+        phone: input.phone,
+        address: input.address,
+        plan_type: input.planType,
+        condition_flags: input.conditionFlags ?? [],
+        tts_call_consent: input.ttsCallConsent ?? false,
+      }),
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) {
+      return { error: await parseErrorResponse(response) };
+    }
+    const data = await response.json();
+    return { userId: data.user_id as string };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return { error: "서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요." };
+    }
+    return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  } finally {
+    clearRequestTimeout();
+  }
 }
