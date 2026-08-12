@@ -6,8 +6,8 @@
 import { API_BASE_URL } from "@/lib/api-config";
 import {
   backendGuardianSessionStore,
-  getBackendGuardianSessionForWard,
-  getCachedBackendWardId,
+  hasBackendSessionForWard,
+  resolveCachedBackendWardAccess,
 } from "@/lib/backend-auth";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
@@ -41,8 +41,8 @@ export function notificationBadgeClass(type: NotificationType) {
 const REQUEST_TIMEOUT_MS = 15_000;
 
 const GUARDIAN_SESSION_REQUIRED_MESSAGE = "실제 백엔드 계정으로 로그인해야 알림을 불러올 수 있어요.";
-const WARD_GUARDIAN_SESSION_REQUIRED_MESSAGE =
-  "이 대상자를 관리하는 보호자 계정으로 로그인해야 알림을 불러올 수 있어요.";
+const WARD_SESSION_REQUIRED_MESSAGE =
+  "이 대상자를 관리하는 보호자 계정 또는 본인 계정으로 로그인해야 알림을 불러올 수 있어요.";
 
 // 백엔드 GuardianNotificationItem / ElderNotificationItem 응답 모양 (snake_case 그대로,
 // 별도 camelCase 변환 없음 — meal/schemas.py 참고). elder_id/elder_name은 보호자용 응답에만 있다.
@@ -154,26 +154,26 @@ export async function fetchGuardianNotifications(guardianLoginId: string): Promi
   return fetchNotificationItems(`${API_BASE_URL}/app/guardian/notifications`, session.accessToken);
 }
 
-// GET /app/elder/{id}/notifications — 어르신 본인 화면(홈)에서 본인 알림만.
-// 어르신 전용 로그인이 없어서(project-self-signup-ward-no-guardian-link 참고) rag-chat.ts의
-// askHealthQuestion()과 동일한 패턴으로, 이 대상자를 관리하는 보호자의 실제 백엔드 세션을 빌려 쓴다.
-// 보호자 없이 직접가입한 이용자는 구조적으로 이 호출이 항상 실패한다 — 알려진 한계.
+// GET /app/elder/{id}/notifications — 어르신 본인 화면(홈)에서 본인 알림만. 이 대상자를
+// 관리하는 보호자의 실제 백엔드 세션, 또는 (보호자 없이 직접가입한 경우) 본인의 백엔드
+// 세션을 쓴다(rag-chat.ts의 askHealthQuestion()과 동일한 패턴 — resolveCachedBackendWardAccess).
 //
-// 순수 조회라 백엔드 유저를 새로 만들지 않는다(getCachedBackendWardId, ensureBackendWardId
-// 아님) — 사진 업로드/AI 질문 같은 명시적 액션을 한 번도 안 한 대상자는 캐시가 비어있는 게
-// 정상이고, 그럴 땐 "아직 알림 없음"으로 조용히 넘어간다. 실제로 백엔드에 등록된 대상자인데
-// 보호자 세션이 없어서 못 부르는 경우만 에러로 알린다.
+// 순수 조회라 백엔드 유저를 새로 만들지 않는다(resolveBackendWardAccess의 "캐시에 없으면
+// 새로 만듦" 버전이 아니라, 캐시/즉시 확인만 하는 버전을 씀) — 사진 업로드/AI 질문 같은
+// 명시적 액션을 한 번도 안 한 대상자는 캐시가 비어있는 게 정상이고, 그럴 땐 "아직 알림
+// 없음"으로 조용히 넘어간다. 세션 자체가(보호자도 본인도) 없어서 못 부르는 경우만
+// hasBackendSessionForWard로 구분해 에러로 알린다.
 export async function fetchElderNotifications(params: { mockWardId: string }): Promise<NotificationItem[]> {
-  const backendUserId = getCachedBackendWardId(params.mockWardId);
-  if (!backendUserId) return [];
-
-  const guardianSession = getBackendGuardianSessionForWard(params.mockWardId);
-  if (!guardianSession) {
-    throw new Error(WARD_GUARDIAN_SESSION_REQUIRED_MESSAGE);
+  const access = resolveCachedBackendWardAccess(params.mockWardId);
+  if (access) {
+    return fetchNotificationItems(
+      `${API_BASE_URL}/app/elder/${access.backendWardId}/notifications`,
+      access.accessToken
+    );
   }
 
-  return fetchNotificationItems(
-    `${API_BASE_URL}/app/elder/${backendUserId}/notifications`,
-    guardianSession.accessToken
-  );
+  if (!hasBackendSessionForWard(params.mockWardId)) {
+    throw new Error(WARD_SESSION_REQUIRED_MESSAGE);
+  }
+  return [];
 }

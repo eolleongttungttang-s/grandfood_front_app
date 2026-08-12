@@ -7,7 +7,7 @@
 // 분리해서 둔다.
 
 import { createLocalStore } from "@/lib/local-store";
-import { ensureBackendWardId, getBackendGuardianSessionForWard } from "@/lib/backend-auth";
+import { resolveBackendWardAccess } from "@/lib/backend-auth";
 import { API_BASE_URL } from "@/lib/api-config";
 
 export type QuickMealStatus = "완식" | "남김" | null;
@@ -59,8 +59,9 @@ export function wardMealLogs(all: Record<string, MealLogEntry[]>, wardId: string
 
 // POST /wards/:id/meal-logs — 식전/식후 사진을 실제로 백엔드에 업로드해서 잔반 분석을 요청한다.
 // grandfood_backend에 배포되어 있는 실제 엔드포인트 (Container App `grandfood`, 2026-08-04 curl로
-// 직접 호출해 확인함). 이 엔드포인트는 로그인한 보호자의 Bearer 토큰 + 실제 UUID ward_id를 요구한다
-// (보호자 본인 소유 어르신이 아니면 403). 그래서 호출 전에 backend-auth.ts로 실제 토큰/UUID를 먼저
+// 직접 호출해 확인함). 이 엔드포인트는 보호자 Bearer 토큰(본인 대상자) 또는 자가등록 개인 이용자
+// 본인의 Bearer 토큰(자기 자신) 둘 다 받는다(backend PR — get_current_elder_app_caller). 그래서
+// 호출 전에 backend-auth.ts의 resolveBackendWardAccess로 둘 중 실제로 쓸 수 있는 토큰/UUID를 먼저
 // 확보한다 — 목업 wardId("001" 등)와 로컬 세션(session.tsx)만으로는 이 요청이 통과하지 않는다.
 // leftoverRatePercent/compartments는 아직 Vision 분석이 붙지 않아 백엔드에서 0/[]로 고정 응답한다.
 export async function submitMealLogPhotos(params: {
@@ -74,19 +75,16 @@ export async function submitMealLogPhotos(params: {
   beforePhoto: File;
   afterPhoto: File;
 }): Promise<MealLogEntry> {
-  const session = getBackendGuardianSessionForWard(params.wardId);
-  if (!session) {
-    throw new Error("이 대상자를 관리하는 보호자 계정으로 로그인해야 사진을 업로드할 수 있어요.");
-  }
-
-  const backendWardId = await ensureBackendWardId({
+  const access = await resolveBackendWardAccess({
     mockWardId: params.wardId,
     name: params.wardName,
     age: params.wardAge,
     address: params.wardAddress,
   });
-  if (!backendWardId) {
-    throw new Error("대상자 정보를 서버에 등록하지 못했어요. 잠시 후 다시 시도해 주세요.");
+  if (!access) {
+    throw new Error(
+      "이 대상자를 관리하는 보호자 계정 또는 본인 계정으로 로그인해야 사진을 업로드할 수 있어요."
+    );
   }
 
   const formData = new FormData();
@@ -95,9 +93,9 @@ export async function submitMealLogPhotos(params: {
   formData.append("beforePhoto", params.beforePhoto);
   formData.append("afterPhoto", params.afterPhoto);
 
-  const response = await fetch(`${API_BASE_URL}/wards/${backendWardId}/meal-logs`, {
+  const response = await fetch(`${API_BASE_URL}/wards/${access.backendWardId}/meal-logs`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${session.accessToken}` },
+    headers: { Authorization: `Bearer ${access.accessToken}` },
     body: formData,
   });
   if (!response.ok) {

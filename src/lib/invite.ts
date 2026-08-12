@@ -1,14 +1,17 @@
 // 보호자가 발급한 "부모님 등록" 요청 1건의 데이터 모델.
 // e-sms → e-consent → e-declined 화면이 이 값을 공유한다.
 
-import { getWardInviteByCode, type WardInviteResult } from "@/lib/ward-invite";
-import { ACCOUNTS, findAccountByLoginId } from "@/lib/auth";
+import { getWardInviteByCode } from "@/lib/ward-invite";
+import { ACCOUNTS } from "@/lib/auth";
 import { getWard } from "@/lib/wards";
 import { createLocalStore } from "@/lib/local-store";
 
 export type InviteRequest = {
   id: string;
   guardianName: string;
+  // 보호자 loginId(=email)와 같은 값 — 이 어르신이 동의할 때 "누구의 보호자 백엔드
+  // 세션으로 POST /users를 호출해야 하는지"를 ConsentView가 이 값으로 찾는다.
+  guardianLoginId: string;
   elderName: string;
   elderPhone: string;
   address: string;
@@ -26,6 +29,7 @@ const elderWard = getWard(elderAccount.selfWardId!)!;
 export const MOCK_INVITE: InviteRequest = {
   id: "inv-mock-01",
   guardianName: guardianAccount.name,
+  guardianLoginId: guardianAccount.loginId,
   elderName: elderAccount.name,
   elderPhone: elderAccount.phone,
   address: elderWard.address,
@@ -54,18 +58,18 @@ export const inviteFormStore = createLocalStore<InviteFormState>(
   EMPTY_FORM_STATE
 );
 
-// 문자/QR 링크의 ?code=로 들어온 초대를 실제 발급 기록(ward-invite.ts)에서 조회한다.
-// 백엔드에 초대 엔드포인트가 없어서(계약 문서 참고) 로컬에 저장해둔 발급 기록이 곧
-// 진실 소스다 — 코드가 없거나 만료/오타면 null.
-export function resolveInviteByCode(code: string | null): InviteRequest | null {
+// 문자/QR 링크의 ?code=로 들어온 초대를 백엔드(GET /wards/invites/{code})에서 조회한다
+// — 발급한 기기가 아니어도(어르신 휴대폰 등) 서버가 코드를 알고 있어서 조회가 된다.
+// 코드가 없거나 오타·만료·이미 처리된 초대면 null.
+export async function resolveInviteByCode(code: string | null): Promise<InviteRequest | null> {
   if (!code) return null;
-  const invite: WardInviteResult | null = getWardInviteByCode(code);
+  const invite = await getWardInviteByCode(code);
   if (!invite) return null;
 
-  const guardian = findAccountByLoginId(invite.guardianLoginId);
   return {
     id: invite.code,
-    guardianName: guardian?.name ?? "보호자",
+    guardianName: invite.guardianName ?? "보호자",
+    guardianLoginId: invite.guardianLoginId ?? "",
     elderName: invite.name,
     elderPhone: invite.phone,
     address: "",

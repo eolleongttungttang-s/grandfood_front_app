@@ -5,7 +5,7 @@
 // 시스템 프롬프트가 짜여 있어서(domains/rag/service.py), 건강과 무관한 잡담엔 답을 못할 수 있다.
 
 import { API_BASE_URL } from "@/lib/api-config";
-import { ensureBackendWardId, getBackendGuardianSessionForWard } from "@/lib/backend-auth";
+import { resolveBackendWardAccess } from "@/lib/backend-auth";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
 export type HealthAnswer = {
@@ -14,8 +14,8 @@ export type HealthAnswer = {
   matchedConditions: string[];
 };
 
-const GUARDIAN_SESSION_REQUIRED_MESSAGE =
-  "이 대상자를 관리하는 보호자 계정으로 로그인해야 AI 도우미를 쓸 수 있어요.";
+const BACKEND_SESSION_REQUIRED_MESSAGE =
+  "이 대상자를 관리하는 보호자 계정 또는 본인 계정으로 로그인해야 AI 도우미를 쓸 수 있어요.";
 
 // Azure OpenAI 응답이 늦어지는 경우(드묾) 요청이 무한정 매달려 있지 않도록 상한을 둔다 —
 // 이 시간이 지나면 fetch가 AbortError로 실패하고 아래서 사용자에게 보이는 에러로 바꿔준다.
@@ -28,33 +28,30 @@ export async function askHealthQuestion(params: {
   wardAddress: string;
   query: string;
 }): Promise<HealthAnswer> {
-  // meal-log-store.ts의 사진 업로드와 같은 이유로 실제 백엔드 UUID가 필요하다 — 목업
+  // meal-log-store.ts의 사진 업로드와 같은 이유로 실제 백엔드 UUID + 토큰이 필요하다 — 목업
   // wardId로는 이 엔드포인트를 호출할 수 없다. 이 대상자를 관리하는 보호자가 실제 백엔드
-  // 로그인을 한 적이 없으면(backend-auth.ts) UUID를 확보할 방법이 없어 여기서 멈춘다.
-  const backendUserId = await ensureBackendWardId({
+  // 로그인을 한 적이 있거나, 본인(자가등록 개인 이용자)이 로그인한 적이 없으면 여기서 멈춘다.
+  const access = await resolveBackendWardAccess({
     mockWardId: params.wardId,
     name: params.wardName,
     age: params.wardAge,
     address: params.wardAddress,
   });
-  if (!backendUserId) {
-    throw new Error(GUARDIAN_SESSION_REQUIRED_MESSAGE);
+  if (!access) {
+    throw new Error(BACKEND_SESSION_REQUIRED_MESSAGE);
   }
 
-  // PR #10(75445f7)부터 이 엔드포인트가 보호자 인증을 요구한다 — user_id만 알면 아무나 남의
-  // 건강정보 기반 답변을 받을 수 있던 취약점 수정. 그 대상자를 관리하는 보호자의 토큰을 그대로 쓴다.
-  const guardianSession = getBackendGuardianSessionForWard(params.wardId);
-  if (!guardianSession) {
-    throw new Error(GUARDIAN_SESSION_REQUIRED_MESSAGE);
-  }
-
+  // PR #10(75445f7)부터 이 엔드포인트가 인증을 요구한다 — user_id만 알면 아무나 남의
+  // 건강정보 기반 답변을 받을 수 있던 취약점 수정. 보호자 토큰이든 본인 토큰이든, 그
+  // user_id의 소유자(보호자 또는 본인)여야만 백엔드가 통과시킨다(get_current_elder_app_caller
+  // + verify_owner_or_self).
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
-    `${API_BASE_URL}/rag/users/${backendUserId}/ask`,
+    `${API_BASE_URL}/rag/users/${access.backendWardId}/ask`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${guardianSession.accessToken}`,
+        Authorization: `Bearer ${access.accessToken}`,
       },
       // with_audio는 지금은 안 씀 — 백엔드 TTS 연동은 별도로 진행 예정.
       body: JSON.stringify({ query: params.query, with_audio: false }),

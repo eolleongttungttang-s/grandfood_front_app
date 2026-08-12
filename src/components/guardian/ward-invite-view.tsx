@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { createWardInvite } from "@/lib/ward-invite";
 import { useSession } from "@/lib/session";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,14 +19,20 @@ export function WardInviteView() {
   const [phone, setPhone] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const canSubmit = name.trim().length > 0 && phone.trim().length > 0 && confirmed && !!account;
 
   async function handleSubmit() {
     if (!canSubmit || submitting || !account) return;
     setSubmitting(true);
+    setError(null);
     try {
-      await createWardInvite({ name: name.trim(), phone: phone.trim() }, account.loginId);
+      const result = await createWardInvite({ name: name.trim(), phone: phone.trim() }, account.loginId);
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
       router.push("/guardian/wards/new/result");
     } finally {
       setSubmitting(false);
@@ -75,6 +82,12 @@ export function WardInviteView() {
             확인합니다
           </span>
         </label>
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
         <Button
           size="lg"
