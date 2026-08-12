@@ -343,6 +343,15 @@ async function postNewBackendUser(params: {
 // 대한 요청이 이미 진행 중이면 새로 fetch하지 않고 그 진행 중인 Promise를 그대로 기다리게 해서 막는다.
 const pendingEnsureRequests = new Map<string, Promise<string | null>>();
 
+// 캐시에 이미 있는 백엔드 UUID만 돌려준다(없으면 null) — 절대 POST /users를 부르지 않는다.
+// 알림 조회처럼 "있으면 보여주고 없으면 그냥 없는 것"이어야 하는 순수 조회 동작에서 쓴다.
+// ensureBackendWardId()를 그런 곳에 그대로 쓰면, 사진 업로드/AI 질문 같은 명시적 액션을
+// 한 번도 안 한 대상자도 화면에 진입만 해도 더미 phone/생년월일로 실제 어르신 레코드가
+// 만들어지는 부수효과가 생긴다(PR#8 리뷰에서 발견).
+export function getCachedBackendWardId(mockWardId: string): string | null {
+  return backendWardIdMapStore.read()[mockWardId] ?? null;
+}
+
 // POST /users — 로그인한 보호자 아래에 실제 어르신(User) 레코드를 만들어 UUID를 확보한다.
 // 목업 Ward에는 phone/정확한 birth_date가 없어서(있는 건 age뿐) 백엔드 필수 필드를 채우기 위한
 // 임시 값을 채운다 — 진짜 개인정보가 아니라, 사진 업로드 함수를 호출하기 위한 최소 더미 데이터.

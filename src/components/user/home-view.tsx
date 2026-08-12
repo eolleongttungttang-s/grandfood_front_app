@@ -46,12 +46,7 @@ export function HomeView({
 
   useEffect(() => {
     let cancelled = false;
-    fetchElderNotifications({
-      mockWardId: ward.id,
-      wardName: ward.name,
-      wardAge: ward.age,
-      wardAddress: ward.address,
-    })
+    fetchElderNotifications({ mockWardId: ward.id })
       .then((result) => {
         if (!cancelled) setNotifications(result);
       })
@@ -63,7 +58,7 @@ export function HomeView({
     return () => {
       cancelled = true;
     };
-  }, [ward.id, ward.name, ward.age, ward.address]);
+  }, [ward.id]);
 
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   const recommendedComboSpeech = `오늘의 추천 반찬 조합이에요. ${partnerStore?.name ?? "담당 반찬가게"}에서 준비했어요. ${detail.recommendedCombo.items

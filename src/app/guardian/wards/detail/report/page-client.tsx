@@ -1,19 +1,19 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { useSession } from "@/lib/session";
-import { getWard } from "@/lib/wards";
-import { NutritionistHistoryView } from "@/components/guardian/nutritionist-history-view";
+import { getWard, getWardDetail } from "@/lib/wards";
+import { ReportView } from "@/components/guardian/report-view";
 
-export function GuardianWardNutritionistPageClient() {
-  const { id } = useParams<{ id: string }>();
+export function GuardianWardReportPageClient() {
+  const id = useSearchParams().get("id");
   const { account } = useSession();
 
   if (!account) return null;
 
-  const ward = getWard(id);
+  const ward = id ? getWard(id) : undefined;
   const canView = ward && account.wardIds?.includes(ward.id);
 
   if (!ward || !canView) {
@@ -29,5 +29,6 @@ export function GuardianWardNutritionistPageClient() {
     );
   }
 
-  return <NutritionistHistoryView ward={ward} />;
+  const detail = getWardDetail(ward);
+  return <ReportView ward={ward} detail={detail} />;
 }

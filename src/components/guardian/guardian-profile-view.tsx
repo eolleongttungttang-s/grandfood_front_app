@@ -69,7 +69,7 @@ export function GuardianProfileView({
           {wards.map((w) => (
             <Link
               key={w.id}
-              href={`/guardian/wards/${w.id}`}
+              href={`/guardian/wards/detail?id=${w.id}`}
               className="flex items-center justify-between rounded-lg py-1.5 text-sm"
             >
               <span className="text-foreground">

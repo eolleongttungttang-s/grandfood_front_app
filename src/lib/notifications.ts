@@ -6,8 +6,8 @@
 import { API_BASE_URL } from "@/lib/api-config";
 import {
   backendGuardianSessionStore,
-  ensureBackendWardId,
   getBackendGuardianSessionForWard,
+  getCachedBackendWardId,
 } from "@/lib/backend-auth";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
@@ -158,21 +158,14 @@ export async function fetchGuardianNotifications(guardianLoginId: string): Promi
 // 어르신 전용 로그인이 없어서(project-self-signup-ward-no-guardian-link 참고) rag-chat.ts의
 // askHealthQuestion()과 동일한 패턴으로, 이 대상자를 관리하는 보호자의 실제 백엔드 세션을 빌려 쓴다.
 // 보호자 없이 직접가입한 이용자는 구조적으로 이 호출이 항상 실패한다 — 알려진 한계.
-export async function fetchElderNotifications(params: {
-  mockWardId: string;
-  wardName: string;
-  wardAge: number;
-  wardAddress: string;
-}): Promise<NotificationItem[]> {
-  const backendUserId = await ensureBackendWardId({
-    mockWardId: params.mockWardId,
-    name: params.wardName,
-    age: params.wardAge,
-    address: params.wardAddress,
-  });
-  if (!backendUserId) {
-    throw new Error(WARD_GUARDIAN_SESSION_REQUIRED_MESSAGE);
-  }
+//
+// 순수 조회라 백엔드 유저를 새로 만들지 않는다(getCachedBackendWardId, ensureBackendWardId
+// 아님) — 사진 업로드/AI 질문 같은 명시적 액션을 한 번도 안 한 대상자는 캐시가 비어있는 게
+// 정상이고, 그럴 땐 "아직 알림 없음"으로 조용히 넘어간다. 실제로 백엔드에 등록된 대상자인데
+// 보호자 세션이 없어서 못 부르는 경우만 에러로 알린다.
+export async function fetchElderNotifications(params: { mockWardId: string }): Promise<NotificationItem[]> {
+  const backendUserId = getCachedBackendWardId(params.mockWardId);
+  if (!backendUserId) return [];
 
   const guardianSession = getBackendGuardianSessionForWard(params.mockWardId);
   if (!guardianSession) {
