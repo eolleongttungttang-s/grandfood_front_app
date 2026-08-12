@@ -34,6 +34,7 @@ import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
+import { useBanchanRecommendation } from "@/lib/use-banchan-recommendation";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
   addMessage,
@@ -82,6 +83,12 @@ export function WardDetailView({
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   useLocalStore(careProfileStore);
   const careProfile = getCareProfile(ward.id);
+  const banchanRecommendation = useBanchanRecommendation({
+    wardId: ward.id,
+    wardName: ward.name,
+    wardAge: ward.age,
+    wardAddress: ward.address,
+  });
 
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestNote, setRequestNote] = useState("");
@@ -302,12 +309,7 @@ export function WardDetailView({
           </div>
         </div>
 
-        <BanchanRecommendationSection
-          wardId={ward.id}
-          wardName={ward.name}
-          wardAge={ward.age}
-          wardAddress={ward.address}
-        />
+        <BanchanRecommendationSection state={banchanRecommendation} />
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>

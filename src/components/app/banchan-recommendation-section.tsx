@@ -3,19 +3,18 @@
 // "AI 반찬 추천 요청 + 결과" 카드. 이용자 본인 화면(diet-view.tsx)과 보호자 화면
 // (ward-detail-view.tsx) 양쪽에서 그대로 재사용한다 — 두 화면 다 대상자 신원(ward)만
 // 알면 되고 화면별로 다른 게 없어서, ward-invite-view.tsx류처럼 화면마다 따로 만들지 않았다.
+//
+// fetch/요청 상태는 이 컴포넌트가 직접 들고 있지 않고 use-banchan-recommendation.ts의
+// useBanchanRecommendation() 훅 결과를 상위 화면에서 props로 받는다 — diet-view.tsx는 이
+// 상태(특히 isNewMember)를 보고 카드 자체가 아니라 화면 전체를 다르게 그려야 해서, 상태를
+// 컴포넌트 안에 가두면 상위 화면이 같은 데이터를 다시 fetch해야 하는 구조가 된다.
 
-import { useEffect, useMemo, useState } from "react";
 import { Sparkles } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  BanchanRecommendation,
-  BanchanRecommendationItem,
-  fetchBanchanRecommendation,
-  getWeekStartDate,
-  requestBanchanRecommendation,
-} from "@/lib/banchan-recommendation";
+import { BanchanRecommendationItem } from "@/lib/banchan-recommendation";
+import { BanchanRecommendationState } from "@/lib/use-banchan-recommendation";
 
 const SUITABILITY_LABEL: Record<string, string> = {
   recommended: "추천",
@@ -30,14 +29,6 @@ const SUITABILITY_CLASS: Record<string, string> = {
   caution: "bg-risk-caution text-risk-caution-foreground",
   avoid: "bg-risk-high text-risk-high-foreground",
 };
-
-function formatErrorMessage(err: unknown): string {
-  return err instanceof TypeError
-    ? "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요."
-    : err instanceof Error
-      ? err.message
-      : "AI 반찬 추천 요청에 실패했어요.";
-}
 
 function groupByDelivery(
   items: BanchanRecommendationItem[]
@@ -65,61 +56,8 @@ function TargetStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function BanchanRecommendationSection({
-  wardId,
-  wardName,
-  wardAge,
-  wardAddress,
-}: {
-  wardId: string;
-  wardName: string;
-  wardAge: number;
-  wardAddress: string;
-}) {
-  // "이번 주"를 마운트 시점에 한 번 고정한다 — 자정을 넘겨 렌더가 다시 일어나도 이미 불러온
-  // 결과와 요청 버튼이 갑자기 다른 주를 가리키지 않게 하기 위함.
-  const weekStartDate = useMemo(() => getWeekStartDate(), []);
-  const [recommendation, setRecommendation] = useState<BanchanRecommendation | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [requesting, setRequesting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    // 이 컴포넌트는 대상자(ward)별로 화면이 다시 마운트되는 구조라(guardian/user 라우트 둘 다
-    // wardId를 key로 갈아끼우기보다는 아예 새 페이지로 이동) 사실상 이 effect는 마운트당 한 번만
-    // 돈다 — 그래서 initial state(loading=true)를 그대로 쓰고, effect 안에서 setLoading(true)를
-    // 다시 동기 호출하지 않는다(react-hooks/set-state-in-effect가 지적하는 캐스케이딩 렌더 방지).
-    fetchBanchanRecommendation({ wardId, wardName, wardAge, wardAddress }, weekStartDate)
-      .then((result) => {
-        if (!cancelled) setRecommendation(result);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // wardName/Age/Address는 최초 백엔드 User 생성(ensureBackendWardId) 시에만 쓰이는 더미
-    // 필드라 wardId 하나만 바뀌었을 때 다시 부르면 충분하다 — rag-chat.ts 호출부들과 동일한 전제.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wardId, weekStartDate]);
-
-  async function handleRequest() {
-    setRequesting(true);
-    setError(null);
-    try {
-      const result = await requestBanchanRecommendation(
-        { wardId, wardName, wardAge, wardAddress },
-        weekStartDate
-      );
-      setRecommendation(result);
-    } catch (err) {
-      setError(formatErrorMessage(err));
-    } finally {
-      setRequesting(false);
-    }
-  }
+export function BanchanRecommendationSection({ state }: { state: BanchanRecommendationState }) {
+  const { weekStartDate, recommendation, loading, requesting, error, request } = state;
 
   const deliveries = recommendation ? groupByDelivery(recommendation.items) : [];
   const hasTargets =
@@ -136,7 +74,7 @@ export function BanchanRecommendationSection({
           <span className="text-xs font-bold text-sidebar-primary">AI 반찬 추천</span>
           <span className="text-base font-bold text-foreground">{weekStartDate} 주 배송 추천</span>
         </div>
-        <Button size="sm" onClick={handleRequest} disabled={requesting || loading}>
+        <Button size="sm" onClick={request} disabled={requesting || loading}>
           <Sparkles />
           {requesting ? "추천 받는 중..." : recommendation ? "다시 추천받기" : "AI 추천받기"}
         </Button>

@@ -9,6 +9,7 @@
 
 import { API_BASE_URL } from "@/lib/api-config";
 import { resolveBackendWardAccess } from "@/lib/backend-auth";
+import { createLocalStore } from "@/lib/local-store";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
 // LLM이 반찬별 적합도를 판단하는 과정이 껴 있어 rag-chat.ts(askHealthQuestion)와 같은 상한을 둔다.
@@ -192,4 +193,26 @@ export async function fetchBanchanRecommendation(
   } finally {
     clearRequestTimeout();
   }
+}
+
+// 이 대상자가 지금까지 한 번이라도 AI 반찬 추천을 받은 적 있는지 기억해두는 로컬 플래그.
+// "특정 주(week_start_date)에 추천이 있는지"만 물어보는 API는 있어도 "전체 기간 통틀어
+// 한 번이라도 받은 적 있는지" 물어보는 API는 백엔드에 없다 — 주가 바뀌면 그 주의 GET은
+// 다시 404가 나기 때문에, 최초로 성공한 시점을 이 브라우저에 기록해두고 그걸로 "신규 회원
+// 온보딩" 여부를 판단한다(diet-view.tsx). 다른 기기에서 처음 여는 경우엔 이 플래그가 없어도
+// 이번 주 GET이 데이터를 찾아내면 그걸로 바로 갱신되지만, "예전 주엔 받았는데 이번 주엔
+// 아직 안 받은 상태로 새 기기에서 여는" 경우까지는 커버하지 못한다 — 이 앱의 다른
+// 로컬스토리지 기반 상태(backend-auth.ts의 세션 맵 등)와 같은 종류의 한계다.
+const onboardedStore = createLocalStore<Record<string, boolean>>(
+  "grandfood-app-banchan-recommendation-onboarded",
+  {}
+);
+
+export function hasEverReceivedBanchanRecommendation(wardId: string): boolean {
+  return onboardedStore.read()[wardId] === true;
+}
+
+export function markBanchanRecommendationReceived(wardId: string): void {
+  if (onboardedStore.read()[wardId]) return;
+  onboardedStore.update((prev) => ({ ...prev, [wardId]: true }));
 }

@@ -14,6 +14,7 @@ import { SpeakableCard } from "@/components/app/speakable-card";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
 import { useLocalStore } from "@/lib/use-store";
+import { useBanchanRecommendation } from "@/lib/use-banchan-recommendation";
 
 // 선택한 File을 <img>로 미리보기할 수 있는 blob URL로 바꿔준다. URL 자체는 렌더 중에 useMemo로
 // 바로 계산하고(state에 미러링하지 않음), effect는 오직 "파일이 바뀌거나 컴포넌트가 사라질 때
@@ -38,6 +39,17 @@ export function DietView({
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
+  // 신규 회원(지금까지 AI 반찬 추천을 한 번도 받은 적 없음)인지에 따라 이 화면 전체를 다르게
+  // 그린다 — "오늘의 추천 반찬 조합"류 카드는 전부 목업(matchDishes, wards.ts)이라, 아직 실제
+  // AI 추천을 한 번도 못 받아본 사람에게 먼저 보여줄 이유가 없다고 판단해 AI 반찬 추천 카드만
+  // 남기고 나머지는 숨긴다(2026-08-12 논의). 이 판단에 따른 조건부 return은 아래 다른 Hook을
+  // 전부 호출한 뒤(맨 아래 return 문 바로 위)에 두어서 Hooks 호출 순서를 건드리지 않는다.
+  const banchanRecommendation = useBanchanRecommendation({
+    wardId: ward.id,
+    wardName: ward.name,
+    wardAge: ward.age,
+    wardAddress: ward.address,
+  });
 
   // 카드별 TTS(SpeakableCard)가 읽어줄 문장 — 화면에 보이는 값 그대로를 문장으로 풀어 쓴다.
   const recommendedComboSpeech =
@@ -97,6 +109,35 @@ export function DietView({
     }
   }
 
+  // isNewMember가 아직 null(최초 조회 중)이면 판단이 서기 전까지는 아무 카드도 안 보여준다 —
+  // 여기서 바로 "기존 회원" 레이아웃을 그렸다가 조회 결과가 늦게 도착해 신규 회원으로
+  // 밝혀지면 화면이 통째로 바뀌는 깜빡임이 생긴다.
+  if (banchanRecommendation.isNewMember == null) {
+    return (
+      <div className="flex flex-1 flex-col gap-4 pb-6">
+        <TopBar title="내 식단" subtitle="오늘의 배정 식단과 근거" />
+        <div className="px-5">
+          <p className="text-sm text-muted-foreground">불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (banchanRecommendation.isNewMember) {
+    return (
+      <div className="flex flex-1 flex-col gap-4 pb-6">
+        <TopBar title="내 식단" subtitle="AI 반찬 추천을 먼저 받아보세요" />
+        <div className="flex flex-col gap-4 px-5">
+          <p className="text-sm text-muted-foreground">
+            아직 배정된 식단이 없어요. 아래에서 AI 반찬 추천을 먼저 받아보세요 — 받고 나면 이
+            화면에 매일 식단과 잔반 분석, 식사 기록이 순서대로 나타나요.
+          </p>
+          <BanchanRecommendationSection state={banchanRecommendation} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
       <TopBar title="내 식단" subtitle="오늘의 배정 식단과 근거" />
@@ -128,12 +169,7 @@ export function DietView({
           </div>
         </SpeakableCard>
 
-        <BanchanRecommendationSection
-          wardId={ward.id}
-          wardName={ward.name}
-          wardAge={ward.age}
-          wardAddress={ward.address}
-        />
+        <BanchanRecommendationSection state={banchanRecommendation} />
 
         <SpeakableCard
           id="diet-menu-composition"
