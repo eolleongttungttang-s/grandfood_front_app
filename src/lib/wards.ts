@@ -215,11 +215,19 @@ export function getWardDetail(ward: Ward): WardDetail {
     allergyTags,
     statusHint: ward.status,
   });
+  // healthProfile.systolicBP/fastingGlucose는 이제 optional이라(설문에서 건너뛰면
+  // undefined) — 이 추천 사유 문구에선 "미입력"을 보여줄 자리가 없으니, 바로 위에서
+  // 계산해둔 시드 기반 수치로 대체한다(정확한 값은 아니지만, 대상자 상세 화면 자체는
+  // 이미 healthProfile을 그대로 넘겨서 "미입력" 표시를 따로 한다 — 여기는 그 값과 별개).
   const vitalsReasons: string[] = [];
   if (has("고혈압"))
-    vitalsReasons.push(`수축기 ${healthProfile.systolicBP}mmHg → 나트륨 섭취를 줄이는 게 중요해요`);
+    vitalsReasons.push(
+      `수축기 ${healthProfile.systolicBP ?? systolicBP}mmHg → 나트륨 섭취를 줄이는 게 중요해요`
+    );
   if (has("당뇨"))
-    vitalsReasons.push(`공복혈당 ${healthProfile.fastingGlucose}mg/dL → 단순당을 줄이는 게 중요해요`);
+    vitalsReasons.push(
+      `공복혈당 ${healthProfile.fastingGlucose ?? fastingGlucose}mg/dL → 단순당을 줄이는 게 중요해요`
+    );
   const recommendedCombo: DishCombo = {
     ...combo,
     reasons: vitalsReasons.length > 0 ? [...vitalsReasons, ...combo.reasons] : combo.reasons,

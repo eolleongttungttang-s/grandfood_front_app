@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { createWardInvite } from "@/lib/ward-invite";
 import { useSession } from "@/lib/session";
+import { PhoneInput } from "@/components/app/phone-input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,11 +58,11 @@ export function WardInviteView() {
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="invite-phone">전화번호</Label>
-            <Input
+            <PhoneInput
               id="invite-phone"
               placeholder="010-0000-0000"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={setPhone}
             />
           </div>
         </div>

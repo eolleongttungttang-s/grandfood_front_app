@@ -15,6 +15,7 @@ import { createLocalStore } from "@/lib/local-store";
 import { API_BASE_URL } from "@/lib/api-config";
 import { getAccounts } from "@/lib/auth";
 import { CONDITION_POOL, getCareProfile } from "@/lib/care-profile";
+import type { BackendActivityLevel } from "@/lib/health-profile";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
 // notifications.ts와 같은 이유로 인증 관련 요청도 무한정 매달리지 않게 상한을 둔다.
@@ -32,6 +33,16 @@ const CONDITION_LABEL_TO_BACKEND_FLAG: Record<(typeof CONDITION_POOL)[number], s
   치매: "dementia",
   관절염: "arthritis",
 };
+
+// 로컬 요금제(subscription.ts PLANS: "basic"/"standard"/"premium")를 백엔드 PlanType
+// ("base"/"premium" 2종, domains/account/schemas.py Literal)으로 좁힌다. 이 매핑 없이
+// "basic"을 그대로 보내면 UserOnboardingRequest가 422(Unprocessable Content)로 거부한다 —
+// register_elder_from_invite가 그래서 계속 실패해 USERS 행이 안 만들어지던 원인이었다.
+// (참고: /auth/users/register 쪽 스키마는 plan_type이 느슨한 str이라 "basic"도 그냥 통과되고,
+// 이 문제는 초대(QR) 경로에서만 드러난다.)
+function toBackendPlanType(planType: string): "base" | "premium" {
+  return planType === "premium" ? "premium" : "base";
+}
 
 // invite/survey/page.tsx도 register-elder-from-invite 호출 시 같은 매핑이 필요해서 export한다.
 export function getBackendConditionFlags(mockWardId: string): string[] {
@@ -210,6 +221,53 @@ export async function fetchGuardianProfile(
   }
 }
 
+// GET /users — 로그인한 보호자(토큰 기준)가 실제로 관리하는 대상자 목록을 서버가 매번
+// 다시 알려준다. login/page.tsx의 크로스디바이스 폴백 로그인 직후, 이 기기에 로컬 Ward가
+// 하나도 없어도 보호자 홈을 채우는 데 쓴다(이슈 #11). gender/담당 매장처럼 백엔드가 아예
+// 모르는 필드는 이 응답에 없다 — 호출부가 적당한 기본값으로 채워야 한다.
+export type BackendOwnUser = {
+  userId: string;
+  name: string;
+  birthDate: string; // "YYYY-MM-DD"
+  phone: string;
+  address: string;
+};
+
+export async function listOwnUsersBackend(
+  accessToken: string
+): Promise<{ users: BackendOwnUser[] } | { error: string }> {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/users`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) {
+      return { error: await parseErrorResponse(response) };
+    }
+    const data = await response.json();
+    const users: BackendOwnUser[] = (data as unknown[]).map((raw) => {
+      const u = raw as Record<string, unknown>;
+      return {
+        userId: u.user_id as string,
+        name: u.name as string,
+        birthDate: u.birth_date as string,
+        phone: u.phone as string,
+        address: u.address as string,
+      };
+    });
+    return { users };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return { error: "서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요." };
+    }
+    return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
 // POST /auth/users/register — 어르신 본인 자가등록(B2C, guardian_id 없음). 보호자 초대
 // 경로(consent-view.tsx)와는 별개다 — 그쪽은 나중에 ensureBackendWardId()가 보호자 토큰으로
 // guardian_id 있는 POST /users를 호출해 만들기 때문에, 여기서도 같은 어르신을 또 만들면
@@ -351,6 +409,15 @@ const pendingEnsureRequests = new Map<string, Promise<string | null>>();
 // 만들어지는 부수효과가 생긴다(PR#8 리뷰에서 발견).
 export function getCachedBackendWardId(mockWardId: string): string | null {
   return backendWardIdMapStore.read()[mockWardId] ?? null;
+}
+
+// 반대 방향 조회 — 이 백엔드 UUID에 이미 대응하는 목업 wardId가 이 기기에 있는지 확인한다.
+// listOwnUsersBackend()로 받아온 대상자 목록을 로컬 Ward와 합칠 때, 이미 로컬에 있는
+// 대상자를 중복으로 또 만들지 않기 위해 쓴다.
+export function findMockWardIdForBackendUserId(backendUserId: string): string | null {
+  const entries = Object.entries(backendWardIdMapStore.read());
+  const found = entries.find(([, backendId]) => backendId === backendUserId);
+  return found ? found[0] : null;
 }
 
 // POST /users — 로그인한 보호자 아래에 실제 어르신(User) 레코드를 만들어 UUID를 확보한다.
@@ -524,6 +591,12 @@ export async function registerElderFromInviteBackend(
     planType: string;
     conditionFlags?: string[];
     ttsCallConsent?: boolean;
+    // BMR/TDEE 기반 권장 영양성분 계산(health/nutrition_targets.py)에 쓰는 값들 — 전부
+    // optional. 백엔드 UserOnboardingRequest가 이미 받아주는 필드라 그대로 실어 보낸다.
+    gender?: "male" | "female";
+    heightCm?: number;
+    weightKg?: number;
+    activityLevel?: BackendActivityLevel;
   }
 ): Promise<{ userId: string } | { error: string }> {
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
@@ -536,9 +609,13 @@ export async function registerElderFromInviteBackend(
         birth_date: input.birthDate,
         phone: input.phone,
         address: input.address,
-        plan_type: input.planType,
+        plan_type: toBackendPlanType(input.planType),
         condition_flags: input.conditionFlags ?? [],
         tts_call_consent: input.ttsCallConsent ?? false,
+        gender: input.gender,
+        height_cm: input.heightCm,
+        weight_kg: input.weightKg,
+        activity_level: input.activityLevel,
       }),
     },
     REQUEST_TIMEOUT_MS
@@ -612,7 +689,22 @@ export async function resolveBackendWardAccess(params: {
 // notifications.ts의 fetchElderNotifications처럼 "이미 백엔드에 등록돼 있으면만 조회하고,
 // 없다고 새로 만들지는 않는다"가 필요한 곳 전용 — 위와 같은 두 경로를 네트워크 호출 없이
 // 캐시/즉시 확인만으로 시도한다.
-export function resolveCachedBackendWardAccess(mockWardId: string): ResolvedBackendWardAccess | null {
+//
+// expectedGuardianLoginId(옵션): 이 함수는 mockWardId만 보고 "그 어르신을 관리하는
+// 보호자가 누구든" 그 보호자의 토큰을 돌려준다 — 이 브라우저에 보호자 A/B 세션이
+// 동시에 캐시돼 있어도 구분하지 않는다. 오늘은 대상자-보호자가 1:1이라 "지금 로그인한
+// 계정이 이 대상자를 관리하는지"를 호출부(page-client.tsx의 canView)가 먼저 걸러주면
+// 실질적으로 안전하지만, 그 가드는 화면마다 각자 복제해야 하고 하나라도 빠뜨리면 다른
+// 보호자의 토큰으로 요청이 나갈 수 있다(코드 리뷰 지적) — 넘겨주면 여기서도 한 번 더
+// 확인해서, 호출부가 가드를 깜빡해도 안전망이 되도록 한다.
+export function resolveCachedBackendWardAccess(
+  mockWardId: string,
+  expectedGuardianLoginId?: string
+): ResolvedBackendWardAccess | null {
+  if (expectedGuardianLoginId && findGuardianLoginIdForWard(mockWardId) !== expectedGuardianLoginId) {
+    return null;
+  }
+
   const guardianSession = getBackendGuardianSessionForWard(mockWardId);
   if (guardianSession) {
     const backendWardId = getCachedBackendWardId(mockWardId);
