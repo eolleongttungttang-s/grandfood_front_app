@@ -559,3 +559,71 @@ export async function registerElderFromInviteBackend(
     clearRequestTimeout();
   }
 }
+
+// 이 mockWardId를 "본인 자신"으로 자가등록(개인 이용자, 보호자 없음)한 로컬 계정의
+// 백엔드 세션을 찾는다. getBackendGuardianSessionForWard와 짝을 이루는 개인 이용자
+// 버전 — 보호자 세션과 달리 이 경로는 backendWardId를 바로 안다(자기 자신의 User가
+// 곧 이 세션의 userId라서, POST /users로 따로 만들 필요가 없음).
+function getBackendUserSessionForWard(mockWardId: string): BackendUserSession | null {
+  const account = getAccounts().find((a) => a.role === "user" && a.selfWardId === mockWardId);
+  if (!account) return null;
+  return backendUserSessionStore.read()[account.loginId] ?? null;
+}
+
+// notifications.ts의 fetchElderNotifications가 "세션 자체가 없음"(에러로 안내)과
+// "세션은 있는데 아직 backendWardId가 캐시에 없음"(조용히 빈 목록)을 구분하는 데 쓴다.
+export function hasBackendSessionForWard(mockWardId: string): boolean {
+  return getBackendGuardianSessionForWard(mockWardId) !== null || getBackendUserSessionForWard(mockWardId) !== null;
+}
+
+export type ResolvedBackendWardAccess = { accessToken: string; backendWardId: string };
+
+// meal-log-store.ts(사진 업로드)/rag-chat.ts(AI 도우미)가 공유하는 "이 wardId로 백엔드를
+// 부를 토큰 + 실제 UUID 확보" 로직. 두 경로를 순서대로 시도한다:
+//   1) 이 어르신을 관리하는 보호자가 있고, 그 보호자가 실제 로그인한 적 있음
+//      → 그 보호자의 세션 + ensureBackendWardId(캐시에 없으면 POST /users로 새로 만듦)
+//   2) 보호자가 없고, 이 어르신 본인이 자가등록(POST /auth/users/register)해 로그인한 적 있음
+//      → 본인 세션 그대로. backendWardId는 이미 회원가입 때 만들어진 자기 자신의 user_id라
+//        추가로 만들 게 없음(어르신 앱 UI 자체가 "어느 대상자"인지 몰라도 되는 자기 자신 화면)
+// 둘 다 없으면(관리하는 보호자도 없고 본인도 로그인 이력이 없으면) null — 호출부가 각자의
+// 안내 문구로 처리한다(예전엔 1번 경로 하나만 있어서, 보호자 없이 직접가입한 이용자는
+// 구조적으로 여기서 항상 막혔다).
+export async function resolveBackendWardAccess(params: {
+  mockWardId: string;
+  name: string;
+  age: number;
+  address: string;
+}): Promise<ResolvedBackendWardAccess | null> {
+  const guardianSession = getBackendGuardianSessionForWard(params.mockWardId);
+  if (guardianSession) {
+    const backendWardId = await ensureBackendWardId(params);
+    if (!backendWardId) return null;
+    return { accessToken: guardianSession.accessToken, backendWardId };
+  }
+
+  const userSession = getBackendUserSessionForWard(params.mockWardId);
+  if (userSession) {
+    return { accessToken: userSession.accessToken, backendWardId: userSession.userId };
+  }
+
+  return null;
+}
+
+// notifications.ts의 fetchElderNotifications처럼 "이미 백엔드에 등록돼 있으면만 조회하고,
+// 없다고 새로 만들지는 않는다"가 필요한 곳 전용 — 위와 같은 두 경로를 네트워크 호출 없이
+// 캐시/즉시 확인만으로 시도한다.
+export function resolveCachedBackendWardAccess(mockWardId: string): ResolvedBackendWardAccess | null {
+  const guardianSession = getBackendGuardianSessionForWard(mockWardId);
+  if (guardianSession) {
+    const backendWardId = getCachedBackendWardId(mockWardId);
+    if (!backendWardId) return null;
+    return { accessToken: guardianSession.accessToken, backendWardId };
+  }
+
+  const userSession = getBackendUserSessionForWard(mockWardId);
+  if (userSession) {
+    return { accessToken: userSession.accessToken, backendWardId: userSession.userId };
+  }
+
+  return null;
+}
