@@ -34,7 +34,7 @@ import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
-import { useBanchanRecommendation } from "@/lib/use-banchan-recommendation";
+import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
   addMessage,
@@ -83,7 +83,7 @@ export function WardDetailView({
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   useLocalStore(careProfileStore);
   const careProfile = getCareProfile(ward.id);
-  const banchanRecommendation = useBanchanRecommendation({
+  const banchanRecommendation = useMonthlyBanchanRecommendation({
     wardId: ward.id,
     wardName: ward.name,
     wardAge: ward.age,

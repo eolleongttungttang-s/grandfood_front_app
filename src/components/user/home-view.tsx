@@ -25,7 +25,7 @@ import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store
 import { quickMealCheckStore, setQuickMealCheck } from "@/lib/meal-log-store";
 import { useLocalStore } from "@/lib/use-store";
 import { getSpeechRecognition, speak } from "@/lib/accessibility";
-import { useBanchanRecommendation } from "@/lib/use-banchan-recommendation";
+import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 
 export function HomeView({
   name,
@@ -44,7 +44,7 @@ export function HomeView({
   // 여기 있는 카드들도 대부분 오늘의 추천 반찬 조합(목업)에서 파생된 값이라, 아직 실제 추천을
   // 한 번도 못 받아본 사람에게 먼저 보여줄 이유가 없다. 조건부 return은 아래 다른 Hook을 전부
   // 호출한 뒤(맨 아래 return 문 자리)에 둔다.
-  const banchanRecommendation = useBanchanRecommendation({
+  const banchanRecommendation = useMonthlyBanchanRecommendation({
     wardId: ward.id,
     wardName: ward.name,
     wardAge: ward.age,

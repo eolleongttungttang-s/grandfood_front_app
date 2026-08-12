@@ -1,11 +1,9 @@
 "use client";
 
-// "AI 반찬 추천" — 백엔드 AI 추천(POST/GET /health/users/{user_id}/banchan-recommendations)에
-// 연결한다. 배송 빈도가 daily로 고정돼 있어(PR #27) 한 번의 요청으로 그 주(월~일) 7일치가
-// 한꺼번에 채워진다. 같은 주로 다시 요청하면 이전 추천을 덮어쓰므로(중복 저장 안 됨, PR #28
-// 응답에 이름/영양정보/RAG 근거까지 포함) "다시 추천받기"도 이 함수를 그대로 다시 부르면 된다.
-// 별도 catalog 조회 API는 아직 없지만 이 응답 자체에 반찬 이름/영양정보가 다 실려오므로
-// 화면에서 추가 조회가 필요 없다.
+// "AI 반찬 추천" — 백엔드 AI 추천(월간, POST/GET .../banchan-recommendations/monthly)에 연결한다.
+// 한 달치 요청을 한 번에 넣으면 그 달에 속한 각 주(월~일)마다 배송 추천이 백그라운드로 채워진다.
+// 같은 달로 다시 요청해도 이미 done/generating인 주는 건드리지 않고 not_started/failed인 주만
+// 새로 큐에 올라가므로, "다시 추천받기"도 이 함수를 그대로 다시 부르면 된다.
 
 import { API_BASE_URL } from "@/lib/api-config";
 import { resolveBackendWardAccess } from "@/lib/backend-auth";
@@ -53,20 +51,33 @@ export type BanchanRecommendation = {
   referenceGuidelines: ReferenceGuideline[];
 };
 
-type WardIdentity = { wardId: string; wardName: string; wardAge: number; wardAddress: string };
+export type WardIdentity = { wardId: string; wardName: string; wardAge: number; wardAddress: string };
+
+export type BanchanRecommendationGenerationStatus = "not_started" | "generating" | "done" | "failed";
+
+export type MonthlyBanchanRecommendationWeek = {
+  weekStartDate: string;
+  generationStatus: BanchanRecommendationGenerationStatus;
+  /** generationStatus가 "done"일 때만 채워진다 */
+  recommendation: BanchanRecommendation | null;
+  /** generationStatus가 "failed"일 때만 채워진다 */
+  error: string | null;
+};
+
+export type MonthlyBanchanRecommendation = {
+  userId: string;
+  month: string;
+  weeks: MonthlyBanchanRecommendationWeek[];
+};
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-// 이 날짜가 속한 주의 월요일(로컬 날짜 기준)을 "YYYY-MM-DD"로 돌려준다. UTC(toISOString)로
-// 계산하면 자정 근처에 하루가 밀리는 문제가 있어서(ward-meal-dashboard.ts에서 나온 것과
-// 같은 종류의 버그) 로컬 Date 필드만 사용한다.
-export function getWeekStartDate(date: Date = new Date()): string {
-  const day = date.getDay(); // 0=일 ~ 6=토
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate() + diffToMonday);
-  return `${monday.getFullYear()}-${pad(monday.getMonth() + 1)}-${pad(monday.getDate())}`;
+// 이 날짜가 속한 달을 "YYYY-MM"으로 돌려준다(일자는 받지 않음 — 백엔드 스키마가 day 없이
+// month만 받는다, GenerateMonthlyBanchanRecommendationRequest 참고).
+export function getMonthString(date: Date = new Date()): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -102,6 +113,21 @@ function parseRecommendation(data: any): BanchanRecommendation {
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseMonthlyRecommendation(data: any): MonthlyBanchanRecommendation {
+  return {
+    userId: data.user_id,
+    month: data.month,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    weeks: (data.weeks ?? []).map((week: any) => ({
+      weekStartDate: week.week_start_date,
+      generationStatus: week.generation_status,
+      recommendation: week.recommendation ? parseRecommendation(week.recommendation) : null,
+      error: week.error ?? null,
+    })),
+  };
+}
+
 async function resolveAccessOrThrow(identity: WardIdentity) {
   const access = await resolveBackendWardAccess({
     mockWardId: identity.wardId,
@@ -128,31 +154,34 @@ async function parseErrorMessage(response: Response): Promise<string> {
   return `AI 반찬 추천 요청이 실패했어요 (status ${response.status})`;
 }
 
-// POST /health/users/{user_id}/banchan-recommendations — 이번 주(또는 지정한 주) 반찬 추천을
-// 새로 만든다. 같은 주로 다시 부르면 이전 추천을 덮어쓴다(별도 "재추천" 엔드포인트가 없다) —
-// 그래서 "다시 추천받기"도 이 함수를 그대로 다시 호출하면 된다.
-export async function requestBanchanRecommendation(
+// POST /health/users/{user_id}/banchan-recommendations/monthly — 그 달에 속한 모든 주의 추천
+// 생성을 백그라운드로 큐에 올린다(202 Accepted, 동기로 items까지 채워서 돌려주지 않는다).
+// 이미 done이거나 generating 중인 주는 건드리지 않고, not_started/failed인 주만 새로 큐에
+// 올라간다 — 그래서 폴링 중에 이 함수를 반복 호출해도 안전하고 추가 비용이 없다. 실제 결과는
+// fetchMonthlyBanchanRecommendation으로 generation_status가 모두 done/failed가 될 때까지
+// 폴링해서 가져와야 한다.
+export async function requestMonthlyBanchanRecommendation(
   identity: WardIdentity,
-  weekStartDate: string = getWeekStartDate()
-): Promise<BanchanRecommendation> {
+  month: string = getMonthString()
+): Promise<MonthlyBanchanRecommendation> {
   const access = await resolveAccessOrThrow(identity);
 
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
-    `${API_BASE_URL}/health/users/${access.backendWardId}/banchan-recommendations`,
+    `${API_BASE_URL}/health/users/${access.backendWardId}/banchan-recommendations/monthly`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${access.accessToken}`,
       },
-      body: JSON.stringify({ week_start_date: weekStartDate }),
+      body: JSON.stringify({ month }),
     },
     REQUEST_TIMEOUT_MS
   );
   try {
     const response = await promise;
     if (!response.ok) throw new Error(await parseErrorMessage(response));
-    return parseRecommendation(await response.json());
+    return parseMonthlyRecommendation(await response.json());
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new Error("AI 반찬 추천이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.");
@@ -163,14 +192,14 @@ export async function requestBanchanRecommendation(
   }
 }
 
-// GET /health/users/{user_id}/banchan-recommendations/{week_start_date} — 이미 만들어둔 추천이
-// 있으면 그대로 가져온다. 아직 그 주를 요청한 적이 없으면 백엔드가 404를 주는데, 이건 에러가
-// 아니라 "아직 없음"이라 조용히 null로 돌려준다(화면 진입 시 이걸로 먼저 확인하고, 없을 때만
-// "AI 추천받기" 버튼을 보여준다).
-export async function fetchBanchanRecommendation(
+// GET /health/users/{user_id}/banchan-recommendations/monthly/{month} — 그 달의 주별 생성 현황을
+// 가져온다. 아직 생성된 게 하나도 없어도 404가 아니라 각 주가 generation_status: "not_started"인
+// 상태로 200이 온다(user_id 자체가 없을 때만 404) — 그래서 호출부에서 weeks를 순회해
+// generation_status를 확인해야 한다.
+export async function fetchMonthlyBanchanRecommendation(
   identity: WardIdentity,
-  weekStartDate: string = getWeekStartDate()
-): Promise<BanchanRecommendation | null> {
+  month: string = getMonthString()
+): Promise<MonthlyBanchanRecommendation | null> {
   const access = await resolveBackendWardAccess({
     mockWardId: identity.wardId,
     name: identity.wardName,
@@ -180,14 +209,14 @@ export async function fetchBanchanRecommendation(
   if (!access) return null;
 
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
-    `${API_BASE_URL}/health/users/${access.backendWardId}/banchan-recommendations/${weekStartDate}`,
+    `${API_BASE_URL}/health/users/${access.backendWardId}/banchan-recommendations/monthly/${month}`,
     { headers: { Authorization: `Bearer ${access.accessToken}` } },
     REQUEST_TIMEOUT_MS
   );
   try {
     const response = await promise;
     if (!response.ok) return null;
-    return parseRecommendation(await response.json());
+    return parseMonthlyRecommendation(await response.json());
   } catch {
     return null;
   } finally {
@@ -196,12 +225,11 @@ export async function fetchBanchanRecommendation(
 }
 
 // 이 대상자가 지금까지 한 번이라도 AI 반찬 추천을 받은 적 있는지 기억해두는 로컬 플래그.
-// "특정 주(week_start_date)에 추천이 있는지"만 물어보는 API는 있어도 "전체 기간 통틀어
-// 한 번이라도 받은 적 있는지" 물어보는 API는 백엔드에 없다 — 주가 바뀌면 그 주의 GET은
-// 다시 404가 나기 때문에, 최초로 성공한 시점을 이 브라우저에 기록해두고 그걸로 "신규 회원
-// 온보딩" 여부를 판단한다(diet-view.tsx). 다른 기기에서 처음 여는 경우엔 이 플래그가 없어도
-// 이번 주 GET이 데이터를 찾아내면 그걸로 바로 갱신되지만, "예전 주엔 받았는데 이번 주엔
-// 아직 안 받은 상태로 새 기기에서 여는" 경우까지는 커버하지 못한다 — 이 앱의 다른
+// "이 달에 진행 상황이 있는지"는 월간 GET으로 바로 알 수 있지만, 그마저도 달이 바뀌면 다시
+// 전부 not_started로 보이기 때문에, 최초로 성공한 시점을 이 브라우저에 기록해두고 그걸로
+// "신규 회원 온보딩" 여부를 판단한다(diet-view.tsx). 다른 기기에서 처음 여는 경우엔 이 플래그가
+// 없어도 이번 달 GET에 진행 중인 주가 있으면 그걸로 바로 갱신되지만, "예전 달엔 받았는데 이번
+// 달엔 아직 안 받은 상태로 새 기기에서 여는" 경우까지는 커버하지 못한다 — 이 앱의 다른
 // 로컬스토리지 기반 상태(backend-auth.ts의 세션 맵 등)와 같은 종류의 한계다.
 const onboardedStore = createLocalStore<Record<string, boolean>>(
   "grandfood-app-banchan-recommendation-onboarded",

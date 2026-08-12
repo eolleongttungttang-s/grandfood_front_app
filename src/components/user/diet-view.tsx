@@ -14,7 +14,7 @@ import { SpeakableCard } from "@/components/app/speakable-card";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
 import { useLocalStore } from "@/lib/use-store";
-import { useBanchanRecommendation } from "@/lib/use-banchan-recommendation";
+import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 
 // 선택한 File을 <img>로 미리보기할 수 있는 blob URL로 바꿔준다. URL 자체는 렌더 중에 useMemo로
 // 바로 계산하고(state에 미러링하지 않음), effect는 오직 "파일이 바뀌거나 컴포넌트가 사라질 때
@@ -44,7 +44,7 @@ export function DietView({
   // AI 추천을 한 번도 못 받아본 사람에게 먼저 보여줄 이유가 없다고 판단해 AI 반찬 추천 카드만
   // 남기고 나머지는 숨긴다(2026-08-12 논의). 이 판단에 따른 조건부 return은 아래 다른 Hook을
   // 전부 호출한 뒤(맨 아래 return 문 바로 위)에 두어서 Hooks 호출 순서를 건드리지 않는다.
-  const banchanRecommendation = useBanchanRecommendation({
+  const banchanRecommendation = useMonthlyBanchanRecommendation({
     wardId: ward.id,
     wardName: ward.name,
     wardAge: ward.age,
