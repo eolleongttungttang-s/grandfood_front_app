@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession } from "@/lib/session";
-import { getWard } from "@/lib/wards";
+import { getWard, getWardDetail } from "@/lib/wards";
 import { ProfileView } from "@/components/user/profile-view";
 
 export default function UserProfilePage() {
@@ -10,5 +10,6 @@ export default function UserProfilePage() {
 
   if (!account || !ward) return null;
 
-  return <ProfileView account={account} ward={ward} />;
+  const detail = getWardDetail(ward);
+  return <ProfileView account={account} ward={ward} detail={detail} />;
 }
