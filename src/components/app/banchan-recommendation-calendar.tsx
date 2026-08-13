@@ -18,37 +18,19 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  addDaysToDateString,
   addMonthsToMonthString,
   BanchanRecommendationItem,
   BanchanRecommendationGenerationStatus,
   BanchanSuitability,
   fetchMonthlyBanchanRecommendation,
   MonthlyBanchanRecommendation,
+  SUITABILITY_CLASS,
+  SUITABILITY_DOT_CLASS,
+  SUITABILITY_LABEL,
+  todayDateString,
   WardIdentity,
 } from "@/lib/banchan-recommendation";
-
-const SUITABILITY_LABEL: Record<BanchanSuitability, string> = {
-  recommended: "추천",
-  caution: "주의",
-  avoid: "피하기",
-};
-
-const SUITABILITY_CLASS: Record<BanchanSuitability, string> = {
-  recommended: "bg-risk-normal text-risk-normal-foreground",
-  caution: "bg-risk-caution text-risk-caution-foreground",
-  avoid: "bg-risk-high text-risk-high-foreground",
-};
-
-// risk-normal/caution/high(배경색)은 배지 위에 짙은 텍스트를 얹는 용도라 일부러 아주
-// 옅게 잡혀 있다(globals.css) — 글자 없이 작은 점 하나로만 구분해야 하는 달력 칸에 그
-// 배경색을 그대로 쓰면 세 등급이 거의 같은 베이지색으로 보여서 정작 "어디를 조심해야
-// 하는지"가 한눈에 안 들어온다. 실제 색 구분은 -foreground 쪽(짙은 회갈색/황토색/적갈색)이
-// 갖고 있어서, 점은 그 foreground 색을 그대로 채워 쓴다.
-const SUITABILITY_DOT_CLASS: Record<BanchanSuitability, string> = {
-  recommended: "bg-risk-normal-foreground",
-  caution: "bg-risk-caution-foreground",
-  avoid: "bg-risk-high-foreground",
-};
 
 // 하루에 반찬이 여럿이면 그중 가장 주의가 필요한 등급 하나로 그날 점 색을 정한다(avoid >
 // caution > recommended) — "이 날은 한 번이라도 조심할 게 있는지"가 달력 한눈에 보기엔
@@ -65,25 +47,6 @@ function worstSuitability(items: BanchanRecommendationItem[]): BanchanSuitabilit
     (worst, item) => (SUITABILITY_SEVERITY[item.suitability] > SUITABILITY_SEVERITY[worst] ? item.suitability : worst),
     items[0].suitability
   );
-}
-
-// "YYYY-MM-DD" 문자열에 날짜를 더한다. Date를 로컬 타임존으로 파싱하면(new Date("YYYY-MM-DD"))
-// 브라우저에 따라 UTC 자정으로 해석돼 로컬에서 하루 밀려 보일 수 있어서, 연/월/일을 직접
-// 분해해 UTC 기준으로만 계산한다(생성 자체엔 시각 개념이 없는 순수 날짜 문자열이라 UTC로
-// 계산해도 실제 날짜가 안 바뀐다).
-function addDaysToDateString(dateStr: string, days: number): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d));
-  date.setUTCDate(date.getUTCDate() + days);
-  const yy = date.getUTCFullYear();
-  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(date.getUTCDate()).padStart(2, "0");
-  return `${yy}-${mm}-${dd}`;
-}
-
-function todayDateString(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 const WEEKDAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
@@ -126,12 +89,14 @@ function TargetStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-// 기본으로 펼쳐 보여줄 날짜 — 오늘이 이 달 데이터 안에 있으면 오늘, 없으면(다른 달을 보는
-// 중이거나, 이번 달의 첫 몇 칸이 지난달 소속 주라 아직 이번 달로 안 들어온 경우) 완료된 첫
-// 날짜, 그것도 없으면 첫 칸.
+// 기본으로 펼쳐 보여줄 날짜 — 구독은 오늘 당장이 아니라 다음날 배송부터 반영되므로(2026-08-13
+// 피드백), 내일이 이 달 데이터 안에 있으면 내일을 먼저 고른다. 내일이 없으면(다른 달을 보는
+// 중 등) 오늘, 그것도 없으면 완료된 첫 날짜, 그마저 없으면 첫 칸.
 function pickDefaultDate(days: DayCell[]): string | null {
   const today = todayDateString();
+  const tomorrow = addDaysToDateString(today, 1);
   const fallback =
+    days.find((d) => d.date === tomorrow) ??
     days.find((d) => d.date === today) ??
     days.find((d) => d.generationStatus === "done" && d.items.length > 0) ??
     days[0] ??
@@ -292,11 +257,12 @@ export function BanchanRecommendationCalendar({
             {weeks.map((week) => (
               <div key={week[0]?.weekStartDate} className="grid grid-cols-7 gap-1">
                 {week.map((day) => {
-                  // 오늘 이전 날짜는 이미 지나간 배송이라, 이번 달을 보는 중일 때만 옅게
-                  // 죽이고 점도 안 보여준다 — "구독한 날부터의 식단"처럼 보이게(2026-08-13
-                  // 피드백). 지난달을 직접 넘겨서 보는 중이면(isViewingCurrentMonth=false)
-                  // 그 달은 원래 전체가 과거라 이 처리를 안 하고 평소처럼 다 보여준다.
-                  const isPast = isViewingCurrentMonth && day.date < todayDateString();
+                  // 오늘까지(포함)는 이미 확정된 배송이라, 이번 달을 보는 중일 때만 옅게
+                  // 죽이고 점도 안 보여준다 — 구독은 다음날 배송부터 반영되므로 "실제 활성
+                  // 식단"은 내일부터라는 게 한눈에 보이게 한다(2026-08-13 피드백). 지난달을
+                  // 직접 넘겨서 보는 중이면(isViewingCurrentMonth=false) 그 달은 원래 전체가
+                  // 과거라 이 처리를 안 하고 평소처럼 다 보여준다.
+                  const isPast = isViewingCurrentMonth && day.date <= todayDateString();
                   const dot = !isPast && day.generationStatus === "done" ? worstSuitability(day.items) : null;
                   const isSelected = day.date === selectedDate;
                   return (

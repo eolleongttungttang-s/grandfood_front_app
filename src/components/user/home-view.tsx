@@ -14,6 +14,8 @@ import { Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import { NotificationItem, fetchElderNotifications, notificationBadgeClass } from "@/lib/notifications";
+import { SUITABILITY_CLASS, SUITABILITY_LABEL } from "@/lib/banchan-recommendation";
+import { resolveTodayMenu } from "@/lib/today-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
@@ -71,9 +73,14 @@ export function HomeView({
     };
   }, [ward.id]);
 
+  // 오늘 실제 AI 추천이 있으면 그걸, 없으면 목업으로 자연스럽게 폴백한다 — diet-view.tsx와
+  // 같은 이유(2026-08-13 피드백, "오늘의 추천 반찬 조합" 카드와 AI 반찬 추천 달력이 서로
+  // 다른 답을 보여주던 문제).
+  const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
-  const recommendedComboSpeech = `오늘의 추천 반찬 조합이에요. ${partnerStore?.name ?? "담당 반찬가게"}에서 준비했어요. ${detail.recommendedCombo.items
-    .map((item) => (dislikes.includes(item.dishId) ? `${item.name}, 기피 표시됨` : item.name))
+  const menuEmoji = todayMenu.isReal ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
+  const recommendedComboSpeech = `오늘의 추천 반찬 조합이에요. ${partnerStore?.name ?? "담당 반찬가게"}에서 준비했어요. ${todayMenu.items
+    .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
     .join(", ")}입니다.`;
   const deliverySpeech = `오늘 점심 배송이 ${detail.deliveryEta}에 예정되어 있어요.`;
   const mealCheckSpeech = mealCheck
@@ -215,7 +222,7 @@ export function HomeView({
           className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
           <div className="flex items-center gap-3">
-            <span className="text-4xl">{representativeDish?.imageEmoji ?? "🍽️"}</span>
+            <span className="text-4xl">{menuEmoji}</span>
             <div className="flex flex-col">
               <span className="text-xs font-semibold text-muted-foreground">
                 오늘의 추천 반찬 조합
@@ -226,23 +233,30 @@ export function HomeView({
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            {detail.recommendedCombo.items.map((item) => {
-              const disliked = dislikes.includes(item.dishId);
+            {todayMenu.items.map((item) => {
+              const disliked = dislikes.includes(item.id);
               return (
                 <div
-                  key={item.dishId}
+                  key={item.id}
                   className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2"
                 >
-                  <span
-                    className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
-                  >
-                    {item.name}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
+                    >
+                      {item.name}
+                    </span>
+                    {item.suitability && (
+                      <Badge className={SUITABILITY_CLASS[item.suitability]}>
+                        {SUITABILITY_LABEL[item.suitability]}
+                      </Badge>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      toggleDislike(ward.id, item.dishId);
+                      toggleDislike(ward.id, item.id);
                     }}
                     className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
                       disliked
