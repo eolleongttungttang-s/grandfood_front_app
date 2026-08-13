@@ -7,6 +7,7 @@ import { MealTone, Ward, WardDetail } from "@/lib/wards";
 import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
 import { deriveMealTones, fetchElderDietHistory } from "@/lib/meal-dashboard";
 import { TopBar } from "@/components/app/top-bar";
+import { MealToneSummary } from "@/components/app/meal-tone-summary";
 import { Switch } from "@/components/ui/switch";
 import {
   medicationReminderStore,
@@ -95,20 +96,12 @@ export function RecordsView({
         )}
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
-            <span className="text-xs text-muted-foreground">
-              완식 <span className="font-semibold text-foreground">{completeCount}</span> ·
-              소량{" "}
-              <span className="font-semibold text-risk-caution-foreground">
-                {smallCount}
-              </span>{" "}
-              · 미응답{" "}
-              <span className="font-semibold text-risk-high-foreground">
-                {noResponseCount}
-              </span>
-            </span>
-          </div>
+          <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
+          <MealToneSummary
+            completeCount={completeCount}
+            smallCount={smallCount}
+            noResponseCount={noResponseCount}
+          />
           <div className="grid grid-cols-7 gap-1.5">
             {mealHistory.map((tone, i) => (
               <div
