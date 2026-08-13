@@ -242,6 +242,37 @@ export function DietView({
         </SpeakableCard>
 
         <SpeakableCard
+          id="diet-reasons"
+          text={reasonsSpeech}
+          className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
+        >
+          <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
+          {todayMenu.isGenerating ? (
+            <p className="text-sm text-muted-foreground">
+              AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
+            </p>
+          ) : (
+            todayMenu.reasons.length === 0 && (
+              <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
+            )
+          )}
+          {todayMenu.reasons.map((reason, i) => (
+            <div
+              key={i}
+              className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-bold text-background">
+                {i + 1}
+              </span>
+              {reason}
+            </div>
+          ))}
+        </SpeakableCard>
+
+        {/* "왜 이 조합인가요" 다음 순서로 옮김 — 잔반 분석은 "오늘 조합이 왜 나왔는지"를
+            먼저 이해한 다음에 "그걸 실제로 얼마나 남겼는지" 기록하는 흐름이 더 자연스럽다
+            (2026-08-13 피드백). */}
+        <SpeakableCard
           id="diet-meal-checkin"
           text={mealCheckinSpeech}
           className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
@@ -317,34 +348,6 @@ export function DietView({
               ))}
             </div>
           )}
-        </SpeakableCard>
-
-        <SpeakableCard
-          id="diet-reasons"
-          text={reasonsSpeech}
-          className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
-        >
-          <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
-          {todayMenu.isGenerating ? (
-            <p className="text-sm text-muted-foreground">
-              AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
-            </p>
-          ) : (
-            todayMenu.reasons.length === 0 && (
-              <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
-            )
-          )}
-          {todayMenu.reasons.map((reason, i) => (
-            <div
-              key={i}
-              className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-bold text-background">
-                {i + 1}
-              </span>
-              {reason}
-            </div>
-          ))}
         </SpeakableCard>
 
         <SpeakableCard
