@@ -233,6 +233,9 @@ export function HomeView({
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
+            {todayMenu.items.length === 0 && (
+              <p className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</p>
+            )}
             {todayMenu.items.map((item) => {
               const disliked = dislikes.includes(item.id);
               return (

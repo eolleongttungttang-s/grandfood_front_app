@@ -37,6 +37,7 @@ import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
+import { resolveTodayMenu } from "@/lib/today-menu";
 import { requestWellnessCall } from "@/lib/wellness-calls";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
@@ -86,7 +87,6 @@ export function WardDetailView({
   const smallCount = mealHistory?.filter((m) => m === "소량").length ?? 0;
   const noResponseCount = mealHistory?.filter((m) => m === "미응답").length ?? 0;
   const dislikedIds = wardDislikes(useLocalStore(dislikesStore), ward.id);
-  const dislikedItems = detail.recommendedCombo.items.filter((i) => dislikedIds.includes(i.dishId));
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   useLocalStore(careProfileStore);
@@ -98,6 +98,12 @@ export function WardDetailView({
     wardAddress: ward.address,
   };
   const banchanRecommendation = useMonthlyBanchanRecommendation(banchanIdentity);
+  // "오늘의 식사"/"왜 이 조합인가요" 카드가 바로 아래 AI 반찬 추천 달력과 서로 다른 답을
+  // 보여주던 문제(home-view.tsx/diet-view.tsx와 동일, 2026-08-13 피드백)를 여기도 고친다 —
+  // 오늘 실제 추천이 있으면 그걸 쓰고, 없으면 기존 목업으로 폴백한다.
+  const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly);
+  const dislikedItems = todayMenu.items.filter((i) => dislikedIds.includes(i.id));
+  const menuEmoji = todayMenu.isReal ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
 
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestNote, setRequestNote] = useState("");
@@ -247,7 +253,7 @@ export function WardDetailView({
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-baseline justify-between">
             <span className="text-xs font-bold text-foreground">
-              {representativeDish?.imageEmoji ?? "🍽️"} 오늘의 식사
+              {menuEmoji} 오늘의 식사
             </span>
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Truck className="h-3.5 w-3.5" />
@@ -283,16 +289,20 @@ export function WardDetailView({
             )}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {detail.recommendedCombo.items.map((item) => (
-              <Badge
-                key={item.dishId}
-                variant={dislikedIds.includes(item.dishId) ? "default" : "secondary"}
-                className={dislikedIds.includes(item.dishId) ? "bg-destructive/10 text-destructive" : ""}
-              >
-                {item.name}
-                {dislikedIds.includes(item.dishId) ? " · 기피" : ""}
-              </Badge>
-            ))}
+            {todayMenu.items.length === 0 ? (
+              <span className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</span>
+            ) : (
+              todayMenu.items.map((item) => (
+                <Badge
+                  key={item.id}
+                  variant={dislikedIds.includes(item.id) ? "default" : "secondary"}
+                  className={dislikedIds.includes(item.id) ? "bg-destructive/10 text-destructive" : ""}
+                >
+                  {item.name}
+                  {dislikedIds.includes(item.id) ? " · 기피" : ""}
+                </Badge>
+              ))
+            )}
           </div>
 
           {dislikedItems.length > 0 && (
@@ -334,7 +344,10 @@ export function WardDetailView({
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
-          {detail.recommendedCombo.reasons.map((reason, i) => (
+          {todayMenu.reasons.length === 0 && (
+            <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
+          )}
+          {todayMenu.reasons.map((reason, i) => (
             <div
               key={i}
               className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"

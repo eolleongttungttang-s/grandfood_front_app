@@ -129,40 +129,35 @@ export function BanchanRecommendationCalendar({
   polling: boolean;
 }) {
   const [viewedMonth, setViewedMonth] = useState(monthly.month);
-  // otherMonth가 null이면 "아직 안 불러온 달"(로딩), data가 null이면 "불러왔는데 그 달엔
-  // 요청한 추천이 없음"(빈 상태) — 이 둘을 구분해야 로딩 중에 잠깐 "빈 상태" 문구가 깜빡이지
-  // 않는다. useEffect 안에서 "로딩 시작"을 곧장 setState하지 않고 아예 안 하는 이유는
-  // react-hooks/set-state-in-effect 때문 — 대신 "이 달 데이터가 아직 otherMonth에 없다"는
-  // 사실 자체를 로딩 중이라는 뜻으로 그대로 쓴다(아래 monthLoading).
-  const [otherMonth, setOtherMonth] = useState<{
-    month: string;
-    data: MonthlyBanchanRecommendation | null;
-  } | null>(null);
+  // 오늘이 속한 달이 아닌 달은 방문할 때마다 조회 결과를 이 캐시에 쌓아둔다 — 달 하나짜리
+  // 슬롯(이전 구현)이었을 땐 ◀ ◀ ▶ ▶처럼 왔다 갔다 하면 이미 받아온 달도 매번 다시
+  // 네트워크로 불러왔다. 캐시에 월 키가 아직 없으면 "안 불러온 달"(로딩), 있는데 값이
+  // null이면 "불러왔는데 그 달엔 요청한 추천이 없음"(빈 상태) — 이 둘을 구분해야 로딩
+  // 중에 잠깐 빈 상태 문구가 깜빡이지 않는다.
+  const [monthCache, setMonthCache] = useState<Record<string, MonthlyBanchanRecommendation | null>>({});
 
   // 보고 있는 달이 "실제 오늘이 속한 달"이면 monthly prop을 그대로 쓰고(폴링 갱신도 자동
   // 반영됨), 다른 달로 넘어갔을 때만 그 달의 데이터를 따로 불러온다 — 지나간/앞으로의 달은
   // 폴링 대상이 아니라(백엔드가 generating 상태를 유지할 이유가 없음) 매번 새로 불러올
-  // 필요가 없다.
+  // 필요가 없다. 이미 캐시에 있는 달이면(과거에 한 번 방문했던 달로 다시 돌아온 경우)
+  // 재요청하지 않는다.
   useEffect(() => {
     if (viewedMonth === monthly.month) return;
+    if (viewedMonth in monthCache) return;
     let cancelled = false;
     fetchMonthlyBanchanRecommendation(identity, viewedMonth).then((result) => {
       if (cancelled) return;
-      setOtherMonth({ month: viewedMonth, data: result });
+      setMonthCache((prev) => ({ ...prev, [viewedMonth]: result }));
     });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewedMonth, monthly.month, identity.wardId]);
+  }, [viewedMonth, monthly.month, identity.wardId, monthCache]);
 
   const isViewingCurrentMonth = viewedMonth === monthly.month;
-  const monthLoading = !isViewingCurrentMonth && otherMonth?.month !== viewedMonth;
-  const displayedMonthly = isViewingCurrentMonth
-    ? monthly
-    : otherMonth?.month === viewedMonth
-      ? otherMonth.data
-      : null;
+  const monthLoading = !isViewingCurrentMonth && !(viewedMonth in monthCache);
+  const displayedMonthly = isViewingCurrentMonth ? monthly : (monthCache[viewedMonth] ?? null);
 
   const days = useMemo(() => (displayedMonthly ? buildDayCells(displayedMonthly) : []), [displayedMonthly]);
   const weeks = useMemo(() => {

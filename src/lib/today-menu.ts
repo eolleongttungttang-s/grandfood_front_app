@@ -52,7 +52,12 @@ export function resolveTodayMenu(
   monthly: MonthlyBanchanRecommendation | null
 ): TodayMenu {
   const real = getRecommendationForDate(monthly, todayDateString());
-  if (real && real.status === "done" && real.items.length > 0) {
+  // items.length > 0을 조건에 넣지 않는다 — 생성이 끝났는데(done) 오늘 몫이 정말 0개인
+  // 극히 드문 경우까지 목업으로 폴백하면, AI 반찬 추천 달력(이 날은 배정된 반찬이
+  // 없어요)과 또 서로 다른 답을 보여주게 된다. done이면 items가 비어 있어도 그대로
+  // "실제 추천 결과(오늘은 없음)"로 취급한다 — 호출부가 items.length === 0 && isReal일
+  // 때 빈 상태 문구를 보여줘야 한다.
+  if (real && real.status === "done") {
     const items: TodayMenuItem[] = [...real.items]
       .sort((a, b) => a.slotIndex - b.slotIndex)
       .map((item) => ({

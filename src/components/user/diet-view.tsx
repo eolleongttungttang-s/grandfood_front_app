@@ -192,6 +192,9 @@ export function DietView({
         >
           <span className="text-xs font-bold text-foreground">{menuEmoji} 오늘 메뉴 구성</span>
           <div className="flex flex-col gap-1.5">
+            {todayMenu.items.length === 0 && (
+              <p className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</p>
+            )}
             {todayMenu.items.map((item) => {
               const disliked = dislikes.includes(item.id);
               return (
@@ -320,6 +323,9 @@ export function DietView({
           className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
+          {todayMenu.reasons.length === 0 && (
+            <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
+          )}
           {todayMenu.reasons.map((reason, i) => (
             <div
               key={i}
