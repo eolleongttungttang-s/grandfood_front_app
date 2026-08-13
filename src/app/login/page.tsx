@@ -18,10 +18,54 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { BrandHeader } from "@/components/app/brand-header";
 import { useSession } from "@/lib/session";
-import { UserRole, ensureLocalGuardianAccount } from "@/lib/auth";
-import { fetchGuardianProfile, loginGuardianBackend, loginUserBackend } from "@/lib/backend-auth";
+import { UserRole, ensureLocalGuardianAccount, linkWardToGuardian } from "@/lib/auth";
+import {
+  backendWardIdMapStore,
+  fetchGuardianProfile,
+  findMockWardIdForBackendUserId,
+  listOwnUsersBackend,
+  loginGuardianBackend,
+  loginUserBackend,
+} from "@/lib/backend-auth";
+import { addWard, calculateAge, newWardDefaults } from "@/lib/wards";
+import { PARTNER_STORES } from "@/lib/partner-stores";
 
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
+
+// GET /users로 받아온 "실제로 관리하는 대상자 목록"을 이 기기의 로컬 Ward와 맞춘다(이슈 #11).
+// 이미 로컬에 대응하는 Ward가 있으면(findMockWardIdForBackendUserId) 링크만 다시 걸어주고,
+// 완전히 새 기기라 로컬에 아무것도 없으면 백엔드 데이터로 Ward를 새로 만든다.
+//
+// gender/담당 매장은 백엔드 UserResponse에 아예 없는 필드라 — 실제 값이 아니라 임시
+// 기본값으로 채운다(성별은 임의로 "여", 매장은 첫 번째 파트너 매장). 나중에 어르신이
+// 생활 정보 설문을 다시 채우거나 보호자가 상세 화면에서 고치면 실제 값으로 덮인다 —
+// "정보 없음"으로 막다른 화면을 보여주는 것보다, 자연스러운 초기 상태로 보이게 하는
+// 기존 newWardDefaults()와 같은 방침이다.
+async function syncGuardianWardsFromBackend(accessToken: string, guardianLoginId: string) {
+  const result = await listOwnUsersBackend(accessToken);
+  if ("error" in result) return;
+
+  for (const user of result.users) {
+    const existingMockId = findMockWardIdForBackendUserId(user.userId);
+    if (existingMockId) {
+      linkWardToGuardian(guardianLoginId, existingMockId);
+      continue;
+    }
+
+    const newWardId = crypto.randomUUID();
+    addWard({
+      id: newWardId,
+      name: user.name,
+      age: calculateAge(user.birthDate),
+      gender: "여",
+      address: user.address,
+      partnerStoreId: PARTNER_STORES[0].id,
+      ...newWardDefaults(),
+    });
+    backendWardIdMapStore.update((prev) => ({ ...prev, [newWardId]: user.userId }));
+    linkWardToGuardian(guardianLoginId, newWardId);
+  }
+}
 
 const DEMO_CREDENTIALS: Record<UserRole, { loginId: string; password: string }> = {
   user: { loginId: "gf-user01", password: "1234" },
@@ -74,6 +118,10 @@ export default function LoginPage() {
             phone: "phone" in profileResult ? profileResult.phone : "",
             relationship: "relationship" in profileResult ? profileResult.relationship : "",
           });
+          // 이슈 #11 — 이 기기엔 이 보호자가 관리하는 대상자 정보가 로컬에 하나도 없다
+          // (그래서 애초에 크로스디바이스 폴백을 탄 것). GET /users로 실제 목록을 받아와
+          // 로컬 Ward/wardIds를 채운다 — 안 그러면 로그인은 되는데 보호자 홈이 계속 빈 채로 보인다.
+          await syncGuardianWardsFromBackend(backendResult.session.accessToken, trimmedId);
           account = login(trimmedId, password);
         }
       }
@@ -171,6 +219,14 @@ export default function LoginPage() {
                   autoComplete="current-password"
                   required
                 />
+                {/* 보호자가 QR/문자로 초대한 이용자는 비밀번호를 직접 정한 적이 없다 —
+                    consent-view.tsx가 본인 연락처 뒷자리 4자리로 자동 생성해준 값이라,
+                    본인이 그걸 "비밀번호"로 기억 못 하는 경우가 많다. 빈 칸일 때만 힌트를 보여준다. */}
+                {tab === "user" && !password && (
+                  <p className="text-xs text-muted-foreground">
+                    보호자를 통해 가입하셨으면 연락처 뒷자리를 입력해주세요.
+                  </p>
+                )}
               </div>
 
               {error && (

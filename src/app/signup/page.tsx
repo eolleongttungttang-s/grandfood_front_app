@@ -14,6 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BirthDateSelect } from "@/components/app/birth-date-select";
+import { PhoneInput } from "@/components/app/phone-input";
 import { UserRole, registerAccount } from "@/lib/auth";
 import { registerGuardianBackend, registerUserBackend } from "@/lib/backend-auth";
 import { speakOnDemand } from "@/lib/accessibility";
@@ -120,12 +121,12 @@ export default function SignupPage() {
 
     setSubmitting(false);
     toast.success("회원가입이 완료됐어요.");
-    // 개인 이용자(자가등록)는 보호자 초대 가입(consent-view.tsx -> /invite/survey)과 달리
-    // 건강 프로필을 채우는 단계가 구조적으로 없어서, 로그인은 되는데 AI 반찬 추천이 항상
-    // 404였다(health-profile 없음). 그래서 여기서도 초대 흐름과 동일하게 설문으로 보낸다 —
-    // onboarding=1은 user/survey/page.tsx가 완료 후 어디로 보낼지(최초 온보딩이면 /user/home,
-    // 나중에 마이 화면에서 재방문한 수정이면 /user/profile) 구분하는 데 쓴다.
-    router.push(result.account.role === "guardian" ? "/guardian/wards/new" : "/user/survey?onboarding=1");
+    // 이용자 본인 직접가입도 QR 초대 경로(consent-view.tsx → /invite/survey)와 마찬가지로
+    // 첫 화면부터 생활 정보를 물어보게 한다 — 예전엔 곧장 /user/home으로 가서 생활 정보를
+    // 입력할 계기가 아예 없었다.
+    router.push(
+      result.account.role === "guardian" ? "/guardian/wards/new" : "/user/survey?first=1"
+    );
   }
 
   return (
@@ -175,7 +176,7 @@ export default function SignupPage() {
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="signup-phone">전화번호</Label>
-                <Input id="signup-phone" value={phone} onChange={(event) => setPhone(event.target.value)} autoComplete="tel" inputMode="tel" placeholder="010-0000-0000" required />
+                <PhoneInput id="signup-phone" value={phone} onChange={setPhone} autoComplete="tel" inputMode="tel" placeholder="010-0000-0000" required />
               </div>
               {role === "guardian" ? (
                 <>
