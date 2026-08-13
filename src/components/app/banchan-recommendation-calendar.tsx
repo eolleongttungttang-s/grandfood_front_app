@@ -292,7 +292,12 @@ export function BanchanRecommendationCalendar({
             {weeks.map((week) => (
               <div key={week[0]?.weekStartDate} className="grid grid-cols-7 gap-1">
                 {week.map((day) => {
-                  const dot = day.generationStatus === "done" ? worstSuitability(day.items) : null;
+                  // 오늘 이전 날짜는 이미 지나간 배송이라, 이번 달을 보는 중일 때만 옅게
+                  // 죽이고 점도 안 보여준다 — "구독한 날부터의 식단"처럼 보이게(2026-08-13
+                  // 피드백). 지난달을 직접 넘겨서 보는 중이면(isViewingCurrentMonth=false)
+                  // 그 달은 원래 전체가 과거라 이 처리를 안 하고 평소처럼 다 보여준다.
+                  const isPast = isViewingCurrentMonth && day.date < todayDateString();
+                  const dot = !isPast && day.generationStatus === "done" ? worstSuitability(day.items) : null;
                   const isSelected = day.date === selectedDate;
                   return (
                     <button
@@ -303,14 +308,14 @@ export function BanchanRecommendationCalendar({
                         isSelected
                           ? "border-primary bg-primary/10 font-bold text-foreground"
                           : "border-transparent hover:bg-muted/60"
-                      } ${day.inTargetMonth ? "text-foreground" : "text-muted-foreground/40"}`}
+                      } ${!day.inTargetMonth || isPast ? "text-muted-foreground/40" : "text-foreground"}`}
                     >
                       <span>{day.dayOfMonth}</span>
                       {dot && <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS[dot]}`} />}
-                      {day.generationStatus === "generating" && (
+                      {!isPast && day.generationStatus === "generating" && (
                         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/50" />
                       )}
-                      {day.generationStatus === "failed" && (
+                      {!isPast && day.generationStatus === "failed" && (
                         <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
                       )}
                     </button>
