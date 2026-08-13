@@ -6,7 +6,7 @@
 // 새로 큐에 올라가므로, "다시 추천받기"도 이 함수를 그대로 다시 부르면 된다.
 
 import { API_BASE_URL } from "@/lib/api-config";
-import { resolveBackendWardAccess } from "@/lib/backend-auth";
+import { resolveBackendWardAccess, resolveCachedBackendWardAccess } from "@/lib/backend-auth";
 import { createLocalStore } from "@/lib/local-store";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
@@ -196,16 +196,20 @@ export async function requestMonthlyBanchanRecommendation(
 // 가져온다. 아직 생성된 게 하나도 없어도 404가 아니라 각 주가 generation_status: "not_started"인
 // 상태로 200이 온다(user_id 자체가 없을 때만 404) — 그래서 호출부에서 weeks를 순회해
 // generation_status를 확인해야 한다.
+//
+// resolveBackendWardAccess(생성형)가 아니라 resolveCachedBackendWardAccess(캐시만 읽음)를
+// 쓴다 — PR #8에서 발견/수정됐던 버그(fetchElderNotifications가 ensureBackendWardId를 써서
+// "홈 화면 진입만으로" 더미 phone/생년월일의 실제 백엔드 User가 생성되던 것)와 정확히 같은
+// 종류의 부수효과가 여기서도 날 수 있다 — 이 함수는 useMonthlyBanchanRecommendation 훅이
+// diet-view.tsx/home-view.tsx/ward-detail-view.tsx 마운트 시 자동으로 부르는 순수 조회라,
+// "AI 추천받기" 버튼을 누른 적 없는 대상자의 화면에 들어가기만 해도 백엔드에 어르신 레코드가
+// 생기면 안 된다. 실제 생성이 필요한 요청(POST, requestMonthlyBanchanRecommendation)은
+// 여전히 resolveBackendWardAccess를 그대로 쓴다.
 export async function fetchMonthlyBanchanRecommendation(
   identity: WardIdentity,
   month: string = getMonthString()
 ): Promise<MonthlyBanchanRecommendation | null> {
-  const access = await resolveBackendWardAccess({
-    mockWardId: identity.wardId,
-    name: identity.wardName,
-    age: identity.wardAge,
-    address: identity.wardAddress,
-  });
+  const access = resolveCachedBackendWardAccess(identity.wardId);
   if (!access) return null;
 
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(

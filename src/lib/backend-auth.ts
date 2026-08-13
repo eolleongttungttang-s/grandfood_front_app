@@ -823,13 +823,17 @@ function parseUserProfile(data: any): BackendUserProfile {
 // 있을 때만(이 앱의 "한 브라우저에서 역할 전환" 데모 구조, backend-auth.ts 상단 주석
 // 참고) 성공한다 — 그 외엔 조회 실패를 에러로 보여줄 것 없이 조용히 null로 돌아가고
 // 화면은 기존 로컬 값을 그대로 보여주면 된다.
+//
+// resolveBackendWardAccess가 아니라 resolveCachedBackendWardAccess를 쓴다 — 이건
+// 마이페이지 진입 시 자동으로 도는 순수 조회라, PR #8에서 고쳤던 "화면 진입만으로 더미
+// 데이터의 백엔드 User가 생성되는" 부수효과를 여기서 다시 만들면 안 된다.
 export async function fetchBackendWardProfile(params: {
   mockWardId: string;
   name: string;
   age: number;
   address: string;
 }): Promise<BackendUserProfile | null> {
-  const access = await resolveBackendWardAccess(params);
+  const access = resolveCachedBackendWardAccess(params.mockWardId);
   if (!access) return null;
 
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(

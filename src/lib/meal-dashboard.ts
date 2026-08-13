@@ -3,13 +3,21 @@
 //   — 보호자 전용(guardian JWT만 받음, notifications.ts의 fetchGuardianNotifications와 같은
 //   패턴으로 guardianLoginId의 세션을 직접 쓴다).
 // - /app/elder/{elder_id}/{today-plan,nutrition-summary,diet-history}
-//   — 보호자 JWT 또는 자가등록 본인 JWT 둘 다 받는다(ElderAppCaller, resolveBackendWardAccess).
+//   — 보호자 JWT 또는 자가등록 본인 JWT 둘 다 받는다(ElderAppCaller).
 //
 // 두 그룹 다 응답 스키마(MealStatusResponse/DietHistoryResponse/HealthReportResponse)는
-// 완전히 같다 — 어느 쪽으로 부르든 같은 파서를 쓴다.
+// 완전히 같다 — 어느 쪽으로 부르든 같은 파서를 쓴다. 이 파일의 모든 조회는 화면 진입 시
+// 자동으로 도는 순수 조회라, 백엔드 User를 새로 만드는 resolveBackendWardAccess/
+// ensureBackendWardId 대신 캐시만 읽는 resolveCachedBackendWardAccess/getCachedBackendWardId를
+// 쓴다 — PR #8에서 발견/수정된 "화면 진입만으로 더미 데이터의 실제 백엔드 User가 생성되던"
+// 버그와 같은 부수효과를 여기서 다시 만들지 않기 위함.
 
 import { API_BASE_URL } from "@/lib/api-config";
-import { ensureBackendWardId, getBackendGuardianSessionForWard, resolveBackendWardAccess } from "@/lib/backend-auth";
+import {
+  getBackendGuardianSessionForWard,
+  getCachedBackendWardId,
+  resolveCachedBackendWardAccess,
+} from "@/lib/backend-auth";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { MealTone } from "@/lib/wards";
 
@@ -71,14 +79,18 @@ async function getJson<T>(
 
 // meal-status/intake-summary/nutrition-gaps/diet-history/health-report(guardian-app)는 전부
 // guardian JWT만 받는다 — notifications.ts의 fetchGuardianNotifications와 같은 이유로
-// resolveBackendWardAccess(둘 다 시도) 대신 이 어르신을 관리하는 보호자의 세션을 직접 찾고,
-// 캐시에 없으면 ensureBackendWardId로 백엔드 User까지 확보한다.
-async function resolveGuardianOnlyAccess(
+// resolveBackendWardAccess(둘 다 시도) 대신 이 어르신을 관리하는 보호자의 세션을 직접 찾는다.
+//
+// ensureBackendWardId(생성형)가 아니라 캐시된 backendWardId만 읽는다 — 이 함수들은 전부
+// report-view.tsx 등이 화면 진입 시 자동으로 부르는 순수 조회라, PR #8에서 고쳤던 것과 같은
+// 부수효과(화면 진입만으로 더미 phone/생년월일의 실제 백엔드 User가 생성되는 것)를 다시
+// 만들면 안 된다 — "AI 추천받기"처럼 실제로 대상자를 생성해도 되는 명시적 액션이 아니다.
+function resolveGuardianOnlyAccess(
   identity: WardIdentity
-): Promise<{ accessToken: string; backendWardId: string } | null> {
+): { accessToken: string; backendWardId: string } | null {
   const session = getBackendGuardianSessionForWard(identity.mockWardId);
   if (!session) return null;
-  const backendWardId = await ensureBackendWardId(identity);
+  const backendWardId = getCachedBackendWardId(identity.mockWardId);
   if (!backendWardId) return null;
   return { accessToken: session.accessToken, backendWardId };
 }
@@ -145,7 +157,7 @@ export async function fetchGuardianDietHistory(
   identity: WardIdentity,
   days: number
 ): Promise<DietHistoryEntry[] | null> {
-  const access = await resolveGuardianOnlyAccess(identity);
+  const access = resolveGuardianOnlyAccess(identity);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseDietHistory>[0]>(
     `${API_BASE_URL}/app/guardian/${access.backendWardId}/diet-history?days=${days}`,
@@ -154,11 +166,14 @@ export async function fetchGuardianDietHistory(
   return data ? parseDietHistory(data) : null;
 }
 
+// elder-app 쪽도(today-plan/nutrition-summary/diet-history 셋 다) resolveBackendWardAccess
+// 대신 캐시만 읽는다 — 위 resolveGuardianOnlyAccess와 같은 이유로, records-view.tsx가 화면
+// 진입 시 자동으로 부르는 순수 조회에서 더미 데이터의 백엔드 User를 새로 만들면 안 된다.
 export async function fetchElderDietHistory(
   identity: WardIdentity,
   days: number
 ): Promise<DietHistoryEntry[] | null> {
-  const access = await resolveBackendWardAccess(identity);
+  const access = resolveCachedBackendWardAccess(identity.mockWardId);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseDietHistory>[0]>(
     `${API_BASE_URL}/app/elder/${access.backendWardId}/diet-history?days=${days}`,
@@ -171,7 +186,7 @@ export async function fetchGuardianIntakeSummary(
   identity: WardIdentity,
   days: number
 ): Promise<IntakeSummary | null> {
-  const access = await resolveGuardianOnlyAccess(identity);
+  const access = resolveGuardianOnlyAccess(identity);
   if (!access) return null;
   const data = await getJson<{
     period_days: number;
@@ -190,7 +205,7 @@ export async function fetchGuardianNutritionGaps(
   identity: WardIdentity,
   days: number
 ): Promise<NutritionGapItem[] | null> {
-  const access = await resolveGuardianOnlyAccess(identity);
+  const access = resolveGuardianOnlyAccess(identity);
   if (!access) return null;
   const data = await getJson<{
     items: {
@@ -232,7 +247,7 @@ function parseHealthReport(data: {
 // 검수 확정된 리포트가 아직 없으면 백엔드가 404를 준다(draft는 노출 안 함) — 에러가 아니라
 // "아직 없음"이라 조용히 null로 돌려준다(banchan-recommendation.ts의 같은 관례).
 export async function fetchGuardianHealthReport(identity: WardIdentity): Promise<HealthReportSummary | null> {
-  const access = await resolveGuardianOnlyAccess(identity);
+  const access = resolveGuardianOnlyAccess(identity);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseHealthReport>[0]>(
     `${API_BASE_URL}/app/guardian/${access.backendWardId}/health-report`,
@@ -242,7 +257,7 @@ export async function fetchGuardianHealthReport(identity: WardIdentity): Promise
 }
 
 export async function fetchElderNutritionSummary(identity: WardIdentity): Promise<HealthReportSummary | null> {
-  const access = await resolveBackendWardAccess(identity);
+  const access = resolveCachedBackendWardAccess(identity.mockWardId);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseHealthReport>[0]>(
     `${API_BASE_URL}/app/elder/${access.backendWardId}/nutrition-summary`,
@@ -258,7 +273,7 @@ function parseMealStatus(data: { completed_count: number; total_expected: number
 }
 
 export async function fetchGuardianMealStatus(identity: WardIdentity): Promise<MealStatusSummary | null> {
-  const access = await resolveGuardianOnlyAccess(identity);
+  const access = resolveGuardianOnlyAccess(identity);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseMealStatus>[0]>(
     `${API_BASE_URL}/app/guardian/${access.backendWardId}/meal-status`,
@@ -268,7 +283,7 @@ export async function fetchGuardianMealStatus(identity: WardIdentity): Promise<M
 }
 
 export async function fetchElderTodayPlan(identity: WardIdentity): Promise<MealStatusSummary | null> {
-  const access = await resolveBackendWardAccess(identity);
+  const access = resolveCachedBackendWardAccess(identity.mockWardId);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseMealStatus>[0]>(
     `${API_BASE_URL}/app/elder/${access.backendWardId}/today-plan`,
