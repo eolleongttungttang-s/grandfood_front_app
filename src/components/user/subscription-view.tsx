@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import {
   PLANS,
   PAYMENT_METHOD,
-  subscriptionStore,
+  selfSubscriptionPlanStore,
+  resolveDisplayPlanId,
   formatWon,
   syncSubscriptionToBackend,
   fetchActiveSubscriptionBackend,
@@ -22,16 +23,27 @@ import { getPartnerStore } from "@/lib/partner-stores";
 // UI는 거의 같지만 대상자가 항상 본인 한 명뿐이고, funding_source가 "guardian"이 아니라
 // "self"로 나간다(subscription.ts 참고). 이 화면이 없으면 자가등록 이용자는 건강 프로필까지
 // 다 채워도 AI 반찬 추천이 "구독 없음"으로 영구히 막혀 있었다.
+//
+// 이 화면은 QR 초대로 보호자가 관리하는 대상자의 마이페이지에서도 똑같이 열린다(profile-view.tsx가
+// 역할 구분 없이 카드를 보여줌) — 그런 대상자는 이미 보호자가 funding_source="guardian"으로
+// 구독을 만들어놨을 수 있는데, 여기서 아무 플랜이나 눌러 새로 구독하면 백엔드가 기존 구독을
+// 자동 취소하고 이걸로 대체해버린다(subscription/router.py register_subscription 주석). 이미
+// 활성 구독이 있는 상태에서 다른 플랜을 고르면 "지금 구독을 대체하는 것"임을 명시적으로
+// 확인받는다 — 특히 본인이 이 화면에서 만든 게 아닌 구독(funding_source !== "self", 즉
+// 보호자가 만들었을 가능성이 높은 경우)은 문구를 더 강하게 경고한다.
 export function SelfSubscriptionView({ ward }: { ward: Ward }) {
-  const currentPlanId = useLocalStore(subscriptionStore);
+  const rememberedPlans = useLocalStore(selfSubscriptionPlanStore);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   const identity = { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address };
 
-  // subscriptionStore는 실제로 구독을 만든 적 없어도 기본값이 "standard"라, 로컬 값만
-  // 보면 자가등록 직후에도 화면이 "이용중"으로 거짓 표시될 수 있다 — 백엔드에 진짜 활성
-  // 구독이 있는지 마운트 시 한 번 확인해서, 있을 때만 "이용중" 배지를 보여준다.
   const [checkingBackend, setCheckingBackend] = useState(true);
   const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
+  // 백엔드 PlanType은 base/premium 2단계뿐이라 basic/standard를 구분 못 한다 — 실제로
+  // 활성 상태인 plan_type과, 이 화면에서 마지막으로 골랐던 3단계 id를 합쳐서 표시용 id를
+  // 만든다(resolveDisplayPlanId). 아직 백엔드 상태를 확인 전(null)엔 아무 카드도 "이용중"
+  // 취급하지 않는다.
+  const [displayPlanId, setDisplayPlanId] = useState<string | null>(null);
+  const [activeFundingSource, setActiveFundingSource] = useState<string | null>(null);
   const [syncingPlanId, setSyncingPlanId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,6 +51,8 @@ export function SelfSubscriptionView({ ward }: { ward: Ward }) {
     fetchActiveSubscriptionBackend(identity).then((result) => {
       if (cancelled) return;
       setHasActiveSubscription(result !== null);
+      setActiveFundingSource(result?.fundingSource ?? null);
+      setDisplayPlanId(result ? resolveDisplayPlanId(result.planType, rememberedPlans[ward.id]) : null);
       setCheckingBackend(false);
     });
     return () => {
@@ -48,6 +62,14 @@ export function SelfSubscriptionView({ ward }: { ward: Ward }) {
   }, [ward.id]);
 
   async function handleSelectPlan(planId: string) {
+    if (hasActiveSubscription) {
+      const warning =
+        activeFundingSource && activeFundingSource !== "self"
+          ? "이미 보호자가 관리하는 구독이 활성화돼 있어요. 지금 다른 플랜을 선택하면 그 구독이 취소되고 이 플랜으로 바뀌어요. 계속할까요?"
+          : "지금 이용 중인 구독을 취소하고 이 플랜으로 바꿀까요?";
+      if (!window.confirm(warning)) return;
+    }
+
     setSyncingPlanId(planId);
     const ok = await syncSubscriptionToBackend(identity, planId, "self");
     setSyncingPlanId(null);
@@ -55,8 +77,10 @@ export function SelfSubscriptionView({ ward }: { ward: Ward }) {
       toast.error("구독 신청에 실패했어요. 잠시 후 다시 시도해 주세요.");
       return;
     }
-    subscriptionStore.write(planId);
+    selfSubscriptionPlanStore.update((prev) => ({ ...prev, [ward.id]: planId }));
     setHasActiveSubscription(true);
+    setActiveFundingSource("self");
+    setDisplayPlanId(planId);
     const plan = PLANS.find((p) => p.id === planId);
     toast.success(`${plan?.name ?? "선택하신"} 플랜 구독을 시작했어요.`);
   }
@@ -72,9 +96,15 @@ export function SelfSubscriptionView({ ward }: { ward: Ward }) {
             이용하실 수 있어요.
           </div>
         )}
+        {!checkingBackend && hasActiveSubscription && activeFundingSource && activeFundingSource !== "self" && (
+          <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 text-sm text-foreground">
+            지금 이용 중인 구독은 보호자가 관리하고 있어요. 다른 플랜으로 바꾸면 보호자가
+            설정한 구독이 취소돼요.
+          </div>
+        )}
 
         {PLANS.map((plan) => {
-          const isCurrent = hasActiveSubscription && plan.id === currentPlanId;
+          const isCurrent = hasActiveSubscription && plan.id === displayPlanId;
           return (
             <div
               key={plan.id}

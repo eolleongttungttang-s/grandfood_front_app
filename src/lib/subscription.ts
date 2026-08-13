@@ -1,5 +1,5 @@
 import { API_BASE_URL } from "@/lib/api-config";
-import { resolveBackendWardAccess } from "@/lib/backend-auth";
+import { resolveBackendWardAccess, resolveCachedBackendWardAccess } from "@/lib/backend-auth";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { createLocalStore } from "@/lib/local-store";
 
@@ -40,10 +40,36 @@ export const PLANS: Plan[] = [
 
 export const PAYMENT_METHOD = { brand: "국민카드", last4: "4821" };
 
+// 보호자 화면(guardian/subscription-view.tsx) 전용 — 보호자 계정 전체에 플랜 하나만
+// 고르는 그 화면의 UI 모델 그대로다. 이용자 본인 구독 화면(user/subscription-view.tsx)은
+// 이 키를 같이 쓰면 안 된다 — 한 브라우저에서 보호자/이용자 역할을 오가며 쓰는 이 앱의
+// 데모 구조상, 보호자가 고른 플랜과 어르신 본인이 고른 플랜이 이 하나의 값을 서로
+// 덮어써서 두 화면이 서로의 상태를 오염시키는 문제가 있었다 — 아래
+// selfSubscriptionPlanStore로 분리했다.
 export const subscriptionStore = createLocalStore<string>(
   "grandfood-app-plan",
   "standard"
 );
+
+// 이용자 본인 구독 화면 전용 — wardId별로 "마지막으로 직접 고른 플랜"만 기억한다(대상자가
+// 항상 본인 한 명이라 wardId 하나짜리 맵이면 충분). 백엔드 PlanType은 base/premium
+// 2단계뿐이라 "basic"과 "standard" 중 실제로 뭘 골랐었는지는 백엔드 응답만으로 복원할 수
+// 없어서, 화면에 "이용중" 배지를 basic/standard 중 어느 쪽에 붙일지 구분하는 용도로만
+// 쓴다 — "구독이 실제로 활성 상태인지" 자체는 이 값이 아니라 fetchActiveSubscriptionBackend
+// (백엔드 조회)로만 판단한다.
+export const selfSubscriptionPlanStore = createLocalStore<Record<string, string>>(
+  "grandfood-app-self-plan",
+  {}
+);
+
+// fetchActiveSubscriptionBackend가 돌려준 실제 plan_type("base"/"premium")을 화면에 표시할
+// 3단계 플랜 id로 되돌린다 — "premium"은 그대로 premium, "base"는 basic/standard 중
+// 마지막으로 골랐던 쪽(rememberedPlanId)을 우선하고, 고른 적이 없거나 그 값 자체가
+// "premium"이었다면(플랜이 premium에서 base로 강등된 경우 등) "basic"으로 기본값 처리한다.
+export function resolveDisplayPlanId(backendPlanType: string, rememberedPlanId?: string): string {
+  if (backendPlanType === "premium") return "premium";
+  return rememberedPlanId === "basic" || rememberedPlanId === "standard" ? rememberedPlanId : "basic";
+}
 
 export function formatWon(value: number) {
   return `${value.toLocaleString("ko-KR")}원`;
@@ -121,13 +147,16 @@ export async function syncSubscriptionToBackend(
 // 실제로는 한 번도 구독을 만든 적 없는 자가등록 이용자도 화면엔 "이용중"으로 보이는 문제가
 // 있다 — 이용자 본인 구독 화면(user/subscription-view.tsx)은 그 착시를 막기 위해 이 함수로
 // 실제 상태를 한 번 더 확인한다. 활성 구독이 없으면(404) null — 신규/구독취소 둘 다 이 값.
+//
+// resolveBackendWardAccess가 아니라 resolveCachedBackendWardAccess를 쓴다 — 이건 화면
+// 진입 시 자동으로 도는 순수 조회라, resolveBackendWardAccess를 쓰면 보호자 세션 경로에서
+// ensureBackendWardId가 캐시 미스 시 더미 phone/생년월일로 실제 백엔드 User를 새로
+// 만들어버릴 수 있다(PR#8 리뷰에서 발견/수정됐던 것과 정확히 같은 부수효과 — backend-auth.ts
+// resolveCachedBackendWardAccess/fetchMonthlyBanchanRecommendation 주석 참고).
 export async function fetchActiveSubscriptionBackend(identity: {
   mockWardId: string;
-  name: string;
-  age: number;
-  address: string;
-}): Promise<{ planType: string } | null> {
-  const access = await resolveBackendWardAccess(identity);
+}): Promise<{ planType: string; fundingSource: string } | null> {
+  const access = resolveCachedBackendWardAccess(identity.mockWardId);
   if (!access) return null;
 
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
@@ -139,7 +168,7 @@ export async function fetchActiveSubscriptionBackend(identity: {
     const response = await promise;
     if (!response.ok) return null;
     const data = await response.json();
-    return { planType: data.plan_type as string };
+    return { planType: data.plan_type as string, fundingSource: data.funding_source as string };
   } catch {
     return null;
   } finally {
