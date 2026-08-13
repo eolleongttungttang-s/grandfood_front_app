@@ -35,6 +35,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
+import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
+import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
+import { requestWellnessCall } from "@/lib/wellness-calls";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
   addMessage,
@@ -88,9 +91,16 @@ export function WardDetailView({
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   useLocalStore(careProfileStore);
   const careProfile = getCareProfile(ward.id);
+  const banchanRecommendation = useMonthlyBanchanRecommendation({
+    wardId: ward.id,
+    wardName: ward.name,
+    wardAge: ward.age,
+    wardAddress: ward.address,
+  });
 
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestNote, setRequestNote] = useState("");
+  const [requestingWellnessCall, setRequestingWellnessCall] = useState(false);
 
   const [messageOpen, setMessageOpen] = useState(false);
   const [messageText, setMessageText] = useState("");
@@ -115,6 +125,23 @@ export function WardDetailView({
     addMessage(threadId, guardianName, trimmed);
     setMessageText("");
     toast.success(`${ward.name}님께 메시지를 보냈어요.`);
+  }
+
+  async function requestWellnessCheck() {
+    setRequestingWellnessCall(true);
+    try {
+      await requestWellnessCall({
+        mockWardId: ward.id,
+        name: ward.name,
+        age: ward.age,
+        address: ward.address,
+      });
+      toast.success(`${ward.name}님 안부 확인을 요청했어요.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "안부 확인 요청에 실패했어요.");
+    } finally {
+      setRequestingWellnessCall(false);
+    }
   }
 
   return (
@@ -172,12 +199,9 @@ export function WardDetailView({
               <PhoneCall />
               매장 연결
             </Button>
-            <Button
-              size="sm"
-              onClick={() => toast.success(`${ward.name}님 안부 확인을 요청했어요.`)}
-            >
+            <Button size="sm" onClick={requestWellnessCheck} disabled={requestingWellnessCall}>
               <MessageCircle />
-              안부 확인 요청
+              {requestingWellnessCall ? "요청하는 중..." : "안부 확인 요청"}
             </Button>
             <Button
               variant="outline"
@@ -305,26 +329,7 @@ export function WardDetailView({
           )}
         </div>
 
-        <div className="flex flex-col gap-2 rounded-2xl bg-sidebar p-5 text-sidebar-foreground shadow-sm">
-          <span className="text-xs font-bold tracking-wide text-sidebar-primary">
-            AI 반찬 매칭
-          </span>
-          <span className="text-xl font-extrabold">오늘의 추천 반찬 조합</span>
-          <div className="flex gap-4 pt-1 text-xs">
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">나트륨</span>
-              <span className="font-semibold">{detail.recommendedCombo.totalSodiumMg}mg</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">단백질</span>
-              <span className="font-semibold">{detail.recommendedCombo.totalProteinG}g</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">열량</span>
-              <span className="font-semibold">{detail.recommendedCombo.totalKcal}kcal</span>
-            </div>
-          </div>
-        </div>
+        <BanchanRecommendationSection state={banchanRecommendation} />
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>

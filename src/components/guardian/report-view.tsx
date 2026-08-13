@@ -6,6 +6,13 @@ import { ChevronLeft, Download } from "lucide-react";
 
 import { Ward, WardDetail } from "@/lib/wards";
 import { getNutritionReport, ReportPeriod } from "@/lib/reports";
+import {
+  fetchGuardianDietHistory,
+  fetchGuardianHealthReport,
+  fetchGuardianNutritionGaps,
+  HealthReportSummary,
+  NutritionGapItem,
+} from "@/lib/meal-dashboard";
 import { deriveHealthInsight } from "@/lib/health-insights";
 import { getRecipeRecommendations, type RecipeRecommendation } from "@/lib/recipe-recommendations";
 import { mealLogStore, wardMealLogs } from "@/lib/meal-log-store";
@@ -23,9 +30,60 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+// 영양소별 목표 대비 섭취(nutrition-gaps)의 nutrient_type은 자유 문자열 컬럼이라 백엔드가
+// 실제로 어떤 값을 쓰는지 시드 데이터로 확정되어 있지 않다 — 나트륨/단백질/열량으로 보이는
+// 항목만 느슨하게(영문·한글 키워드 포함 여부) 찾아 쓰고, 못 찾으면 그 카드는 목업 값을 그대로
+// 둔다(완전히 안 보이게 하는 것보다, 아직 실제 기록이 없다는 걸 자연스럽게 드러내는 셈).
+function findNutrientAverage(items: NutritionGapItem[], keywords: string[]): number | null {
+  const match = items.find((i) => keywords.some((k) => i.nutrientType.toLowerCase().includes(k)));
+  return match ? Math.round(match.averageAmount) : null;
+}
+
 export function ReportView({ ward, detail }: { ward: Ward; detail: WardDetail }) {
   const [period, setPeriod] = useState<ReportPeriod>("주간");
-  const report = getNutritionReport(ward, detail, period);
+  const mockReport = getNutritionReport(ward, detail, period);
+  const days = period === "주간" ? 7 : 30;
+
+  // 실제 백엔드 리포트 데이터(GET /app/guardian/{id}/{diet-history,nutrition-gaps,health-report})가
+  // 있으면 목업(reports.ts getNutritionReport) 대신 그걸 보여준다 — 없거나 실패하면(자가등록 본인이
+  // 관리하는 대상자, 아직 섭취 기록이 없는 신규 대상자 등) 조용히 목업으로 남는다.
+  const [backendCompleteRate, setBackendCompleteRate] = useState<number | null>(null);
+  const [backendGaps, setBackendGaps] = useState<NutritionGapItem[] | null>(null);
+  const [backendHealthReport, setBackendHealthReport] = useState<HealthReportSummary | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const identity = { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address };
+
+    fetchGuardianDietHistory(identity, days).then((items) => {
+      if (cancelled || !items || items.length === 0) return;
+      const completedCount = items.filter((i) => i.completed).length;
+      setBackendCompleteRate(Math.round((completedCount / items.length) * 100));
+    });
+    fetchGuardianNutritionGaps(identity, days).then((items) => {
+      if (!cancelled && items) setBackendGaps(items);
+    });
+    fetchGuardianHealthReport(identity).then((result) => {
+      if (!cancelled) setBackendHealthReport(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ward.id, ward.name, ward.age, ward.address, days]);
+
+  const avgSodiumMg = backendGaps ? (findNutrientAverage(backendGaps, ["sodium", "나트륨"]) ?? mockReport.avgSodiumMg) : mockReport.avgSodiumMg;
+  const avgProteinG = backendGaps ? (findNutrientAverage(backendGaps, ["protein", "단백질"]) ?? mockReport.avgProteinG) : mockReport.avgProteinG;
+  const avgKcal = backendGaps
+    ? (findNutrientAverage(backendGaps, ["kcal", "calorie", "열량", "칼로리"]) ?? mockReport.avgKcal)
+    : mockReport.avgKcal;
+
+  const report = {
+    ...mockReport,
+    completeRate: backendCompleteRate ?? mockReport.completeRate,
+    avgSodiumMg,
+    avgProteinG,
+    avgKcal,
+  };
 
   // "건강데이터 결합 해석" — 건강 프로필/오늘의 조합 + 최근 식사 기록을 합쳐서 이상 신호를 판단.
   // 이미 갖고 있는 props(detail)와 로컬 store에서 동기적으로 계산되는 값이라 useState/useEffect가 필요 없다.
@@ -111,11 +169,30 @@ export function ReportView({ ward, detail }: { ward: Ward; detail: WardDetail })
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">담당 영양사 소견</span>
-          {report.notes.map((n, i) => (
-            <p key={i} className="text-sm text-foreground">
-              · {n}
-            </p>
-          ))}
+          {backendHealthReport ? (
+            <>
+              <p className="text-sm text-foreground">{backendHealthReport.summary}</p>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {backendHealthReport.riskLevel && (
+                  <Badge className="bg-risk-caution text-risk-caution-foreground">
+                    위험도 {backendHealthReport.riskLevel}
+                  </Badge>
+                )}
+                {backendHealthReport.bpStatus && <Badge variant="secondary">혈압 {backendHealthReport.bpStatus}</Badge>}
+                {backendHealthReport.glucoseStatus && (
+                  <Badge variant="secondary">혈당 {backendHealthReport.glucoseStatus}</Badge>
+                )}
+                {backendHealthReport.bmiStatus && <Badge variant="secondary">BMI {backendHealthReport.bmiStatus}</Badge>}
+              </div>
+              <span className="text-xs text-muted-foreground">{backendHealthReport.reportDate} 검수 확정</span>
+            </>
+          ) : (
+            report.notes.map((n, i) => (
+              <p key={i} className="text-sm text-foreground">
+                · {n}
+              </p>
+            ))
+          )}
         </div>
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">

@@ -1,9 +1,11 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Pill } from "lucide-react";
 
-import { WardDetail } from "@/lib/wards";
+import { MealTone, Ward, WardDetail } from "@/lib/wards";
 import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
+import { deriveMealTones, fetchElderDietHistory } from "@/lib/meal-dashboard";
 import { TopBar } from "@/components/app/top-bar";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -28,16 +30,35 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 }
 
 export function RecordsView({
-  wardId,
+  ward,
   detail,
 }: {
-  wardId: string;
+  ward: Ward;
   detail: WardDetail;
 }) {
-  const completeCount = detail.mealHistory.filter((m) => m === "완식").length;
-  const smallCount = detail.mealHistory.filter((m) => m === "소량").length;
-  const noResponseCount = detail.mealHistory.filter((m) => m === "미응답").length;
-  const reminderEnabled = useLocalStore(medicationReminderStore)[wardId] ?? false;
+  // 실제 백엔드 식단 이력(GET /app/elder/{id}/diet-history)이 있으면 목업 대신 그걸 보여준다 —
+  // 여긴 어르신 본인 화면이라 elder-app 엔드포인트(보호자/본인 JWT 둘 다 됨)를 쓴다. 실패하면
+  // (아직 실제 기록 없음 등) 조용히 기존 목업 그리드를 그대로 쓴다.
+  const [backendMealTones, setBackendMealTones] = useState<MealTone[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchElderDietHistory(
+      { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
+      14
+    ).then((items) => {
+      if (cancelled || !items) return;
+      setBackendMealTones(deriveMealTones(items, 14));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ward.id, ward.name, ward.age, ward.address]);
+  const mealHistory = backendMealTones ?? detail.mealHistory;
+
+  const completeCount = mealHistory.filter((m) => m === "완식").length;
+  const smallCount = mealHistory.filter((m) => m === "소량").length;
+  const noResponseCount = mealHistory.filter((m) => m === "미응답").length;
+  const reminderEnabled = useLocalStore(medicationReminderStore)[ward.id] ?? false;
   const hasRealMeds = detail.medications[0]?.name !== "특이 복약 없음";
 
   return (
@@ -54,7 +75,7 @@ export function RecordsView({
               </span>
               <Switch
                 checked={reminderEnabled}
-                onCheckedChange={(checked) => setMedicationReminder(wardId, checked)}
+                onCheckedChange={(checked) => setMedicationReminder(ward.id, checked)}
               />
             </div>
             <div className="flex flex-col gap-1">
@@ -89,7 +110,7 @@ export function RecordsView({
             </span>
           </div>
           <div className="grid grid-cols-7 gap-1.5">
-            {detail.mealHistory.map((tone, i) => (
+            {mealHistory.map((tone, i) => (
               <div
                 key={i}
                 className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]}`}

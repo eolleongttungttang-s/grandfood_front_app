@@ -18,11 +18,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 import { SpeakableCard } from "@/components/app/speakable-card";
+import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { getNutritionTip } from "@/lib/nutrition-tip";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
 import { quickMealCheckStore, setQuickMealCheck } from "@/lib/meal-log-store";
 import { useLocalStore } from "@/lib/use-store";
 import { getSpeechRecognition, speak } from "@/lib/accessibility";
+import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 
 export function HomeView({
   name,
@@ -37,6 +39,16 @@ export function HomeView({
   const mealCheck = useLocalStore(quickMealCheckStore)[ward.id] ?? null;
   const [listening, setListening] = useState(false);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
+  // diet-view.tsx와 같은 이유로 신규 회원(AI 반찬 추천을 한 번도 받은 적 없음)인지 본다 —
+  // 여기 있는 카드들도 대부분 오늘의 추천 반찬 조합(목업)에서 파생된 값이라, 아직 실제 추천을
+  // 한 번도 못 받아본 사람에게 먼저 보여줄 이유가 없다. 조건부 return은 아래 다른 Hook을 전부
+  // 호출한 뒤(맨 아래 return 문 자리)에 둔다.
+  const banchanRecommendation = useMonthlyBanchanRecommendation({
+    wardId: ward.id,
+    wardName: ward.name,
+    wardAge: ward.age,
+    wardAddress: ward.address,
+  });
 
   // null이면 아직 응답 안 옴(로딩 중), 배열이면 로딩 완료(비어있어도) — notifications-view.tsx와
   // 같은 패턴. 이렇게 구분해야 로딩/에러 중에 "안내 사항 없음"으로 잘못 안내하지 않는다.
@@ -110,6 +122,43 @@ export function HomeView({
     };
     recognition.onend = () => setListening(false);
     recognition.start();
+  }
+
+  // isNewMember가 아직 null(최초 조회 중)이면 판단이 서기 전까지는 기존 홈 화면도, 신규
+  // 회원용 소개 화면도 아닌 최소 로딩만 보여준다 — diet-view.tsx와 같은 이유로, 판단이 늦게
+  // 서서 화면이 통째로 바뀌는 깜빡임을 피한다.
+  if (banchanRecommendation.isNewMember == null) {
+    return (
+      <div className="flex flex-1 flex-col gap-4 pb-6">
+        <TopBar title={`안녕하세요, ${name}님`} subtitle={partnerStore?.name} />
+        <div className="px-5">
+          <p className="text-sm text-muted-foreground">불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (banchanRecommendation.isNewMember) {
+    return (
+      <div className="flex flex-1 flex-col gap-4 pb-6">
+        <TopBar title={`환영해요, ${name}님`} subtitle="그랜드푸드가 처음이시군요" />
+        <div className="flex flex-col gap-4 px-5">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
+            <GrandFoodMark className="h-14 w-14" />
+            <p className="text-base font-bold text-foreground">GrandFood와 함께 시작해요</p>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              그랜드푸드는 건강 상태와 질환·알레르기에 맞춰 AI가 매주 반찬을 추천하고, 담당
+              반찬가게가 그대로 배송해드리는 서비스예요. 잔반 사진만 올리면 잔반율도 자동으로
+              분석해드려요.
+            </p>
+            <Button className="mt-1 w-full" nativeButton={false} render={<Link href="/user/diet" />}>
+              <Sparkles />
+              AI 반찬 추천 받으러 가기
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

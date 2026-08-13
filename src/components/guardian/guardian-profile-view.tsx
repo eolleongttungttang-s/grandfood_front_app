@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronRight, Copy, LogOut, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { Account } from "@/lib/auth";
+import { fetchGuardianOwnUsers, getCachedBackendWardId } from "@/lib/backend-auth";
 import { Ward } from "@/lib/wards";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { TopBar } from "@/components/app/top-bar";
@@ -32,6 +34,37 @@ export function GuardianProfileView({
   const invite = useLocalStore(guardianInviteStore);
   const currentPlanId = useLocalStore(subscriptionStore);
   const currentPlan = PLANS.find((p) => p.id === currentPlanId);
+  // 로컬 wards 목록 자체는 그대로 두고(백엔드 응답엔 담당 매장/식사기록 같은 이 앱의 목업
+  // 전용 필드가 없어서 화면을 통째로 못 채운다), GET /users로 실제 서버에도 대상자가
+  // 만들어져 있는지만 확인해서 "서버 연동됨" 표시에 쓴다.
+  const [linkedBackendWardIds, setLinkedBackendWardIds] = useState<Set<string>>(new Set());
+  // wards는 부모(page.tsx)가 렌더마다 getWards().filter(...)로 새로 만드는 배열이라 참조가
+  // 매번 바뀐다 — 그대로 deps에 넣으면 렌더마다 재조회한다. report-view.tsx의
+  // deficiencyKey/leftoverKey와 같은 방식으로, "실제로 대상자 목록이 달라졌을 때만" 값이
+  // 바뀌는 문자열 키로 뽑아써서 안정적인 의존성으로 쓴다 — account.loginId만 보면 같은
+  // 계정으로 로그인한 채 대상자를 추가/제거해도 이 effect가 다시 안 도는 문제가 있었다.
+  const wardIdsKey = wards.map((w) => w.id).join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchGuardianOwnUsers(account.loginId).then((users) => {
+      if (cancelled) return;
+      const backendUserIds = new Set(users.map((u) => u.userId));
+      const linked = new Set(
+        wards
+          .filter((w) => {
+            const backendId = getCachedBackendWardId(w.id);
+            return backendId !== null && backendUserIds.has(backendId);
+          })
+          .map((w) => w.id)
+      );
+      setLinkedBackendWardIds(linked);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account.loginId, wardIdsKey]);
 
   async function createInvite() {
     await createGuardianInvite({ wardIds: wards.map((w) => w.id) });
@@ -72,8 +105,13 @@ export function GuardianProfileView({
               href={`/guardian/wards/detail?id=${w.id}`}
               className="flex items-center justify-between rounded-lg py-1.5 text-sm"
             >
-              <span className="text-foreground">
+              <span className="flex items-center gap-1.5 text-foreground">
                 {w.name} <span className="text-muted-foreground">({w.relationToGuardian})</span>
+                {linkedBackendWardIds.has(w.id) && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    서버 연동됨
+                  </Badge>
+                )}
               </span>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </Link>

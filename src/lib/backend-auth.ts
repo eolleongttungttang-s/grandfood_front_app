@@ -637,6 +637,72 @@ export async function registerElderFromInviteBackend(
   }
 }
 
+// POST /users/{user_id}/health-profile — 자가등록(보호자 없는) 이용자 본인이 로그인 후
+// 자기 건강 프로필(질환 체크리스트)을 채운다. register_user(보호자 전용 온보딩)와 달리
+// registerUserBackend(자가등록)는 건강 프로필을 안 만들어서, 이 호출 없이는 AI 반찬 추천이
+// 구조적으로 항상 404였다(health/service.py가 HealthProfile 존재를 요구함). user/survey/page.tsx가
+// "생활 정보" 설문(conditions만 수집)을 마친 직후 이 함수를 불러 그 갭을 메운다.
+export async function submitSelfHealthProfileBackend(params: {
+  mockWardId: string;
+  name: string;
+  age: number;
+  address: string;
+  conditionFlags: string[];
+  // BMR/TDEE + KDRI 기반 서버 영양 목표치 계산 전용(전부 선택) — health-profile.ts의
+  // HealthMetricsForm(키/몸무게/활동량)과 signup 시점의 성별을 실어 보내면, care-survey-view.tsx
+  // 설문에서 여기까지 다 입력한 이용자는 실제 BMR/TDEE 계산까지 받을 수 있다. 넷 다 없어도
+  // condition_flags만으로 건강 프로필 자체는 만들어진다(health-profile.ts 상단 주석 참고 —
+  // 예전엔 이 필드들이 로컬에만 남고 백엔드로 전혀 안 갔었다).
+  gender?: "male" | "female";
+  heightCm?: number;
+  weightKg?: number;
+  activityLevel?: BackendActivityLevel;
+}): Promise<{ userId: string } | { error: string }> {
+  const access = await resolveBackendWardAccess({
+    mockWardId: params.mockWardId,
+    name: params.name,
+    age: params.age,
+    address: params.address,
+  });
+  if (!access) {
+    return { error: "이 계정으로 로그인해야 건강 프로필을 저장할 수 있어요." };
+  }
+
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/users/${access.backendWardId}/health-profile`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${access.accessToken}`,
+      },
+      body: JSON.stringify({
+        condition_flags: params.conditionFlags,
+        gender: params.gender,
+        height_cm: params.heightCm,
+        weight_kg: params.weightKg,
+        activity_level: params.activityLevel,
+      }),
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) {
+      return { error: await parseErrorResponse(response) };
+    }
+    const data = await response.json();
+    return { userId: data.user_id as string };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return { error: "서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요." };
+    }
+    return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
 // 이 mockWardId를 "본인 자신"으로 자가등록(개인 이용자, 보호자 없음)한 로컬 계정의
 // 백엔드 세션을 찾는다. getBackendGuardianSessionForWard와 짝을 이루는 개인 이용자
 // 버전 — 보호자 세션과 달리 이 경로는 backendWardId를 바로 안다(자기 자신의 User가
@@ -718,4 +784,130 @@ export function resolveCachedBackendWardAccess(
   }
 
   return null;
+}
+
+export type BackendUserProfile = {
+  userId: string;
+  guardianId: string | null;
+  name: string;
+  birthDate: string;
+  phone: string;
+  address: string;
+  planType: string;
+  healthProfileId: string | null;
+  conditionFlags: string[];
+  ttsCallConsent: boolean;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseUserProfile(data: any): BackendUserProfile {
+  return {
+    userId: data.user_id,
+    guardianId: data.guardian_id ?? null,
+    name: data.name,
+    birthDate: data.birth_date,
+    phone: data.phone,
+    address: data.address,
+    planType: data.plan_type,
+    healthProfileId: data.health_profile_id ?? null,
+    conditionFlags: data.condition_flags ?? [],
+    ttsCallConsent: data.tts_call_consent ?? false,
+  };
+}
+
+// GET /users/{user_id} — 마이페이지(이용자 본인)가 로컬 mock 대신 실제 백엔드 프로필을
+// 보여줄 때 쓴다. 주의: 이 엔드포인트는 보호자 토큰만 받는다(account/router.py의
+// read_user가 Depends(get_current_guardian)) — 그래서 resolveBackendWardAccess가
+// 자가등록 본인 세션으로 해석한 경우(guardian 세션이 없는 경우)엔 백엔드가 거부해 항상
+// null이 된다. 보호자가 관리하는 대상자를 이 브라우저에서 보호자로도 로그인해본 적
+// 있을 때만(이 앱의 "한 브라우저에서 역할 전환" 데모 구조, backend-auth.ts 상단 주석
+// 참고) 성공한다 — 그 외엔 조회 실패를 에러로 보여줄 것 없이 조용히 null로 돌아가고
+// 화면은 기존 로컬 값을 그대로 보여주면 된다.
+//
+// resolveBackendWardAccess가 아니라 resolveCachedBackendWardAccess를 쓴다 — 이건
+// 마이페이지 진입 시 자동으로 도는 순수 조회라, PR #8에서 고쳤던 "화면 진입만으로 더미
+// 데이터의 백엔드 User가 생성되는" 부수효과를 여기서 다시 만들면 안 된다.
+export async function fetchBackendWardProfile(params: {
+  mockWardId: string;
+  name: string;
+  age: number;
+  address: string;
+}): Promise<BackendUserProfile | null> {
+  const access = resolveCachedBackendWardAccess(params.mockWardId);
+  if (!access) return null;
+
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/users/${access.backendWardId}`,
+    { headers: { Authorization: `Bearer ${access.accessToken}` } },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) return null;
+    return parseUserProfile(await response.json());
+  } catch {
+    return null;
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
+// PATCH /users/{user_id} { tts_call_consent } — fetchBackendWardProfile과 같은 보호자
+// 토큰 제약을 받는다(같은 이유로 자가등록 본인은 항상 실패). 실패해도 profile-view.tsx가
+// 이미 로컬(auth.ts updateAccountTtsCallConsent)에 값을 저장해두므로, 여기 실패는 "다음에
+// 보호자로 다시 로그인하면 서버에도 반영됨" 정도로 조용히 넘어가면 된다.
+export async function updateBackendWardTtsConsent(
+  params: { mockWardId: string; name: string; age: number; address: string },
+  consent: boolean
+): Promise<boolean> {
+  const access = await resolveBackendWardAccess(params);
+  if (!access) return false;
+
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/users/${access.backendWardId}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${access.accessToken}`,
+      },
+      body: JSON.stringify({ tts_call_consent: consent }),
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
+// GET /users — 로그인한 보호자가 관리하는 대상자 목록을 서버 기준으로 확인한다.
+// guardian-profile-view.tsx가 이 결과를 로컬 wards 목록과 대조해서, 실제로 서버에
+// 연동된(=백엔드 User가 있는) 대상자에게만 "서버 연동됨" 표시를 붙이는 데 쓴다 — 서버
+// User 데이터로 로컬 Ward 전체를 대체하지는 않는다(로컬 Ward엔 담당 매장/식사기록 같은
+// 이 앱의 목업 전용 필드가 훨씬 많아서, 백엔드 응답만으로는 화면을 못 채운다).
+export async function fetchGuardianOwnUsers(guardianLoginId: string): Promise<BackendUserProfile[]> {
+  const session = backendGuardianSessionStore.read()[guardianLoginId];
+  if (!session) return [];
+
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/users`,
+    { headers: { Authorization: `Bearer ${session.accessToken}` } },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) return [];
+    const data = await response.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (data as any[]).map(parseUserProfile);
+  } catch {
+    return [];
+  } finally {
+    clearRequestTimeout();
+  }
 }
