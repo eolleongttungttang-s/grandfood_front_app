@@ -70,6 +70,27 @@ export type MonthlyBanchanRecommendation = {
   weeks: MonthlyBanchanRecommendationWeek[];
 };
 
+export const SUITABILITY_LABEL: Record<BanchanSuitability, string> = {
+  recommended: "추천",
+  caution: "주의",
+  avoid: "피하기",
+};
+
+export const SUITABILITY_CLASS: Record<BanchanSuitability, string> = {
+  recommended: "bg-risk-normal text-risk-normal-foreground",
+  caution: "bg-risk-caution text-risk-caution-foreground",
+  avoid: "bg-risk-high text-risk-high-foreground",
+};
+
+// risk-normal/caution/high(배경색)은 배지 위에 짙은 텍스트를 얹는 용도라 일부러 아주
+// 옅게 잡혀 있다(globals.css) — 글자 없이 점만으로 구분해야 하는 곳(달력 칸 등)엔 이
+// -foreground 쪽(짙은 회갈색/황토색/적갈색)을 대신 쓴다.
+export const SUITABILITY_DOT_CLASS: Record<BanchanSuitability, string> = {
+  recommended: "bg-risk-normal-foreground",
+  caution: "bg-risk-caution-foreground",
+  avoid: "bg-risk-high-foreground",
+};
+
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
@@ -78,6 +99,58 @@ function pad(n: number): string {
 // month만 받는다, GenerateMonthlyBanchanRecommendationRequest 참고).
 export function getMonthString(date: Date = new Date()): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
+}
+
+// "YYYY-MM" 문자열끼리 달을 더하고 뺀다 — 달력 이전달/다음달 이동(banchan-recommendation-
+// calendar.tsx)에 쓴다. Date 객체로 한 번 변환했다가 다시 "YYYY-MM"만 뽑아내는 이유는, 월
+// 경계(12월→1월 등)를 직접 계산하는 것보다 Date의 month overflow 처리를 그대로 믿는 게
+// 실수가 적기 때문이다.
+export function addMonthsToMonthString(month: string, delta: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const date = new Date(y, m - 1 + delta, 1);
+  return getMonthString(date);
+}
+
+// "YYYY-MM-DD" 문자열에 날짜를 더한다. Date를 로컬 타임존으로 파싱하면(new Date("YYYY-MM-DD"))
+// 브라우저에 따라 UTC 자정으로 해석돼 로컬에서 하루 밀려 보일 수 있어서, 연/월/일을 직접
+// 분해해 UTC 기준으로만 계산한다(생성 자체엔 시각 개념이 없는 순수 날짜 문자열이라 UTC로
+// 계산해도 실제 날짜가 안 바뀐다).
+export function addDaysToDateString(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + days);
+  const yy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+export function todayDateString(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// weekStartDate(월요일)가 dateStr을 포함하는 주를 찾아, 그 주의 생성 상태와 그날(deliveryNumber)
+// 몫 반찬만 돌려준다 — home-view.tsx/diet-view.tsx가 "오늘의 추천 반찬"을 이 달의 월간 데이터
+// 안에서 바로 뽑아 쓸 때 쓴다(오늘의 식단 카드와 AI 반찬 추천 달력이 서로 다른 내용을 보여주는
+// 문제를 막기 위해 — 2026-08-13 피드백). monthly가 아직 없거나(구독/조회 전) 그 날짜가 이
+// monthly에 안 걸리면(다른 달을 보는 중 등) null.
+export function getRecommendationForDate(
+  monthly: MonthlyBanchanRecommendation | null,
+  dateStr: string
+): { status: BanchanRecommendationGenerationStatus; items: BanchanRecommendationItem[] } | null {
+  if (!monthly) return null;
+  for (const week of monthly.weeks) {
+    const deliveryNumber = Math.round(
+      (Date.parse(`${dateStr}T00:00:00Z`) - Date.parse(`${week.weekStartDate}T00:00:00Z`)) / 86_400_000
+    ) + 1;
+    if (deliveryNumber < 1 || deliveryNumber > 7) continue;
+    return {
+      status: week.generationStatus,
+      items: (week.recommendation?.items ?? []).filter((item) => item.deliveryNumber === deliveryNumber),
+    };
+  }
+  return null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

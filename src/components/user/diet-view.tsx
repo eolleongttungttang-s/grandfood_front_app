@@ -7,6 +7,8 @@ import { Camera, Stethoscope } from "lucide-react";
 import { Ward, WardDetail } from "@/lib/wards";
 import { getRepresentativeDish } from "@/lib/dishes";
 import { getCurrentMealSlot, mealLogStore, submitMealLogPhotos, wardMealLogs } from "@/lib/meal-log-store";
+import { SUITABILITY_CLASS, SUITABILITY_LABEL } from "@/lib/banchan-recommendation";
+import { resolveTodayMenu } from "@/lib/today-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
@@ -38,27 +40,36 @@ export function DietView({
   detail: WardDetail;
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
-  const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   // 신규 회원(지금까지 AI 반찬 추천을 한 번도 받은 적 없음)인지에 따라 이 화면 전체를 다르게
   // 그린다 — "오늘의 추천 반찬 조합"류 카드는 전부 목업(matchDishes, wards.ts)이라, 아직 실제
   // AI 추천을 한 번도 못 받아본 사람에게 먼저 보여줄 이유가 없다고 판단해 AI 반찬 추천 카드만
   // 남기고 나머지는 숨긴다(2026-08-12 논의). 이 판단에 따른 조건부 return은 아래 다른 Hook을
   // 전부 호출한 뒤(맨 아래 return 문 바로 위)에 두어서 Hooks 호출 순서를 건드리지 않는다.
-  const banchanRecommendation = useMonthlyBanchanRecommendation({
+  const banchanIdentity = {
     wardId: ward.id,
     wardName: ward.name,
     wardAge: ward.age,
     wardAddress: ward.address,
-  });
+  };
+  const banchanRecommendation = useMonthlyBanchanRecommendation(banchanIdentity);
+  // "오늘의 추천 반찬 조합"/"오늘 메뉴 구성"/"왜 이 조합인가요" 세 카드가 오늘 실제 AI 추천이
+  // 있으면 그걸 쓰고, 없으면 목업으로 자연스럽게 폴백한다 — 실제 추천이 생긴 뒤에도 이 카드들이
+  // 계속 목업만 보여줘서 바로 아래 AI 반찬 추천 달력과 서로 다른 답을 보여주던 문제(2026-08-13
+  // 피드백, "카드 내용이 안 맞는다")를 여기서 고친다.
+  const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly);
+  const representativeDish = getRepresentativeDish(detail.recommendedCombo);
+  // 대표 이모지는 목업 카탈로그(dishes.ts)의 카테고리 매핑에만 있어서, 실제 추천을 쓰는
+  // 중엔 적용할 방법이 없다 — 그냥 기본 그릇 이모지로 대신한다.
+  const menuEmoji = todayMenu.isReal ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
 
   // 카드별 TTS(SpeakableCard)가 읽어줄 문장 — 화면에 보이는 값 그대로를 문장으로 풀어 쓴다.
   const recommendedComboSpeech =
-    `오늘의 추천 반찬 조합이에요. 나트륨 ${detail.recommendedCombo.totalSodiumMg}mg, ` +
-    `단백질 ${detail.recommendedCombo.totalProteinG}g, 열량 ${detail.recommendedCombo.totalKcal}kcal입니다.`;
-  const menuCompositionSpeech = `오늘 메뉴 구성은, ${detail.recommendedCombo.items
-    .map((item) => (dislikes.includes(item.dishId) ? `${item.name}, 기피 표시됨` : item.name))
+    `오늘의 추천 반찬 조합이에요. 나트륨 ${todayMenu.totalSodiumMg}mg, ` +
+    `단백질 ${todayMenu.totalProteinG}g, 열량 ${todayMenu.totalKcal}kcal입니다.`;
+  const menuCompositionSpeech = `오늘 메뉴 구성은, ${todayMenu.items
+    .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
     .join(", ")}입니다.`;
-  const reasonsSpeech = detail.recommendedCombo.reasons.join(" ");
+  const reasonsSpeech = todayMenu.reasons.join(" ");
   const conditionsSpeech =
     `진단 질환은 ${detail.conditions.join(", ") || "없음"}입니다. ` +
     `알레르기는 ${detail.allergies[0] === "없음" ? "없음" : detail.allergies.join(", ")}입니다. ` +
@@ -135,7 +146,7 @@ export function DietView({
             아직 배정된 식단이 없어요. 아래에서 AI 반찬 추천을 먼저 받아보세요 — 받고 나면 이
             화면에 매일 식단과 잔반 분석, 식사 기록이 순서대로 나타나요.
           </p>
-          <BanchanRecommendationSection state={banchanRecommendation} />
+          <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" />
         </div>
       </div>
     );
@@ -159,47 +170,55 @@ export function DietView({
           <div className="flex gap-4 pt-1 text-xs">
             <div className="flex flex-col">
               <span className="text-sidebar-foreground/60">나트륨</span>
-              <span className="font-semibold">{detail.recommendedCombo.totalSodiumMg}mg</span>
+              <span className="font-semibold">{todayMenu.totalSodiumMg}mg</span>
             </div>
             <div className="flex flex-col">
               <span className="text-sidebar-foreground/60">단백질</span>
-              <span className="font-semibold">{detail.recommendedCombo.totalProteinG}g</span>
+              <span className="font-semibold">{todayMenu.totalProteinG}g</span>
             </div>
             <div className="flex flex-col">
               <span className="text-sidebar-foreground/60">열량</span>
-              <span className="font-semibold">{detail.recommendedCombo.totalKcal}kcal</span>
+              <span className="font-semibold">{todayMenu.totalKcal}kcal</span>
             </div>
           </div>
         </SpeakableCard>
 
-        <BanchanRecommendationSection state={banchanRecommendation} />
+        <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" />
 
         <SpeakableCard
           id="diet-menu-composition"
           text={menuCompositionSpeech}
           className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
-          <span className="text-xs font-bold text-foreground">
-            {representativeDish?.imageEmoji ?? "🍽️"} 오늘 메뉴 구성
-          </span>
+          <span className="text-xs font-bold text-foreground">{menuEmoji} 오늘 메뉴 구성</span>
           <div className="flex flex-col gap-1.5">
-            {detail.recommendedCombo.items.map((item) => {
-              const disliked = dislikes.includes(item.dishId);
+            {todayMenu.items.length === 0 && (
+              <p className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</p>
+            )}
+            {todayMenu.items.map((item) => {
+              const disliked = dislikes.includes(item.id);
               return (
                 <div
-                  key={item.dishId}
+                  key={item.id}
                   className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2"
                 >
-                  <span
-                    className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
-                  >
-                    {item.name}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
+                    >
+                      {item.name}
+                    </span>
+                    {item.suitability && (
+                      <Badge className={SUITABILITY_CLASS[item.suitability]}>
+                        {SUITABILITY_LABEL[item.suitability]}
+                      </Badge>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      toggleDislike(ward.id, item.dishId);
+                      toggleDislike(ward.id, item.id);
                     }}
                     className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
                       disliked
@@ -304,7 +323,10 @@ export function DietView({
           className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
-          {detail.recommendedCombo.reasons.map((reason, i) => (
+          {todayMenu.reasons.length === 0 && (
+            <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
+          )}
+          {todayMenu.reasons.map((reason, i) => (
             <div
               key={i}
               className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"

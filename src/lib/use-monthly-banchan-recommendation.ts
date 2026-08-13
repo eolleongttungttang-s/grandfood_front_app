@@ -18,6 +18,7 @@ import {
   requestMonthlyBanchanRecommendation,
   WardIdentity,
 } from "@/lib/banchan-recommendation";
+import { fetchActiveSubscriptionBackend } from "@/lib/subscription";
 
 export type MonthlyBanchanRecommendationState = {
   month: string;
@@ -30,6 +31,12 @@ export type MonthlyBanchanRecommendationState = {
   /** null = 아직 판단 전(최초 조회 중). true = 지금까지 AI 반찬 추천을 한 번도 요청한 적
    *  없는 신규 회원. false = 예전에(이번 달이 아니어도) 한 번이라도 요청한 적 있는 기존 회원. */
   isNewMember: boolean | null;
+  /** null = 아직 확인 전. AI 반찬 추천/구독 둘 다 활성 구독(health/service.py의
+   *  get_active_subscription)이 없으면 항상 404로 막히므로, 화면이 "AI 추천받기" 버튼을
+   *  보여주기 전에 먼저 구독부터 하도록 안내하는 데 쓴다(home-view.tsx/diet-view.tsx/
+   *  banchan-recommendation-section.tsx). 구독을 누가 만들었는지(본인/보호자)는 안 가린다 —
+   *  활성 구독만 있으면 true. */
+  hasActiveSubscription: boolean | null;
   request: () => Promise<void>;
 };
 
@@ -77,6 +84,7 @@ export function useMonthlyBanchanRecommendation(identity: WardIdentity): Monthly
   const [isNewMember, setIsNewMember] = useState<boolean | null>(
     hasEverReceivedBanchanRecommendation(identity.wardId) ? false : null
   );
+  const [hasActiveSubscription, setHasActiveSubscription] = useState<boolean | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +102,11 @@ export function useMonthlyBanchanRecommendation(identity: WardIdentity): Monthly
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    // 신규 회원 화면(home-view.tsx/diet-view.tsx)이 "AI 추천받기"를 누르기도 전에 구독부터
+    // 안내해야 하므로, 월간 조회와 별도로(둘 다 서로 결과를 안 기다림) 병렬로 확인한다.
+    fetchActiveSubscriptionBackend({ mockWardId: identity.wardId }).then((result) => {
+      if (!cancelled) setHasActiveSubscription(result !== null);
+    });
     return () => {
       cancelled = true;
     };
@@ -137,6 +150,10 @@ export function useMonthlyBanchanRecommendation(identity: WardIdentity): Monthly
       setMonthly(result);
       markBanchanRecommendationReceived(identity.wardId);
       setIsNewMember(false);
+      // 이 요청 자체가 활성 구독을 요구하므로(health/service.py), 성공했다는 건 구독이
+      // 있다는 뜻이다 — 마운트 시점의 병렬 확인이 아직 안 끝났거나 그 사이 상태가 바뀐
+      // 경우에도 여기서 확실하게 맞춰준다.
+      setHasActiveSubscription(true);
     } catch (err) {
       setError(formatErrorMessage(err));
     } finally {
@@ -144,5 +161,15 @@ export function useMonthlyBanchanRecommendation(identity: WardIdentity): Monthly
     }
   }
 
-  return { month, monthly, loading, requesting, polling: isGenerating(monthly), error, isNewMember, request };
+  return {
+    month,
+    monthly,
+    loading,
+    requesting,
+    polling: isGenerating(monthly),
+    error,
+    isNewMember,
+    hasActiveSubscription,
+    request,
+  };
 }
