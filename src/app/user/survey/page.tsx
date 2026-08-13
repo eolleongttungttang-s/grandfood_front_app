@@ -45,27 +45,31 @@ function UserSurveyPageContent() {
   // undefined 그대로 유지)로 병합해서 저장한다 — 다만 여기는 재방문(마이 화면)이라 실제
   // 백엔드 User 등록은 이미 끝나 있으므로 그건 안 한다.
   async function saveHealthMetrics(health: HealthMetricsForm) {
-    if (!wardId) return;
+    if (!wardId || !ward) return;
+    // 로컬 저장은 실제로 입력된(또는 예전에 입력된) 값이 있을 때만 한다 — 값이 하나도
+    // 없는데 저장하면 healthProfileStore에 전부 undefined인 빈 레코드가 생긴다.
     const hasAnyValue = Object.values(health).some((v) => v !== undefined);
-    if (!existingHealth && !hasAnyValue) return;
+    if (existingHealth || hasAnyValue) {
+      await registerHealthProfile({
+        wardId,
+        source: "self_reported",
+        systolicBP: health.systolicBP ?? existingHealth?.systolicBP,
+        fastingGlucose: health.fastingGlucose ?? existingHealth?.fastingGlucose,
+        hba1c: existingHealth?.hba1c ?? 0,
+        weightKg: health.weightKg ?? existingHealth?.weightKg,
+        heightCm: health.heightCm ?? existingHealth?.heightCm,
+        diastolicBP: health.diastolicBP ?? existingHealth?.diastolicBP,
+        activityLevel: health.activityLevel ?? existingHealth?.activityLevel,
+      });
+    }
 
-    await registerHealthProfile({
-      wardId,
-      source: "self_reported",
-      systolicBP: health.systolicBP ?? existingHealth?.systolicBP,
-      fastingGlucose: health.fastingGlucose ?? existingHealth?.fastingGlucose,
-      hba1c: existingHealth?.hba1c ?? 0,
-      weightKg: health.weightKg ?? existingHealth?.weightKg,
-      heightCm: health.heightCm ?? existingHealth?.heightCm,
-      diastolicBP: health.diastolicBP ?? existingHealth?.diastolicBP,
-      activityLevel: health.activityLevel ?? existingHealth?.activityLevel,
-    });
-
-    if (!ward) return;
-    // 로컬 저장과 별개로 실제 백엔드 건강 프로필도 채운다 — POST /users/{user_id}/health-profile.
-    // 자가등록(보호자 없이 가입) 이용자는 이 호출이 없으면 백엔드에 HealthProfile 자체가
-    // 영영 안 생겨서 AI 반찬 추천이 항상 404였다(backend-auth.ts submitSelfHealthProfileBackend
-    // 주석 참고). 실패해도(서버 일시 장애 등) 로컬 저장은 이미 끝났으니 화면 이동은 막지 않는다.
+    // 백엔드 동기화는 위 로컬 저장과 무관하게 항상 시도한다 — 키/몸무게 등 신체 수치를
+    // 하나도 안 넣고 질환 체크리스트만 답한 경우(가장 흔한 경로)에도 condition_flags는
+    // 보내야 한다. 로컬 저장 쪽 early return과 여기를 하나로 묶으면, 신체 수치를 안 넣은
+    // 사용자는 조건만 답했어도 POST /users/{user_id}/health-profile이 아예 안 나가서
+    // 백엔드에 HealthProfile이 영영 안 생기는 문제가 있었다(자가등록 이용자의 AI 반찬
+    // 추천이 항상 404였던 원인 — backend-auth.ts submitSelfHealthProfileBackend 주석
+    // 참고). 실패해도(서버 일시 장애 등) 로컬 저장은 이미 끝났으니 화면 이동은 막지 않는다.
     const heightCm = health.heightCm ?? existingHealth?.heightCm;
     const weightKg = health.weightKg ?? existingHealth?.weightKg;
     const activityLevel = health.activityLevel ?? existingHealth?.activityLevel;

@@ -75,6 +75,9 @@ export function DietView({
   const afterPreview = useObjectUrl(afterPhoto);
   const mealLogs = wardMealLogs(useLocalStore(mealLogStore), ward.id);
   const latestLog = mealLogs[mealLogs.length - 1];
+  const mealCheckinSpeech = latestLog
+    ? `식사 전후 사진을 찍어서 잔반 분석을 요청할 수 있어요. 최근 분석 결과, 전체 잔반율은 ${latestLog.leftoverRatePercent}%입니다.`
+    : "식사 전후 사진을 찍어서 잔반 분석을 요청할 수 있어요.";
 
   async function analyzeLeftovers() {
     if (!beforePhoto || !afterPhoto) return;
@@ -217,13 +220,23 @@ export function DietView({
           )}
         </SpeakableCard>
 
-        <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <SpeakableCard
+          id="diet-meal-checkin"
+          text={mealCheckinSpeech}
+          className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
+        >
           <span className="text-base font-bold text-foreground">식사 체크인 · 잔반 분석</span>
           <p className="text-sm text-muted-foreground">
             식사 전/후 사진을 찍어 올리면 반찬별 잔반율을 분석해드려요.
           </p>
           <div className="flex gap-2">
-            <label className="flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-border bg-muted/40 p-3 text-center">
+            {/* 이 카드 전체가 SpeakableCard의 탭 영역이라, 사진 업로드 라벨을 누른 클릭이
+                그대로 버블링되면 파일 선택과 동시에 음성 읽기가 토글된다 — stopPropagation으로
+                막는다(analyzeLeftovers 버튼도 동일). */}
+            <label
+              className="flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-border bg-muted/40 p-3 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
               {beforePreview ? (
                 // eslint-disable-next-line @next/next/no-img-element -- 로컬 blob URL 미리보기라 next/image 최적화 대상이 아님
                 <img src={beforePreview} alt="식전 사진 미리보기" className="h-16 w-16 rounded object-cover" />
@@ -239,7 +252,10 @@ export function DietView({
                 onChange={(e) => setBeforePhoto(e.target.files?.[0] ?? null)}
               />
             </label>
-            <label className="flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-border bg-muted/40 p-3 text-center">
+            <label
+              className="flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-border bg-muted/40 p-3 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
               {afterPreview ? (
                 // eslint-disable-next-line @next/next/no-img-element -- 로컬 blob URL 미리보기라 next/image 최적화 대상이 아님
                 <img src={afterPreview} alt="식후 사진 미리보기" className="h-16 w-16 rounded object-cover" />
@@ -256,7 +272,14 @@ export function DietView({
               />
             </label>
           </div>
-          <Button size="sm" disabled={!beforePhoto || !afterPhoto || submitting} onClick={analyzeLeftovers}>
+          <Button
+            size="sm"
+            disabled={!beforePhoto || !afterPhoto || submitting}
+            onClick={(e) => {
+              e.stopPropagation();
+              analyzeLeftovers();
+            }}
+          >
             {submitting ? "분석 요청 중..." : "잔반 분석하기"}
           </Button>
           {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
@@ -273,7 +296,7 @@ export function DietView({
               ))}
             </div>
           )}
-        </div>
+        </SpeakableCard>
 
         <SpeakableCard
           id="diet-reasons"

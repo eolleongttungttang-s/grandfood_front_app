@@ -66,6 +66,11 @@ export function useMonthlyBanchanRecommendation(identity: WardIdentity): Monthly
   const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollAttemptsRef = useRef(0);
+  // 폴링 재실행을 monthly 참조 변경에만 기대면, 폴링 도중 fetch가 실패/null을 반환한 회차엔
+  // setMonthly가 아예 안 불려서 monthly 참조가 안 바뀌고 — 그럼 이 값을 의존성으로 쓰는
+  // 아래 useEffect가 다시 안 돌아 폴링이 조용히 영구 정지한다(에러 메시지도 안 뜸). 매
+  // 폴링 시도마다(성공/실패 무관) 이 값을 올려서 effect가 항상 다시 실행되게 한다.
+  const [pollTick, setPollTick] = useState(0);
   // 로컬에 "예전에 한 번이라도 받은 적 있다" 기록이 이미 있으면 조회 결과를 기다릴 것 없이
   // 바로 "기존 회원"으로 확정한다 — 없으면 이번 달 GET 결과가 올 때까지는 판단을 미룬다
   // (null): 신규 회원 온보딩 화면이 잠깐 떴다가 기존 회원 화면으로 바뀌는 깜빡임을 피한다.
@@ -110,14 +115,18 @@ export function useMonthlyBanchanRecommendation(identity: WardIdentity): Monthly
     const timer = setTimeout(async () => {
       pollAttemptsRef.current += 1;
       const result = await fetchMonthlyBanchanRecommendation(identity, month);
-      if (!cancelled && result) setMonthly(result);
+      if (cancelled) return;
+      if (result) setMonthly(result);
+      // 성공/실패 무관하게 다음 회차를 예약하도록 effect를 다시 트리거한다 — result가
+      // null이어도(일시적 네트워크 오류 등) 폴링이 멈추지 않게 하기 위함.
+      setPollTick((t) => t + 1);
     }, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monthly, identity.wardId, month]);
+  }, [monthly, pollTick, identity.wardId, month]);
 
   async function request() {
     setRequesting(true);

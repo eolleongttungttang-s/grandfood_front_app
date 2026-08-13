@@ -38,6 +38,12 @@ export function GuardianProfileView({
   // 전용 필드가 없어서 화면을 통째로 못 채운다), GET /users로 실제 서버에도 대상자가
   // 만들어져 있는지만 확인해서 "서버 연동됨" 표시에 쓴다.
   const [linkedBackendWardIds, setLinkedBackendWardIds] = useState<Set<string>>(new Set());
+  // wards는 부모(page.tsx)가 렌더마다 getWards().filter(...)로 새로 만드는 배열이라 참조가
+  // 매번 바뀐다 — 그대로 deps에 넣으면 렌더마다 재조회한다. report-view.tsx의
+  // deficiencyKey/leftoverKey와 같은 방식으로, "실제로 대상자 목록이 달라졌을 때만" 값이
+  // 바뀌는 문자열 키로 뽑아써서 안정적인 의존성으로 쓴다 — account.loginId만 보면 같은
+  // 계정으로 로그인한 채 대상자를 추가/제거해도 이 effect가 다시 안 도는 문제가 있었다.
+  const wardIdsKey = wards.map((w) => w.id).join(",");
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +64,7 @@ export function GuardianProfileView({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account.loginId]);
+  }, [account.loginId, wardIdsKey]);
 
   async function createInvite() {
     await createGuardianInvite({ wardIds: wards.map((w) => w.id) });
