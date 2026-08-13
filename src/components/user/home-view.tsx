@@ -139,6 +139,19 @@ export function HomeView({
   }
 
   if (banchanRecommendation.isNewMember) {
+    // 구독이 없으면 "AI 반찬 추천 받으러 가기"를 눌러 /user/diet에 가봐야 거기서 다시
+    // 막힌다(health/service.py가 활성 구독을 요구함) — 처음 시작하는 화면에서부터 구독을
+    // 먼저 안내한다. hasActiveSubscription이 아직 null(확인 중)이면 어느 쪽 버튼을 보여줄지
+    // 아직 몰라서, 판단이 서기 전까지는 카드 자체를 잠깐 비워둔다(깜빡임 방지).
+    if (banchanRecommendation.hasActiveSubscription == null) {
+      return (
+        <div className="flex flex-1 flex-col gap-4 pb-6">
+          <TopBar title={`환영해요, ${name}님`} subtitle="그랜드푸드가 처음이시군요" />
+        </div>
+      );
+    }
+
+    const needsSubscription = !banchanRecommendation.hasActiveSubscription;
     return (
       <div className="flex flex-1 flex-col gap-4 pb-6">
         <TopBar title={`환영해요, ${name}님`} subtitle="그랜드푸드가 처음이시군요" />
@@ -150,11 +163,19 @@ export function HomeView({
               그랜드푸드는 건강 상태와 질환·알레르기에 맞춰 AI가 매주 반찬을 추천하고, 담당
               반찬가게가 그대로 배송해드리는 서비스예요. 잔반 사진만 올리면 잔반율도 자동으로
               분석해드려요.
+              {needsSubscription && " 먼저 구독을 시작하면 바로 이용하실 수 있어요."}
             </p>
-            <Button className="mt-1 w-full" nativeButton={false} render={<Link href="/user/diet" />}>
-              <Sparkles />
-              AI 반찬 추천 받으러 가기
-            </Button>
+            {needsSubscription ? (
+              <Button className="mt-1 w-full" nativeButton={false} render={<Link href="/user/subscription" />}>
+                <Sparkles />
+                구독하고 시작하기
+              </Button>
+            ) : (
+              <Button className="mt-1 w-full" nativeButton={false} render={<Link href="/user/diet" />}>
+                <Sparkles />
+                AI 반찬 추천 받으러 가기
+              </Button>
+            )}
           </div>
         </div>
       </div>

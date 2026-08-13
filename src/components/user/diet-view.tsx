@@ -135,7 +135,7 @@ export function DietView({
             아직 배정된 식단이 없어요. 아래에서 AI 반찬 추천을 먼저 받아보세요 — 받고 나면 이
             화면에 매일 식단과 잔반 분석, 식사 기록이 순서대로 나타나요.
           </p>
-          <BanchanRecommendationSection state={banchanRecommendation} />
+          <BanchanRecommendationSection state={banchanRecommendation} subscribeHref="/user/subscription" />
         </div>
       </div>
     );
@@ -172,7 +172,7 @@ export function DietView({
           </div>
         </SpeakableCard>
 
-        <BanchanRecommendationSection state={banchanRecommendation} />
+        <BanchanRecommendationSection state={banchanRecommendation} subscribeHref="/user/subscription" />
 
         <SpeakableCard
           id="diet-menu-composition"

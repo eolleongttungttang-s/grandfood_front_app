@@ -329,7 +329,7 @@ export function WardDetailView({
           )}
         </div>
 
-        <BanchanRecommendationSection state={banchanRecommendation} />
+        <BanchanRecommendationSection state={banchanRecommendation} subscribeHref="/guardian/subscription" />
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
