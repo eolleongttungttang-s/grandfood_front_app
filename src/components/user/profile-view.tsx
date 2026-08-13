@@ -8,8 +8,9 @@ import { toast } from "sonner";
 
 import { Account, updateAccountTtsCallConsent } from "@/lib/auth";
 import { BackendUserProfile, fetchBackendWardProfile, updateBackendWardTtsConsent } from "@/lib/backend-auth";
-import { calculateAge, Ward } from "@/lib/wards";
+import { calculateAge, Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
+import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
 import {
   CARE_SURVEY_STEP,
   careProfileStore,
@@ -36,7 +37,15 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function ProfileView({ account, ward }: { account: Account; ward: Ward }) {
+export function ProfileView({
+  account,
+  ward,
+  detail,
+}: {
+  account: Account;
+  ward: Ward;
+  detail: WardDetail;
+}) {
   const router = useRouter();
   const { logout } = useSession();
   const [notifyEnabled, setNotifyEnabled] = useState(true);
@@ -148,6 +157,64 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
             <ClipboardEdit />
             {careProfile ? "생활 정보 다시 입력하기" : "생활 정보 입력하기"}
           </Button>
+        </div>
+
+        {/* "생활 정보 입력하기" 설문(care-survey-view.tsx) 하나가 위 생활 정보와 이 건강
+            프로필을 한 번에 같이 받는다 — 입력 화면(여기, 마이페이지)과 결과 확인 화면이
+            갈라져 있으면 헷갈린다고 판단해 예전엔 섭취기록 탭에 있던 이 카드를 여기로
+            옮겼다(2026-08-13 피드백). */}
+        <div className="flex flex-col gap-0.5 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-baseline justify-between pb-1">
+            <span className="text-xs font-bold text-foreground">건강 프로필</span>
+            <span className="text-xs text-muted-foreground">
+              {detail.healthProfile.source === "mydata_linked" ? "마이데이터 연동" : "자가 입력"}
+            </span>
+          </div>
+          <InfoRow
+            label="혈압 위쪽 숫자 (수축기)"
+            value={
+              detail.healthProfile.systolicBP != null
+                ? `${detail.healthProfile.systolicBP} mmHg`
+                : "미입력"
+            }
+          />
+          <Separator />
+          <InfoRow
+            label="혈압 아래쪽 숫자 (이완기)"
+            value={
+              detail.healthProfile.diastolicBP != null
+                ? `${detail.healthProfile.diastolicBP} mmHg`
+                : "미입력"
+            }
+          />
+          <Separator />
+          <InfoRow
+            label="공복혈당"
+            value={
+              detail.healthProfile.fastingGlucose != null
+                ? `${detail.healthProfile.fastingGlucose} mg/dL`
+                : "미입력"
+            }
+          />
+          <Separator />
+          <InfoRow
+            label="키"
+            value={detail.healthProfile.heightCm != null ? `${detail.healthProfile.heightCm} cm` : "미입력"}
+          />
+          <Separator />
+          <InfoRow
+            label="체중"
+            value={detail.healthProfile.weightKg != null ? `${detail.healthProfile.weightKg} kg` : "미입력"}
+          />
+          <Separator />
+          <InfoRow
+            label="활동 수준"
+            value={
+              detail.healthProfile.activityLevel
+                ? ACTIVITY_LEVEL_LABEL[detail.healthProfile.activityLevel]
+                : "미입력"
+            }
+          />
         </div>
 
         <Button
