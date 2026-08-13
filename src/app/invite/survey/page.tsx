@@ -15,7 +15,9 @@ import {
 } from "@/lib/health-profile";
 import {
   backendWardIdMapStore,
+  deriveElderBackendPassword,
   getBackendConditionFlags,
+  loginUserBackend,
   registerElderFromInviteBackend,
 } from "@/lib/backend-auth";
 import { CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
@@ -60,6 +62,17 @@ function InviteSurveyPageContent() {
     // ensureBackendWardId()(rag-chat.ts/meal-log-store.ts)의 캐시를 미리 채워둔다 —
     // 이미 방금 만든 User라 다시 POST /wards로 만들 필요가 없다는 걸 알려주는 것.
     backendWardIdMapStore.update((prev) => ({ ...prev, [wardId]: result.userId }));
+
+    // 방금 백엔드가 이 어르신 본인의 로그인 수단도 같이 만들어줬다(invite/service.py의
+    // register_elder_from_invite, login_id=이름/password=전화번호 뒷자리 4자리로 결정론적
+    // 생성) — 그런데 그 응답엔 access_token이 없다(UserResponse만 돌려줌, 로그인 응답이
+    // 아니라서). 여기서 바로 한 번 로그인해 backendUserSessionStore를 채워두지 않으면,
+    // 어르신 본인 기기에서 온보딩 직후 곧장 AI 반찬 추천 등을 눌러도 다시 로그아웃→로그인을
+    // 해야만 자기 토큰이 생긴다 — consent-view.tsx가 계산한 것과 같은 공식(
+    // deriveElderBackendPassword)이라 여기서 실패할 일은 사실상 없다(이름 충돌로 백엔드가
+    // login_id를 못 만들어준 극히 드문 경우만 예외 — 그때도 조용히 넘어간다, 다음 로그인
+    // 시도 때 다시 시도됨).
+    await loginUserBackend(account.loginId, deriveElderBackendPassword(account.phone));
   }
 
   // 키/몸무게/혈압/혈당은 registerElderFromInviteBackend()로 실제 백엔드 User에도 실어

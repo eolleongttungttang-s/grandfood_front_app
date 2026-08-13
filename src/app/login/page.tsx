@@ -141,15 +141,28 @@ export default function LoginPage() {
       // 보호자가 이메일 형식 아이디로 로그인했을 때 best-effort로 같이 시도해서 토큰을
       // 갱신해둔다 — 사진 업로드 함수 호출에 필요하다. 실패해도(예: 데모용 gf-guardian01처럼
       // 백엔드엔 없는 계정) 로컬 로그인 자체는 막지 않는다.
+      //
+      // 크로스디바이스 폴백(!account 분기)과 달리 이 분기는 "이미 이 기기에 로컬 계정이
+      // 있는" 보호자가 매번 타는 경로라 — 대상자 목록도 매번 다시 동기화한다. 그래야 어르신이
+      // 본인 기기에서 QR 초대 동의+설문을 끝내 새 대상자가 생겨도(그 시점엔 보호자 기기의
+      // localStorage가 전혀 갱신되지 않는다 — addWard/linkWardToGuardian 둘 다 어르신 기기
+      // 기준으로 실행됨), 보호자가 다음에 로그인할 때는 자기 홈 화면에 그 대상자가 보인다.
+      // 이 동기화가 없으면 "완전히 새 기기로 첫 로그인"할 때만(크로스디바이스 폴백 경로)
+      // 대상자 목록이 채워지고, 원래 쓰던 기기에선 초대한 대상자가 영원히 안 보였다.
       if (!backendSessionEstablished && account.role === "guardian" && EMAIL_PATTERN.test(trimmedId)) {
-        await loginGuardianBackend(trimmedId, password);
+        const backendResult = await loginGuardianBackend(trimmedId, password);
+        if ("session" in backendResult) {
+          await syncGuardianWardsFromBackend(backendResult.session.accessToken, trimmedId);
+        }
       }
 
       // 이용자 본인도 같은 이유로 best-effort 백엔드 로그인을 시도한다 — 직접가입
-      // (signup/page.tsx)으로 만든 계정만 백엔드에 대응 레코드가 있고, 보호자 초대로 만들어진
-      // 계정이나 데모 계정(gf-user01)은 백엔드에 없어서 조용히 실패한다. 크로스디바이스 폴백은
-      // 이용자 쪽엔 없다 — 백엔드가 로그인 응답으로 이름만 돌려주고 생년월일/주소가 없어서,
-      // 로컬 계정을 새로 만들어도 대상자(Ward) 정보가 없는 반쪽짜리 홈 화면이 된다.
+      // (signup/page.tsx)으로 만든 계정과, 초대(QR)로 등록된 계정(invite/service.py의
+      // register_elder_from_invite가 이름/전화번호 뒷자리로 로그인 수단을 함께 만들어준다)
+      // 둘 다 여기서 대응 레코드를 찾는다 — 데모 계정(gf-user01)처럼 애초에 백엔드에 없는
+      // 계정만 조용히 실패한다. 크로스디바이스 폴백은 이용자 쪽엔 없다 — 백엔드가 로그인
+      // 응답으로 이름만 돌려주고 생년월일/주소가 없어서, 로컬 계정을 새로 만들어도 대상자
+      // (Ward) 정보가 없는 반쪽짜리 홈 화면이 된다.
       if (account.role === "user") {
         await loginUserBackend(trimmedId, password);
       }

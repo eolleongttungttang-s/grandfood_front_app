@@ -56,6 +56,15 @@ export function getBackendConditionFlags(mockWardId: string): string[] {
     .filter((flag): flag is string => flag !== undefined);
 }
 
+// 초대(QR)로 등록되는 어르신 본인 로그인 비밀번호 — 전화번호 뒷자리 4자리. 프론트
+// (consent-view.tsx가 로컬 계정을 만들 때)와 백엔드(invite/service.py의
+// register_elder_from_invite가 login_id/password_hash를 만들 때) 둘 다 이 공식으로
+// 독립적으로 계산한다 — 어느 한쪽만 값을 바꾸면 어긋나므로, 프론트 쪽에서 쓰는 곳(
+// consent-view.tsx, invite/survey/page.tsx)은 전부 이 함수 하나로 통일해서 계산한다.
+export function deriveElderBackendPassword(phone: string): string {
+  return phone.replace(/\D/g, "").slice(-4);
+}
+
 export type BackendGuardianSession = {
   accessToken: string;
   guardianId: string;
