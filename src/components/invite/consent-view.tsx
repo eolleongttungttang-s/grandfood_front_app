@@ -7,6 +7,7 @@ import { Volume2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { linkWardToGuardian, registerAccount } from "@/lib/auth";
+import { deriveElderBackendPassword } from "@/lib/backend-auth";
 import { InviteFormState, submitInviteConsent, submitInviteDecline } from "@/lib/invite";
 import { consumeWardInvite } from "@/lib/ward-invite";
 import { addWard, createSelfWard } from "@/lib/wards";
@@ -64,7 +65,10 @@ export function ConsentView({
   }
 
   const generatedLoginId = form.elderName.trim();
-  const generatedPassword = form.elderPhone.replace(/\D/g, "").slice(-4);
+  // invite/service.py의 register_elder_from_invite가 정확히 같은 공식(전화번호 뒷자리
+  // 4자리)으로 백엔드 로그인 계정을 만든다 — 여기서 어긋나면 어르신이 안내받은 비밀번호로
+  // 실제 로그인이 안 되므로 반드시 같은 함수를 공유해서 계산한다.
+  const generatedPassword = deriveElderBackendPassword(form.elderPhone);
 
   async function handleAccept() {
     if (!agreed || submitting) return;

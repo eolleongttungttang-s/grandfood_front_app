@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ClipboardEdit, LogOut, Phone, Volume2 } from "lucide-react";
+import { ChevronRight, ClipboardEdit, LogOut, Phone, Volume2, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { Account, updateAccountTtsCallConsent } from "@/lib/auth";
@@ -158,6 +158,20 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
           <Phone />
           매장에 전화 연결 요청하기
         </Button>
+
+        <Link
+          href="/user/subscription"
+          className="flex items-center justify-between rounded-2xl border border-border bg-card p-5 shadow-sm"
+        >
+          <div className="flex items-center gap-2.5">
+            <Wallet className="h-4 w-4 text-accent" />
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold text-foreground">구독 관리</span>
+              <span className="text-xs text-muted-foreground">플랜과 결제수단 확인하기</span>
+            </div>
+          </div>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </Link>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">화면 · 음성 설정</span>

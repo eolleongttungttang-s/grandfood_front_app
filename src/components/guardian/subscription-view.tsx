@@ -59,7 +59,8 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
                       wards.map((w) =>
                         syncSubscriptionToBackend(
                           { mockWardId: w.id, name: w.name, age: w.age, address: w.address },
-                          plan.id
+                          plan.id,
+                          "guardian"
                         )
                       )
                     );
