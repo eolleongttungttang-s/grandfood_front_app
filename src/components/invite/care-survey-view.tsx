@@ -131,7 +131,10 @@ export function CareSurveyView({
 }: {
   wardId: string;
   wardName: string;
-  initialValues?: RegisterCareProfileCommand;
+  // completed/answeredStep은 CareProfileView(care-profile.ts)에만 있는 필드라 optional로
+  // 열어둔다 — 호출부가 실제로는 CareProfileView 전체를 넘기지만(user/survey/page.tsx),
+  // 이 컴포넌트가 필요한 만큼만 타입에 요구한다.
+  initialValues?: RegisterCareProfileCommand & { completed?: boolean; answeredStep?: number };
   initialHealthValues?: HealthMetricsForm;
   onComplete: (cmd: RegisterCareProfileCommand, health: HealthMetricsForm) => void | Promise<void>;
   onSkip: (
@@ -140,10 +143,15 @@ export function CareSurveyView({
     health: HealthMetricsForm
   ) => void | Promise<void>;
 }) {
-  // 이미 한 번 답한 적 있으면(initialValues 있음) 14단계를 처음부터 다시 훑게 하는 대신,
-  // "무엇을 수정할지" 고르는 목록 화면을 먼저 보여준다 — 처음 온보딩(초대/가입 직후, 답한
-  // 적 없음)은 지금까지처럼 순서대로 다 물어본다.
-  const isEditMode = initialValues !== undefined;
+  // 목록 화면(overview)은 initialValues의 각 필드가 "실제로 답한 값"이라는 전제로 그대로
+  // 보여준다 — completed가 false인 프로필(예전에 "나중에 할게요"로 건너뜀)은 답한 적 없는
+  // 필드도 EMPTY_CARE_PROFILE_COMMAND 기본값(예: 음식 알레르기 "없음", 거동 "혼자 잘
+  // 걸어다님")을 그대로 들고 있어서, 목록에 실제 답변처럼 보여주면 안 된다(코드 리뷰 지적 —
+  // 이 값을 그대로 다시 저장하면 registerCareProfile이 completed:true로 확정해버려서, 실제로는
+  // 안 물어본 답이 영구히 "답함"으로 남는다). 그래서 completed가 확실히 true일 때만 목록을
+  // 보여주고, 아니면(건너뛴 적 있음/최초 온보딩) 지금까지처럼 순서대로 다 물어보게 둔다 —
+  // 그래야 미답변 필드도 반드시 한 번은 화면에 노출된 뒤 저장된다.
+  const isEditMode = initialValues?.completed === true;
   const [mode, setMode] = useState<"overview" | "wizard">(isEditMode ? "overview" : "wizard");
   // 목록 화면에서 특정 단계로 바로 들어온 경우, 그 단계를 확인하고 나면 다음 단계로
   // 넘어가는 게 아니라 목록으로 돌아가야 한다 — 순서대로 진행 중인 것과 버튼 동작이
