@@ -60,8 +60,11 @@ function isGenerating(monthly: MonthlyBanchanRecommendation | null): boolean {
 }
 
 // 이 달에 대해 뭔가(생성 중이든 완료든 실패든) 이미 한 번이라도 요청된 적이 있는지 —
-// 모든 주가 not_started면 이 달은 아직 한 번도 요청 안 한 것이다.
-function hasAnyProgress(monthly: MonthlyBanchanRecommendation | null): boolean {
+// 모든 주가 not_started면 이 달은 아직 한 번도 요청 안 한 것이다. banchan-recommendation-
+// section.tsx도 "다시 추천받기" 문구를 이 기준으로 골라야 해서 export한다 — monthly가
+// null이 아니라고 해서 실제로 뭔가 요청된 건 아니다(구독만 있어도 전부 not_started인 채로
+// 200이 옴, banchan-recommendation.ts의 fetchMonthlyBanchanRecommendation 주석 참고).
+export function hasAnyProgress(monthly: MonthlyBanchanRecommendation | null): boolean {
   return monthly?.weeks.some((week) => week.generationStatus !== "not_started") ?? false;
 }
 
