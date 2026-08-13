@@ -41,6 +41,12 @@ export type TodayMenu = {
   /** true면 실제 AI 반찬 추천, false면 아직 실제 추천이 없어 목업으로 대체된 상태 —
    *  화면이 "대표 반찬 이모지"처럼 목업 카탈로그에만 있는 정보를 쓸지 판단하는 데 쓴다. */
   isReal: boolean;
+  /** 오늘 몫이 지금 한창 생성되고 있는 중(status: "generating"). 이 경우엔 목업으로
+   *  폴백하지 않는다 — "AI가 지금 고르고 있다"는 게 화면에 뜬 상태에서 바로 아래에
+   *  무관한 목업 반찬(현미밥·미역국...)이 나오면 그게 이미 나온 실제 결과처럼 보여서
+   *  헷갈린다는 피드백(2026-08-13). 호출부가 isGenerating일 때 items는 비어 있는 채로
+   *  "생성 중" 문구를 보여줘야 한다. */
+  isGenerating: boolean;
 };
 
 function sum(values: (number | null)[]): number {
@@ -75,6 +81,19 @@ export function resolveTodayMenu(
       totalProteinG: sum(items.map((i) => i.proteinG)),
       reasons: [...new Set(real.items.map((i) => i.reason).filter((r): r is string => !!r))],
       isReal: true,
+      isGenerating: false,
+    };
+  }
+
+  if (real && real.status === "generating") {
+    return {
+      items: [],
+      totalKcal: 0,
+      totalSodiumMg: 0,
+      totalProteinG: 0,
+      reasons: [],
+      isReal: false,
+      isGenerating: true,
     };
   }
 
@@ -92,5 +111,6 @@ export function resolveTodayMenu(
     totalProteinG: combo.totalProteinG,
     reasons: combo.reasons,
     isReal: false,
+    isGenerating: false,
   };
 }

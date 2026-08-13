@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 import { SpeakableCard } from "@/components/app/speakable-card";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
+import { DislikeToggleButton } from "@/components/app/dislike-toggle-button";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
 import { useLocalStore } from "@/lib/use-store";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
@@ -167,20 +168,26 @@ export function DietView({
             AI 반찬 매칭
           </span>
           <span className="text-xl font-extrabold">오늘의 추천 반찬 조합</span>
-          <div className="flex gap-4 pt-1 text-xs">
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">나트륨</span>
-              <span className="font-semibold">{todayMenu.totalSodiumMg}mg</span>
+          {todayMenu.isGenerating ? (
+            <p className="text-sm text-sidebar-foreground/80">
+              AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
+            </p>
+          ) : (
+            <div className="flex gap-4 pt-1 text-xs">
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">나트륨</span>
+                <span className="font-semibold">{todayMenu.totalSodiumMg}mg</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">단백질</span>
+                <span className="font-semibold">{todayMenu.totalProteinG}g</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">열량</span>
+                <span className="font-semibold">{todayMenu.totalKcal}kcal</span>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">단백질</span>
-              <span className="font-semibold">{todayMenu.totalProteinG}g</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">열량</span>
-              <span className="font-semibold">{todayMenu.totalKcal}kcal</span>
-            </div>
-          </div>
+          )}
         </SpeakableCard>
 
         <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" />
@@ -192,45 +199,40 @@ export function DietView({
         >
           <span className="text-xs font-bold text-foreground">{menuEmoji} 오늘 메뉴 구성</span>
           <div className="flex flex-col gap-1.5">
-            {todayMenu.items.length === 0 && (
+            {todayMenu.isGenerating ? (
+              <p className="text-sm text-muted-foreground">
+                AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
+              </p>
+            ) : todayMenu.items.length === 0 ? (
               <p className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</p>
-            )}
-            {todayMenu.items.map((item) => {
-              const disliked = dislikes.includes(item.id);
-              return (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
-                    >
-                      {item.name}
-                    </span>
-                    {item.suitability && (
-                      <Badge className={SUITABILITY_CLASS[item.suitability]}>
-                        {SUITABILITY_LABEL[item.suitability]}
-                      </Badge>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleDislike(ward.id, item.id);
-                    }}
-                    className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      disliked
-                        ? "bg-destructive/10 text-destructive"
-                        : "bg-transparent text-muted-foreground hover:bg-muted"
-                    }`}
+            ) : (
+              todayMenu.items.map((item) => {
+                const disliked = dislikes.includes(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2"
                   >
-                    {disliked ? "기피 표시됨" : "이거 싫어요"}
-                  </button>
-                </div>
-              );
-            })}
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
+                      >
+                        {item.name}
+                      </span>
+                      {item.suitability && (
+                        <Badge className={SUITABILITY_CLASS[item.suitability]}>
+                          {SUITABILITY_LABEL[item.suitability]}
+                        </Badge>
+                      )}
+                    </div>
+                    <DislikeToggleButton
+                      disliked={disliked}
+                      onClick={() => toggleDislike(ward.id, item.id)}
+                    />
+                  </div>
+                );
+              })
+            )}
           </div>
           {dislikes.length > 0 && (
             <p className="text-xs text-muted-foreground">
@@ -323,8 +325,14 @@ export function DietView({
           className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
-          {todayMenu.reasons.length === 0 && (
-            <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
+          {todayMenu.isGenerating ? (
+            <p className="text-sm text-muted-foreground">
+              AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
+            </p>
+          ) : (
+            todayMenu.reasons.length === 0 && (
+              <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
+            )
           )}
           {todayMenu.reasons.map((reason, i) => (
             <div

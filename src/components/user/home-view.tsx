@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 import { SpeakableCard } from "@/components/app/speakable-card";
+import { DislikeToggleButton } from "@/components/app/dislike-toggle-button";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { getNutritionTip } from "@/lib/nutrition-tip";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
@@ -233,45 +234,40 @@ export function HomeView({
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            {todayMenu.items.length === 0 && (
+            {todayMenu.isGenerating ? (
+              <p className="text-sm text-muted-foreground">
+                AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
+              </p>
+            ) : todayMenu.items.length === 0 ? (
               <p className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</p>
-            )}
-            {todayMenu.items.map((item) => {
-              const disliked = dislikes.includes(item.id);
-              return (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
-                    >
-                      {item.name}
-                    </span>
-                    {item.suitability && (
-                      <Badge className={SUITABILITY_CLASS[item.suitability]}>
-                        {SUITABILITY_LABEL[item.suitability]}
-                      </Badge>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleDislike(ward.id, item.id);
-                    }}
-                    className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      disliked
-                        ? "bg-destructive/10 text-destructive"
-                        : "bg-transparent text-muted-foreground hover:bg-muted"
-                    }`}
+            ) : (
+              todayMenu.items.map((item) => {
+                const disliked = dislikes.includes(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2"
                   >
-                    {disliked ? "기피 표시됨" : "이거 싫어요"}
-                  </button>
-                </div>
-              );
-            })}
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
+                      >
+                        {item.name}
+                      </span>
+                      {item.suitability && (
+                        <Badge className={SUITABILITY_CLASS[item.suitability]}>
+                          {SUITABILITY_LABEL[item.suitability]}
+                        </Badge>
+                      )}
+                    </div>
+                    <DislikeToggleButton
+                      disliked={disliked}
+                      onClick={() => toggleDislike(ward.id, item.id)}
+                    />
+                  </div>
+                );
+              })
+            )}
           </div>
 
           <div className="flex flex-col gap-2.5 border-t border-border pt-4">

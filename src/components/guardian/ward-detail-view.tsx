@@ -290,7 +290,11 @@ export function WardDetailView({
             )}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {todayMenu.items.length === 0 ? (
+            {todayMenu.isGenerating ? (
+              <span className="text-sm text-muted-foreground">
+                AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
+              </span>
+            ) : todayMenu.items.length === 0 ? (
               <span className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</span>
             ) : (
               todayMenu.items.map((item) => (
@@ -345,9 +349,13 @@ export function WardDetailView({
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
-          {todayMenu.reasons.length === 0 && (
+          {todayMenu.isGenerating ? (
+            <p className="text-sm text-muted-foreground">
+              AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
+            </p>
+          ) : todayMenu.reasons.length === 0 ? (
             <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
-          )}
+          ) : null}
           {todayMenu.reasons.map((reason, i) => (
             <div
               key={i}
