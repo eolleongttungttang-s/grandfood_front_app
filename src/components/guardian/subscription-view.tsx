@@ -5,7 +5,7 @@ import { toast } from "sonner";
 
 import { TopBar } from "@/components/app/top-bar";
 import { Button } from "@/components/ui/button";
-import { PLANS, PAYMENT_METHOD, subscriptionStore, formatWon } from "@/lib/subscription";
+import { PLANS, PAYMENT_METHOD, subscriptionStore, formatWon, syncSubscriptionToBackend } from "@/lib/subscription";
 import { useLocalStore } from "@/lib/use-store";
 import type { Ward } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
@@ -49,9 +49,20 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
                 <Button
                   size="sm"
                   className="w-fit"
-                  onClick={() => {
+                  onClick={async () => {
                     subscriptionStore.write(plan.id);
                     toast.success(`${plan.name} 플랜으로 변경했어요.`);
+                    // 이 화면은 보호자 계정 전체에 플랜 하나만 고르는 UI라, 관리하는 모든
+                    // 대상자에게 같은 플랜을 백엔드에도 반영한다(subscription.ts 주석 참고).
+                    // 실패해도(서버 일시 장애 등) 이미 로컬 변경/안내는 끝난 뒤라 조용히 넘어간다.
+                    await Promise.all(
+                      wards.map((w) =>
+                        syncSubscriptionToBackend(
+                          { mockWardId: w.id, name: w.name, age: w.age, address: w.address },
+                          plan.id
+                        )
+                      )
+                    );
                   }}
                 >
                   이 플랜으로 변경

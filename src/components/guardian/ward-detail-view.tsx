@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ChevronLeft,
   FileText,
@@ -15,7 +15,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Ward, WardDetail, WardStatus } from "@/lib/wards";
+import { MealTone, Ward, WardDetail, WardStatus } from "@/lib/wards";
+import { deriveMealTones, fetchGuardianDietHistory, fetchGuardianIntakeSummary } from "@/lib/meal-dashboard";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import {
@@ -35,6 +36,7 @@ import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
+import { requestWellnessCall } from "@/lib/wellness-calls";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
   addMessage,
@@ -74,9 +76,47 @@ export function WardDetailView({
   detail: WardDetail;
   guardianName: string;
 }) {
-  const completeCount = detail.mealHistory.filter((m) => m === "완식").length;
-  const smallCount = detail.mealHistory.filter((m) => m === "소량").length;
-  const noResponseCount = detail.mealHistory.filter((m) => m === "미응답").length;
+  // 실제 백엔드 식단 이력(GET /app/guardian/{id}/diet-history)이 있으면 detail.mealHistory
+  // (목업)를 대체해서 보여준다 — 실패하면(자가등록 본인이 관리하는 대상자 등, meal-dashboard.ts
+  // 상단 주석 참고) 조용히 기존 목업 그리드를 그대로 쓴다.
+  const [backendMealTones, setBackendMealTones] = useState<MealTone[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchGuardianDietHistory({ mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address }, 14).then(
+      (items) => {
+        if (cancelled || !items) return;
+        setBackendMealTones(deriveMealTones(items, 14));
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [ward.id, ward.name, ward.age, ward.address]);
+  const mealHistory = backendMealTones ?? detail.mealHistory;
+
+  // "오늘 잔반율" — 실제 오늘치 반찬 잔반 분석(intake-summary, days=1)이 있으면 목업
+  // (detail.leftoverPercent) 대신 그걸 보여준다. 오늘 아직 잔반 분석이 하나도 없으면
+  // averageLeftoverPct가 null이라 그냥 목업으로 남는다.
+  const [backendLeftoverPercent, setBackendLeftoverPercent] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchGuardianIntakeSummary(
+      { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
+      1
+    ).then((summary) => {
+      if (!cancelled && summary?.averageLeftoverPct != null) {
+        setBackendLeftoverPercent(Math.round(summary.averageLeftoverPct));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ward.id, ward.name, ward.age, ward.address]);
+  const leftoverPercent = backendLeftoverPercent ?? detail.leftoverPercent;
+
+  const completeCount = mealHistory.filter((m) => m === "완식").length;
+  const smallCount = mealHistory.filter((m) => m === "소량").length;
+  const noResponseCount = mealHistory.filter((m) => m === "미응답").length;
   const dislikedIds = wardDislikes(useLocalStore(dislikesStore), ward.id);
   const dislikedItems = detail.recommendedCombo.items.filter((i) => dislikedIds.includes(i.dishId));
   const partnerStore = getPartnerStore(ward.partnerStoreId);
@@ -92,6 +132,7 @@ export function WardDetailView({
 
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestNote, setRequestNote] = useState("");
+  const [requestingWellnessCall, setRequestingWellnessCall] = useState(false);
 
   const [messageOpen, setMessageOpen] = useState(false);
   const [messageText, setMessageText] = useState("");
@@ -116,6 +157,23 @@ export function WardDetailView({
     addMessage(threadId, guardianName, trimmed);
     setMessageText("");
     toast.success(`${ward.name}님께 메시지를 보냈어요.`);
+  }
+
+  async function requestWellnessCheck() {
+    setRequestingWellnessCall(true);
+    try {
+      await requestWellnessCall({
+        mockWardId: ward.id,
+        name: ward.name,
+        age: ward.age,
+        address: ward.address,
+      });
+      toast.success(`${ward.name}님 안부 확인을 요청했어요.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "안부 확인 요청에 실패했어요.");
+    } finally {
+      setRequestingWellnessCall(false);
+    }
   }
 
   return (
@@ -173,12 +231,9 @@ export function WardDetailView({
               <PhoneCall />
               매장 연결
             </Button>
-            <Button
-              size="sm"
-              onClick={() => toast.success(`${ward.name}님 안부 확인을 요청했어요.`)}
-            >
+            <Button size="sm" onClick={requestWellnessCheck} disabled={requestingWellnessCall}>
               <MessageCircle />
-              안부 확인 요청
+              {requestingWellnessCall ? "요청하는 중..." : "안부 확인 요청"}
             </Button>
             <Button
               variant="outline"
@@ -234,10 +289,10 @@ export function WardDetailView({
             <span className="text-sm text-foreground">오늘 잔반율</span>
             <span
               className={`text-sm font-bold ${
-                detail.leftoverPercent >= 50 ? "text-destructive" : "text-foreground"
+                leftoverPercent >= 50 ? "text-destructive" : "text-foreground"
               }`}
             >
-              {detail.leftoverPercent}%
+              {leftoverPercent}%
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -437,7 +492,7 @@ export function WardDetailView({
             </span>
           </div>
           <div className="grid grid-cols-7 gap-1.5">
-            {detail.mealHistory.map((tone, i) => (
+            {mealHistory.map((tone, i) => (
               <div
                 key={i}
                 className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]}`}
