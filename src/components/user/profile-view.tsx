@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ClipboardEdit, LogOut, Phone, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Account, updateAccountTtsCallConsent } from "@/lib/auth";
-import { Ward } from "@/lib/wards";
+import { BackendUserProfile, fetchBackendWardProfile, updateBackendWardTtsConsent } from "@/lib/backend-auth";
+import { calculateAge, Ward } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 import {
   CARE_SURVEY_STEP,
@@ -40,10 +41,29 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
   const { logout } = useSession();
   const [notifyEnabled, setNotifyEnabled] = useState(true);
   const [ttsCallConsent, setTtsCallConsent] = useState(account.ttsCallConsent ?? false);
+  const [backendProfile, setBackendProfile] = useState<BackendUserProfile | null>(null);
   const a11y = useLocalStore(accessibilityStore);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   useLocalStore(careProfileStore);
   const careProfile = getCareProfile(ward.id);
+
+  // 서버에 실제로 조회할 수 있는 프로필이 있으면(보호자가 관리하는 대상자를 이 브라우저에서
+  // 보호자로도 로그인해본 적 있는 경우 — backend-auth.ts의 fetchBackendWardProfile 주석
+  // 참고) 나이/거주지/안부확인콜 동의를 로컬 mock 대신 그 값으로 덮어써서 보여준다. 실패하면
+  // (자가등록 본인 등) 조용히 기존 로컬 값을 그대로 쓴다.
+  useEffect(() => {
+    let cancelled = false;
+    fetchBackendWardProfile({ mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address }).then(
+      (result) => {
+        if (cancelled || !result) return;
+        setBackendProfile(result);
+        setTtsCallConsent(result.ttsCallConsent);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [ward.id, ward.name, ward.age, ward.address]);
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -66,9 +86,12 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
 
         <div className="flex flex-col gap-0.5 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="pb-1 text-xs font-bold text-foreground">기본 정보</span>
-          <InfoRow label="나이" value={`${ward.age}세 · ${ward.gender}`} />
+          <InfoRow
+            label="나이"
+            value={`${backendProfile ? calculateAge(backendProfile.birthDate) : ward.age}세 · ${ward.gender}`}
+          />
           <Separator />
-          <InfoRow label="거주지" value={ward.address} />
+          <InfoRow label="거주지" value={backendProfile?.address ?? ward.address} />
           <Separator />
           <InfoRow label="담당 반찬가게" value={partnerStore?.name ?? "-"} />
           <Separator />
@@ -213,6 +236,10 @@ export function ProfileView({ account, ward }: { account: Account; ward: Ward })
             onCheckedChange={(checked) => {
               setTtsCallConsent(checked);
               updateAccountTtsCallConsent(account.loginId, checked);
+              updateBackendWardTtsConsent(
+                { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
+                checked
+              );
             }}
           />
         </div>
