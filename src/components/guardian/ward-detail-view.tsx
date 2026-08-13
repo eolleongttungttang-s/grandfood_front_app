@@ -91,12 +91,13 @@ export function WardDetailView({
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   useLocalStore(careProfileStore);
   const careProfile = getCareProfile(ward.id);
-  const banchanRecommendation = useMonthlyBanchanRecommendation({
+  const banchanIdentity = {
     wardId: ward.id,
     wardName: ward.name,
     wardAge: ward.age,
     wardAddress: ward.address,
-  });
+  };
+  const banchanRecommendation = useMonthlyBanchanRecommendation(banchanIdentity);
 
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestNote, setRequestNote] = useState("");
@@ -329,7 +330,7 @@ export function WardDetailView({
           )}
         </div>
 
-        <BanchanRecommendationSection state={banchanRecommendation} subscribeHref="/guardian/subscription" />
+        <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/guardian/subscription" />
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>

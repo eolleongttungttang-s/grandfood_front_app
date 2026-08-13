@@ -80,6 +80,16 @@ export function getMonthString(date: Date = new Date()): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
 }
 
+// "YYYY-MM" 문자열끼리 달을 더하고 뺀다 — 달력 이전달/다음달 이동(banchan-recommendation-
+// calendar.tsx)에 쓴다. Date 객체로 한 번 변환했다가 다시 "YYYY-MM"만 뽑아내는 이유는, 월
+// 경계(12월→1월 등)를 직접 계산하는 것보다 Date의 month overflow 처리를 그대로 믿는 게
+// 실수가 적기 때문이다.
+export function addMonthsToMonthString(month: string, delta: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const date = new Date(y, m - 1 + delta, 1);
+  return getMonthString(date);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function parseRecommendation(data: any): BanchanRecommendation {
   return {

@@ -44,12 +44,13 @@ export function DietView({
   // AI 추천을 한 번도 못 받아본 사람에게 먼저 보여줄 이유가 없다고 판단해 AI 반찬 추천 카드만
   // 남기고 나머지는 숨긴다(2026-08-12 논의). 이 판단에 따른 조건부 return은 아래 다른 Hook을
   // 전부 호출한 뒤(맨 아래 return 문 바로 위)에 두어서 Hooks 호출 순서를 건드리지 않는다.
-  const banchanRecommendation = useMonthlyBanchanRecommendation({
+  const banchanIdentity = {
     wardId: ward.id,
     wardName: ward.name,
     wardAge: ward.age,
     wardAddress: ward.address,
-  });
+  };
+  const banchanRecommendation = useMonthlyBanchanRecommendation(banchanIdentity);
 
   // 카드별 TTS(SpeakableCard)가 읽어줄 문장 — 화면에 보이는 값 그대로를 문장으로 풀어 쓴다.
   const recommendedComboSpeech =
@@ -135,7 +136,7 @@ export function DietView({
             아직 배정된 식단이 없어요. 아래에서 AI 반찬 추천을 먼저 받아보세요 — 받고 나면 이
             화면에 매일 식단과 잔반 분석, 식사 기록이 순서대로 나타나요.
           </p>
-          <BanchanRecommendationSection state={banchanRecommendation} subscribeHref="/user/subscription" />
+          <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" />
         </div>
       </div>
     );
@@ -172,7 +173,7 @@ export function DietView({
           </div>
         </SpeakableCard>
 
-        <BanchanRecommendationSection state={banchanRecommendation} subscribeHref="/user/subscription" />
+        <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" />
 
         <SpeakableCard
           id="diet-menu-composition"

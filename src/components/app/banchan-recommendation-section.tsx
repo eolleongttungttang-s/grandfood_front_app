@@ -13,13 +13,16 @@ import Link from "next/link";
 import { Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { WardIdentity } from "@/lib/banchan-recommendation";
 import { MonthlyBanchanRecommendationState } from "@/lib/use-monthly-banchan-recommendation";
 import { BanchanRecommendationCalendar } from "@/components/app/banchan-recommendation-calendar";
 
 export function BanchanRecommendationSection({
+  identity,
   state,
   subscribeHref,
 }: {
+  identity: WardIdentity;
   state: MonthlyBanchanRecommendationState;
   /** 구독이 없어서(hasActiveSubscription === false) 못 받을 때 보여줄 "구독하러 가기"
    *  버튼이 이동할 경로 — 이용자 본인 화면(diet-view.tsx)은 "/user/subscription", 보호자
@@ -66,7 +69,7 @@ export function BanchanRecommendationSection({
           아직 이번 달 AI 반찬 추천을 요청하지 않았어요. 위 버튼을 눌러 받아보세요.
         </p>
       ) : (
-        <BanchanRecommendationCalendar monthly={monthly} polling={polling} />
+        <BanchanRecommendationCalendar identity={identity} monthly={monthly} polling={polling} />
       )}
     </div>
   );
