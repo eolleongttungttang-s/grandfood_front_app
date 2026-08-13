@@ -135,10 +135,21 @@ export function todayDateString(): string {
 // 안에서 바로 뽑아 쓸 때 쓴다(오늘의 식단 카드와 AI 반찬 추천 달력이 서로 다른 내용을 보여주는
 // 문제를 막기 위해 — 2026-08-13 피드백). monthly가 아직 없거나(구독/조회 전) 그 날짜가 이
 // monthly에 안 걸리면(다른 달을 보는 중 등) null.
+export type DateRecommendation = {
+  status: BanchanRecommendationGenerationStatus;
+  items: BanchanRecommendationItem[];
+  /** BanchanRecommendation.target*와 동일 — 주 단위로 저장돼 있지만 "하루" 목표치라
+   *  그 주 안의 어느 날에 물어도 같은 값이다(records-view.tsx의 영양성분 분석에서 씀). */
+  targetCalorieKcal: number | null;
+  targetProteinG: number | null;
+  targetSodiumMg: number | null;
+  targetCarbsG: number | null;
+};
+
 export function getRecommendationForDate(
   monthly: MonthlyBanchanRecommendation | null,
   dateStr: string
-): { status: BanchanRecommendationGenerationStatus; items: BanchanRecommendationItem[] } | null {
+): DateRecommendation | null {
   if (!monthly) return null;
   for (const week of monthly.weeks) {
     const deliveryNumber = Math.round(
@@ -148,6 +159,10 @@ export function getRecommendationForDate(
     return {
       status: week.generationStatus,
       items: (week.recommendation?.items ?? []).filter((item) => item.deliveryNumber === deliveryNumber),
+      targetCalorieKcal: week.recommendation?.targetCalorieKcal ?? null,
+      targetProteinG: week.recommendation?.targetProteinG ?? null,
+      targetSodiumMg: week.recommendation?.targetSodiumMg ?? null,
+      targetCarbsG: week.recommendation?.targetCarbsG ?? null,
     };
   }
   return null;
