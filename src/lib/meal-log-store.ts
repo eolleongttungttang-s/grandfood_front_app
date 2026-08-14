@@ -1,26 +1,13 @@
 "use client";
 
-// "식사 체크인·잔반 분석" 단계. 기존 meal-check-store.ts는 "완식/남김" 버튼 한 번 탭하는 게 전부였는데,
-// B2C 흐름에서는 식전/식후 사진을 남기고 칸(compartment)별 잔반율까지 분석해야 한다.
-// 그래서 기존의 간단한 탭 기록(quickMealCheckStore로 이름만 바꿔 그대로 유지 — 홈 화면의 빠른 체크는
-// 굳이 사진 없이도 되는 편이 나아서 없애지 않았다)과, 새로 추가하는 사진 기반 기록(mealLogStore)을
-// 분리해서 둔다.
+// "식사 체크인·잔반 분석" 단계 — 식전/식후 사진을 남기고 칸(compartment)별 잔반율까지 분석한다.
+// 예전엔 사진 없이 "완식/남김" 버튼만 누르는 빠른 체크(quickMealCheckStore)도 따로 있었는데,
+// 실제 사진으로 잔반을 확인할 수 있는 이상 자가 신고 버튼은 중복이라 없앴다(2026-08-14 피드백,
+// 홈 화면에 이 사진 체크인을 그대로 옮기며 정리).
 
 import { createLocalStore } from "@/lib/local-store";
 import { resolveBackendWardAccess } from "@/lib/backend-auth";
 import { API_BASE_URL } from "@/lib/api-config";
-
-export type QuickMealStatus = "완식" | "남김" | null;
-
-/** wardId -> 오늘 "다 먹었어요/남겼어요" 빠른 체크 상태 (기존 meal-check-store.ts와 동일한 용도) */
-export const quickMealCheckStore = createLocalStore<Record<string, QuickMealStatus>>(
-  "grandfood-app-meal-check",
-  {}
-);
-
-export function setQuickMealCheck(wardId: string, status: QuickMealStatus) {
-  quickMealCheckStore.update((prev) => ({ ...prev, [wardId]: status }));
-}
 
 export type MealSlot = "아침" | "점심" | "저녁";
 
