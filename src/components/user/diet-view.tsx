@@ -8,7 +8,7 @@ import { Ward, WardDetail } from "@/lib/wards";
 import { getRepresentativeDish } from "@/lib/dishes";
 import { getCurrentMealSlot, mealLogStore, submitMealLogPhotos, wardMealLogs } from "@/lib/meal-log-store";
 import { SUITABILITY_CLASS, SUITABILITY_LABEL } from "@/lib/banchan-recommendation";
-import { resolveTodayMenu } from "@/lib/today-menu";
+import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
@@ -60,16 +60,25 @@ export function DietView({
   const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   // 대표 이모지는 목업 카탈로그(dishes.ts)의 카테고리 매핑에만 있어서, 실제 추천을 쓰는
-  // 중엔 적용할 방법이 없다 — 그냥 기본 그릇 이모지로 대신한다.
-  const menuEmoji = todayMenu.isReal ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
+  // 중엔 적용할 방법이 없다 — 그냥 기본 그릇 이모지로 대신한다. 생성 중(isGenerating)일
+  // 때도 목업 이모지를 보여주면 "생성 중" 문구 바로 옆에 무관한 목업 반찬의 이모지가
+  // 남아있는, 이 파일이 고치려던 것과 같은 종류의 문제가 생긴다 — 그때도 기본 이모지를 쓴다.
+  const menuEmoji =
+    todayMenu.isReal || todayMenu.isGenerating ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
 
   // 카드별 TTS(SpeakableCard)가 읽어줄 문장 — 화면에 보이는 값 그대로를 문장으로 풀어 쓴다.
-  const recommendedComboSpeech =
-    `오늘의 추천 반찬 조합이에요. 나트륨 ${todayMenu.totalSodiumMg}mg, ` +
-    `단백질 ${todayMenu.totalProteinG}g, 열량 ${todayMenu.totalKcal}kcal입니다.`;
-  const menuCompositionSpeech = `오늘 메뉴 구성은, ${todayMenu.items
-    .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
-    .join(", ")}입니다.`;
+  // isGenerating일 땐 totalSodiumMg 등이 전부 0/items가 빈 배열이라, 그대로 문장을 지으면
+  // "나트륨 0mg..." 같은 잘못된 값이나 빈 목록 문장이 화면 문구와 다르게 읽힌다 — 시각 카드와
+  // 똑같이 생성 중 안내로 맞춘다.
+  const recommendedComboSpeech = todayMenu.isGenerating
+    ? TODAY_MENU_GENERATING_MESSAGE
+    : `오늘의 추천 반찬 조합이에요. 나트륨 ${todayMenu.totalSodiumMg}mg, ` +
+      `단백질 ${todayMenu.totalProteinG}g, 열량 ${todayMenu.totalKcal}kcal입니다.`;
+  const menuCompositionSpeech = todayMenu.isGenerating
+    ? TODAY_MENU_GENERATING_MESSAGE
+    : `오늘 메뉴 구성은, ${todayMenu.items
+        .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
+        .join(", ")}입니다.`;
   const reasonsSpeech = todayMenu.reasons.join(" ");
   const conditionsSpeech =
     `진단 질환은 ${detail.conditions.join(", ") || "없음"}입니다. ` +
@@ -169,9 +178,7 @@ export function DietView({
           </span>
           <span className="text-xl font-extrabold">오늘의 추천 반찬 조합</span>
           {todayMenu.isGenerating ? (
-            <p className="text-sm text-sidebar-foreground/80">
-              AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
-            </p>
+            <p className="text-sm text-sidebar-foreground/80">{TODAY_MENU_GENERATING_MESSAGE}</p>
           ) : (
             <div className="flex gap-4 pt-1 text-xs">
               <div className="flex flex-col">
@@ -200,9 +207,7 @@ export function DietView({
           <span className="text-xs font-bold text-foreground">{menuEmoji} 오늘 메뉴 구성</span>
           <div className="flex flex-col gap-1.5">
             {todayMenu.isGenerating ? (
-              <p className="text-sm text-muted-foreground">
-                AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
-              </p>
+              <p className="text-sm text-muted-foreground">{TODAY_MENU_GENERATING_MESSAGE}</p>
             ) : todayMenu.items.length === 0 ? (
               <p className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</p>
             ) : (
@@ -248,9 +253,7 @@ export function DietView({
         >
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
           {todayMenu.isGenerating ? (
-            <p className="text-sm text-muted-foreground">
-              AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
-            </p>
+            <p className="text-sm text-muted-foreground">{TODAY_MENU_GENERATING_MESSAGE}</p>
           ) : (
             todayMenu.reasons.length === 0 && (
               <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>

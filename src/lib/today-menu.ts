@@ -53,6 +53,12 @@ function sum(values: (number | null)[]): number {
   return values.reduce<number>((acc, v) => acc + (v ?? 0), 0);
 }
 
+/** isGenerating일 때 화면(JSX)과 TTS 문장 양쪽이 공통으로 쓰는 안내 문구 — diet-view.tsx/
+ *  home-view.tsx/ward-detail-view.tsx 6곳에 그대로 복붙돼 있던 걸 하나로 모았다(2026-08-13
+ *  코드리뷰 지적: 문구를 바꿀 때 한 곳을 빠뜨리면 화면마다 문구가 달라진다). */
+export const TODAY_MENU_GENERATING_MESSAGE =
+  "AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.";
+
 export function resolveTodayMenu(
   combo: DishCombo,
   monthly: MonthlyBanchanRecommendation | null

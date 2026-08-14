@@ -38,7 +38,7 @@ import { requestDietChange } from "@/lib/diet-requests-store";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { MealToneSummary } from "@/components/app/meal-tone-summary";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
-import { resolveTodayMenu } from "@/lib/today-menu";
+import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
 import { requestWellnessCall } from "@/lib/wellness-calls";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
@@ -104,7 +104,10 @@ export function WardDetailView({
   // 오늘 실제 추천이 있으면 그걸 쓰고, 없으면 기존 목업으로 폴백한다.
   const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly);
   const dislikedItems = todayMenu.items.filter((i) => dislikedIds.includes(i.id));
-  const menuEmoji = todayMenu.isReal ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
+  // isGenerating일 때도 목업 이모지를 그대로 두면 "생성 중" 문구 옆에 무관한 목업 반찬
+  // 이모지가 남는다 — diet-view.tsx/home-view.tsx와 동일하게 그때도 기본 이모지를 쓴다.
+  const menuEmoji =
+    todayMenu.isReal || todayMenu.isGenerating ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
 
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestNote, setRequestNote] = useState("");
@@ -291,9 +294,7 @@ export function WardDetailView({
           </div>
           <div className="flex flex-wrap gap-1.5">
             {todayMenu.isGenerating ? (
-              <span className="text-sm text-muted-foreground">
-                AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
-              </span>
+              <span className="text-sm text-muted-foreground">{TODAY_MENU_GENERATING_MESSAGE}</span>
             ) : todayMenu.items.length === 0 ? (
               <span className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</span>
             ) : (
@@ -350,9 +351,7 @@ export function WardDetailView({
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
           {todayMenu.isGenerating ? (
-            <p className="text-sm text-muted-foreground">
-              AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
-            </p>
+            <p className="text-sm text-muted-foreground">{TODAY_MENU_GENERATING_MESSAGE}</p>
           ) : todayMenu.reasons.length === 0 ? (
             <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
           ) : null}

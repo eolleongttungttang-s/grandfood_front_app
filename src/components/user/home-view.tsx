@@ -15,7 +15,7 @@ import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import { NotificationItem, fetchElderNotifications, notificationBadgeClass } from "@/lib/notifications";
 import { SUITABILITY_CLASS, SUITABILITY_LABEL } from "@/lib/banchan-recommendation";
-import { resolveTodayMenu } from "@/lib/today-menu";
+import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
@@ -79,10 +79,17 @@ export function HomeView({
   // 다른 답을 보여주던 문제).
   const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
-  const menuEmoji = todayMenu.isReal ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
-  const recommendedComboSpeech = `오늘의 추천 반찬 조합이에요. ${partnerStore?.name ?? "담당 반찬가게"}에서 준비했어요. ${todayMenu.items
-    .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
-    .join(", ")}입니다.`;
+  // isGenerating일 때도 목업 이모지를 그대로 두면 "생성 중" 문구 옆에 무관한 목업 반찬
+  // 이모지가 남는다 — diet-view.tsx와 동일하게 그때도 기본 이모지를 쓴다.
+  const menuEmoji =
+    todayMenu.isReal || todayMenu.isGenerating ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
+  // isGenerating이면 items가 비어 있어 그대로 문장을 지으면 "...준비했어요. 입니다." 같은
+  // 빈 목록 문장이 되므로, 화면 문구와 같은 생성 중 안내로 맞춘다.
+  const recommendedComboSpeech = todayMenu.isGenerating
+    ? TODAY_MENU_GENERATING_MESSAGE
+    : `오늘의 추천 반찬 조합이에요. ${partnerStore?.name ?? "담당 반찬가게"}에서 준비했어요. ${todayMenu.items
+        .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
+        .join(", ")}입니다.`;
   const deliverySpeech = `오늘 점심 배송이 ${detail.deliveryEta}에 예정되어 있어요.`;
   const mealCheckSpeech = mealCheck
     ? `식사하셨으면 다 먹었어요 또는 남겼어요를 눌러 알려주세요. 오늘은 ${mealCheck}으로 체크하셨어요.`
@@ -235,9 +242,7 @@ export function HomeView({
           </div>
           <div className="flex flex-col gap-1.5">
             {todayMenu.isGenerating ? (
-              <p className="text-sm text-muted-foreground">
-                AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.
-              </p>
+              <p className="text-sm text-muted-foreground">{TODAY_MENU_GENERATING_MESSAGE}</p>
             ) : todayMenu.items.length === 0 ? (
               <p className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</p>
             ) : (
