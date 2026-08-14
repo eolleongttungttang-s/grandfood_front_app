@@ -119,10 +119,17 @@ function parseDietHistory(data: {
 
 // diet-history(끼니 단위)를 "최근 N일, 하루 하나의 완식/소량/미응답 톤" 그리드로 뭉뚱그린다 —
 // ward-detail-view.tsx/records-view.tsx의 기존 mealHistory 그리드(ward-registry.ts MealTone)와
-// 같은 모양을 유지하기 위함. 하루 안에 끼니가 하나도 없으면(아직 기록 없음) "미응답", 하나라도
-// completed=false(after 사진 없음)면 "미응답", 전부 완료됐는데 그날 반찬들의 평균 잔반율이
-// 50% 이상이면 "소량", 그 외엔 "완식"으로 판정한다 — mealHistory가 표현하던 3단계와 최대한
-// 가깝게 맞춘 결정론적 규칙이다.
+// 같은 모양을 유지하기 위함. 하루 안에 끼니가 하나도 없으면(아직 기록 없음) "미응답", 그날
+// 완료된(after 사진 있음) 끼니가 하나도 없으면 "미응답", 완료된 끼니가 하나라도 있으면 그
+// 끼니들의 반찬 평균 잔반율이 50% 이상이면 "소량", 그 외엔 "완식"으로 판정한다.
+//
+// 예전엔 "그날 끼니 중 하나라도 미완료면 그날 전체가 미응답"이었다 — 하루 3끼(아침/점심/
+// 저녁) 전부 식전+식후 사진을 다 찍어야만 그날이 기록으로 인정됐던 셈이라, 어르신 입장에선
+// 하루 최대 6장을 찍어야 겨우 미응답을 면했다. 대부분의 집은 매 끼니를 다 못 찍을 거라
+// 실질적으로 거의 항상 미응답만 쌓이는 문제가 있었다(2026-08-14 피드백: "잔반 분석할 때
+// 14일간의 기록, 어떤 식으로 기록을 남기면 좋을까?"). 완료되지 않은 끼니는 그냥 집계에서
+// 빼고, 완료된 끼니가 하루 중 하나라도 있으면 그걸로 그날을 판정하도록 완화했다 — 세 끼 중
+// 한 끼만 찍어도 그날은 "기록 있음"으로 인정된다.
 export function deriveMealTones(items: DietHistoryEntry[], days: number): MealTone[] {
   const byDate = new Map<string, DietHistoryEntry[]>();
   for (const item of items) {
@@ -141,11 +148,12 @@ export function deriveMealTones(items: DietHistoryEntry[], days: number): MealTo
     d.setDate(d.getDate() - i);
     const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     const dayItems = byDate.get(key) ?? [];
-    if (dayItems.length === 0 || dayItems.some((m) => !m.completed)) {
+    const completedItems = dayItems.filter((m) => m.completed);
+    if (completedItems.length === 0) {
       tones.push("미응답");
       continue;
     }
-    const dishes = dayItems.flatMap((m) => m.dishes);
+    const dishes = completedItems.flatMap((m) => m.dishes);
     const avgLeftover =
       dishes.length > 0 ? dishes.reduce((sum, d2) => sum + d2.leftoverPct, 0) / dishes.length : 0;
     tones.push(avgLeftover >= 50 ? "소량" : "완식");

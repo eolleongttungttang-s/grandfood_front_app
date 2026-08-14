@@ -9,17 +9,56 @@
 import { createLocalStore } from "@/lib/local-store";
 import { resolveBackendWardAccess } from "@/lib/backend-auth";
 import { API_BASE_URL } from "@/lib/api-config";
+import { todayDateString } from "@/lib/banchan-recommendation";
+import type { MealTone } from "@/lib/ward-registry";
 
 export type QuickMealStatus = "완식" | "남김" | null;
 
-/** wardId -> 오늘 "다 먹었어요/남겼어요" 빠른 체크 상태 (기존 meal-check-store.ts와 동일한 용도) */
-export const quickMealCheckStore = createLocalStore<Record<string, QuickMealStatus>>(
-  "grandfood-app-meal-check",
+type QuickMealCheckEntry = { date: string; status: QuickMealStatus };
+
+/** wardId -> 오늘 "다 먹었어요/남겼어요" 빠른 체크 상태 (기존 meal-check-store.ts와 동일한 용도).
+ *  status만 저장하던 예전 스키마는 날짜가 없어서, 어제 누른 체크가 오늘도 그대로 남아있는
+ *  문제가 있었다 — date를 같이 저장해 오늘 게 아니면 무시한다(getTodayQuickMealCheck 참고).
+ *  키를 v2로 바꿔서 옛 스키마(QuickMealStatus만 저장)가 새 타입인 척 섞여 들어오는 걸 막는다. */
+export const quickMealCheckStore = createLocalStore<Record<string, QuickMealCheckEntry>>(
+  "grandfood-app-meal-check-v2",
   {}
 );
 
 export function setQuickMealCheck(wardId: string, status: QuickMealStatus) {
-  quickMealCheckStore.update((prev) => ({ ...prev, [wardId]: status }));
+  quickMealCheckStore.update((prev) => ({ ...prev, [wardId]: { date: todayDateString(), status } }));
+}
+
+/** 오늘 날짜로 찍힌 체크만 유효하다고 본다 — 날짜가 다르면(어제 이전) "오늘은 아직 체크
+ *  안 함"과 같게 취급한다. */
+export function getTodayQuickMealCheck(
+  all: Record<string, QuickMealCheckEntry>,
+  wardId: string
+): QuickMealStatus {
+  const entry = all[wardId];
+  if (!entry || entry.date !== todayDateString()) return null;
+  return entry.status;
+}
+
+// 최근 14일 섭취 기록 그리드(records-view.tsx/ward-detail-view.tsx)는 사진 기반 정밀 기록
+// (diet-history)만 반영해서, 사진 찍을 여유가 없었던 날은 실제로 뭘 어떻게 드셨든 전부
+// "미응답"으로만 표시됐다 — 홈 화면 원탭 자가 보고는 로컬에만 저장되고 그리드엔 전혀
+// 반영되지 않았다(2026-08-14 피드백: "잔반 분석할 때 14일간의 기록, 어떤 식으로 기록을
+// 남기면 좋을까?"). 오늘 칸에 사진 기반 정밀 기록이 아직 없을 때(= "미응답")만, 원탭
+// 자가 보고를 최소한의 근사 기록으로 대신 채운다 — 정밀 기록이 이미 있으면 그게 항상
+// 우선한다(GPU 비전 분석이 자가 보고보다 정확하므로).
+//
+// 주의: 이 반영은 이 브라우저 안에서만 보인다 — create_meal_log이 GPU가 비교할 전후 사진을
+// 필수로 받는 구조라, 사진 없는 자가 보고를 실제로 저장할 백엔드 엔드포인트가 아직 없다
+// (프론트 먼저 진행하기로 함 — 다른 기기/보호자 화면과 진짜로 동기화하려면 백엔드 작업이
+// 후속으로 필요하다).
+export function mergeTodayQuickCheck(tones: MealTone[], quickCheck: QuickMealStatus): MealTone[] {
+  if (!quickCheck || tones.length === 0) return tones;
+  const lastIndex = tones.length - 1;
+  if (tones[lastIndex] !== "미응답") return tones;
+  const merged = [...tones];
+  merged[lastIndex] = quickCheck === "완식" ? "완식" : "소량";
+  return merged;
 }
 
 export type MealSlot = "아침" | "점심" | "저녁";

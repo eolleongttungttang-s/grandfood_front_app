@@ -24,7 +24,7 @@ import { DislikeToggleButton } from "@/components/app/dislike-toggle-button";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { getNutritionTip } from "@/lib/nutrition-tip";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
-import { quickMealCheckStore, setQuickMealCheck } from "@/lib/meal-log-store";
+import { getTodayQuickMealCheck, quickMealCheckStore, setQuickMealCheck } from "@/lib/meal-log-store";
 import { useLocalStore } from "@/lib/use-store";
 import { getSpeechRecognition, speak } from "@/lib/accessibility";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
@@ -39,7 +39,7 @@ export function HomeView({
   detail: WardDetail;
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
-  const mealCheck = useLocalStore(quickMealCheckStore)[ward.id] ?? null;
+  const mealCheck = getTodayQuickMealCheck(useLocalStore(quickMealCheckStore), ward.id);
   const [listening, setListening] = useState(false);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   // diet-view.tsx와 같은 이유로 신규 회원(AI 반찬 추천을 한 번도 받은 적 없음)인지 본다 —

@@ -17,6 +17,7 @@ import {
   medicationReminderStore,
   setMedicationReminder,
 } from "@/lib/medication-reminder-store";
+import { getTodayQuickMealCheck, mergeTodayQuickCheck, quickMealCheckStore } from "@/lib/meal-log-store";
 import { useLocalStore } from "@/lib/use-store";
 
 const MEAL_TONE_CLASS: Record<string, string> = {
@@ -49,7 +50,10 @@ export function RecordsView({
       cancelled = true;
     };
   }, [ward.id, ward.name, ward.age, ward.address]);
-  const mealHistory = backendMealTones ?? detail.mealHistory;
+  // 오늘 칸이 사진 기반 정밀 기록 없이 "미응답"이면, 홈 화면에서 원탭으로 남긴 자가 보고를
+  // 최소한의 근사 기록으로 대신 보여준다(meal-log-store.ts의 mergeTodayQuickCheck 참고).
+  const todayQuickCheck = getTodayQuickMealCheck(useLocalStore(quickMealCheckStore), ward.id);
+  const mealHistory = mergeTodayQuickCheck(backendMealTones ?? detail.mealHistory, todayQuickCheck);
 
   const completeCount = mealHistory.filter((m) => m === "완식").length;
   const smallCount = mealHistory.filter((m) => m === "소량").length;
