@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
   Mic,
@@ -24,7 +24,13 @@ import { DislikeToggleButton } from "@/components/app/dislike-toggle-button";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { getNutritionTip } from "@/lib/nutrition-tip";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
-import { quickMealCheckStore, setQuickMealCheck } from "@/lib/meal-log-store";
+import {
+  getCurrentMealSlot,
+  getTodayQuickMealCheck,
+  quickMealCheckStore,
+  setQuickMealCheck,
+  submitQuickMealCheck,
+} from "@/lib/meal-log-store";
 import { useLocalStore } from "@/lib/use-store";
 import { getSpeechRecognition, speak } from "@/lib/accessibility";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
@@ -39,8 +45,23 @@ export function HomeView({
   detail: WardDetail;
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
-  const mealCheck = useLocalStore(quickMealCheckStore)[ward.id] ?? null;
+  const mealCheck = getTodayQuickMealCheck(useLocalStore(quickMealCheckStore), ward.id);
   const [listening, setListening] = useState(false);
+  // checkMeal이 연달아 두 번(완식→남김 등) 탭되면 두 submitQuickMealCheck 요청이 동시에
+  // 나가는데, 네트워크 지연으로 응답이 보낸 순서와 다르게 도착할 수 있어 최종적으로 백엔드에
+  // 저장되는 값이 마지막 탭과 반대가 될 위험이 있다(코드 리뷰 지적). 이 ref에 매번 이전
+  // 요청 뒤에 체이닝해서, 실제 네트워크 요청 자체가 탭한 순서대로만 나가게 직렬화한다.
+  const quickCheckQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // 낙관적 화면 표시(setQuickMealCheck)는 위 큐와 무관하게 탭할 때마다 즉시 일어난다 —
+  // 그래서 큐로 요청 "발신" 순서는 맞춰도, 오래된 요청의 응답이 그 뒤 늦게 도착해서
+  // applied:false로 화면을 null로 되돌리면, 그사이 사용자가 이미 또 탭해서 최신 상태를
+  // 표시해둔 화면을 옛 응답이 덮어써버리는 문제가 남아있었다(코드 리뷰 재발견 — "applied:
+  // false 처리는 store를 지우는데 성공 케이스는 다시 채워주지 않아서, 연타 시 실제로는
+  // 저장된 마지막 탭 상태가 화면엔 영구히 '미체크'로 잘못 남을 수 있음"). 각 탭마다
+  // 번호를 매겨서, 응답이 왔을 때 그 사이 더 최근 탭이 없었을 때만(자신이 여전히 최신
+  // 탭일 때만) 화면을 건드리게 한다 — 오래된 응답은 이미 최신 탭의 낙관적 표시로 대체된
+  // 화면을 그대로 두고 조용히 넘어간다.
+  const latestCheckIdRef = useRef(0);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   // diet-view.tsx와 같은 이유로 신규 회원(AI 반찬 추천을 한 번도 받은 적 없음)인지 본다 —
   // 여기 있는 카드들도 대부분 오늘의 추천 반찬 조합(목업)에서 파생된 값이라, 아직 실제 추천을
@@ -110,10 +131,57 @@ export function HomeView({
         : "안내 사항이에요. 아직 새로운 안내 사항이 없어요.";
 
   function checkMeal(status: "완식" | "남김") {
+    // 로컬에 즉시 반영 — 네트워크 왕복을 기다리지 않고 버튼을 누른 순간 "오늘 체크: 완식"
+    // 표시/TTS가 바로 나온다(낙관적 업데이트).
     setQuickMealCheck(ward.id, status);
     const message = status === "완식" ? "잘 하셨어요! 다음 식사도 챙겨드릴게요." : "알겠어요, 남긴 반찬은 다음 식단에 참고할게요.";
     toast.success(message);
     speak(message);
+
+    // 탭한 "지금" 시각 기준 끼니를 여기서 미리 확정한다 — 아래 큐 콜백 안에서
+    // getCurrentMealSlot()을 부르면, 이전 요청이 밀려서 콜백이 실제로 실행되는 시점이
+    // 늦어질 때(예: 16:59에 탭했는데 콜백은 17:01에 실행) 탭한 끼니가 아니라 콜백 실행
+    // 시점의 끼니로 잘못 저장된다(코드 리뷰 지적).
+    const mealSlot = getCurrentMealSlot();
+
+    // 이 탭에 번호를 매긴다 — 이 응답이 나중에 도착했을 때, 그 사이 더 최근 탭이 없었을
+    // 때만(자신이 여전히 최신 탭일 때만) 아래에서 화면을 건드리게 하기 위함.
+    const checkId = ++latestCheckIdRef.current;
+
+    // 실제 저장은 백그라운드로 — 아직 실제 백엔드에 연결 안 된 대상자(데모/자가등록 전
+    // 등)나 네트워크 문제로 실패해도 위 로컬 반영/음성 안내는 이미 끝났으니 어르신 경험은
+    // 끊기지 않는다. 이전 요청 뒤에 체이닝해서(quickCheckQueueRef) 연달아 탭해도 네트워크
+    // 요청이 탭한 순서대로만 나가게 한다.
+    quickCheckQueueRef.current = quickCheckQueueRef.current.then(() =>
+      submitQuickMealCheck({
+        wardId: ward.id,
+        wardName: ward.name,
+        wardAge: ward.age,
+        wardAddress: ward.address,
+        mealSlot,
+        status,
+      })
+        .then((result) => {
+          // 이 응답을 기다리는 동안 사용자가 또 탭했으면(latestCheckIdRef.current가
+          // 이 checkId보다 커짐) 화면은 이미 그 최신 탭의 낙관적 표시로 넘어가 있다 —
+          // 이 오래된 응답으로 그걸 덮어쓰면 안 된다(코드 리뷰 재발견: applied:false
+          // 처리는 store를 null로 지우는데 성공 케이스는 다시 채워주지 않아서, 느린
+          // 첫 요청의 실패 응답이 나중에 온 두 번째 탭의 성공 상태를 지워버리고 그대로
+          // 방치되는 문제가 있었다).
+          if (latestCheckIdRef.current !== checkId) return;
+          if (!result.applied) {
+            // 이미 사진 기반 실제 기록이 있는 끼니라 이번 원탭이 반영 안 됐다
+            // (grandfood_backend 145ee63) — 방금 낙관적으로 바꿔둔 로컬 표시를 그대로 두면
+            // 실제로는 반영 안 된 상태가 화면에 계속 남으므로 되돌린다.
+            setQuickMealCheck(ward.id, null);
+            toast.info("이미 사진으로 기록된 끼니라 이번 체크는 반영되지 않았어요.");
+          }
+        })
+        .catch(() => {
+          // 조용히 무시 — submitMealLogPhotos와 달리 이 버튼은 실패해도 사용자에게 막힌 느낌을
+          // 주면 안 되는 가벼운 원탭이다. 큐는 이 catch로 여기서 끝나서 다음 탭까지 끊기지 않는다.
+        })
+    );
   }
 
   function listenForMealStatus() {

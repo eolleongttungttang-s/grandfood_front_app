@@ -5,21 +5,54 @@
 // 그래서 기존의 간단한 탭 기록(quickMealCheckStore로 이름만 바꿔 그대로 유지 — 홈 화면의 빠른 체크는
 // 굳이 사진 없이도 되는 편이 나아서 없애지 않았다)과, 새로 추가하는 사진 기반 기록(mealLogStore)을
 // 분리해서 둔다.
+//
+// quickMealCheckStore는 grandfood_backend 145ee63부터 로컬 전용이 아니다 — 원탭도
+// submitQuickMealCheck으로 실제 백엔드에 저장된다(사진 기반 실제 기록이 이미 있으면
+// applied:false로 무시됨). 다만 로컬 스토어는 여전히 남겨둔다 — 네트워크 왕복 없이 버튼을
+// 누른 즉시 "오늘 체크: 완식" 표시/TTS를 보여주는 낙관적(optimistic) 캐시 용도.
 
 import { createLocalStore } from "@/lib/local-store";
 import { resolveBackendWardAccess } from "@/lib/backend-auth";
 import { API_BASE_URL } from "@/lib/api-config";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+import { todayDateString } from "@/lib/banchan-recommendation";
+
+// backend-auth.ts 등과 동일한 관례 — 사진 업로드(submitMealLogPhotos)만 일반 API 호출보다
+// 넉넉하게 UPLOAD_TIMEOUT_MS를 따로 쓴다.
+const REQUEST_TIMEOUT_MS = 15_000;
+const UPLOAD_TIMEOUT_MS = 30_000;
 
 export type QuickMealStatus = "완식" | "남김" | null;
 
-/** wardId -> 오늘 "다 먹었어요/남겼어요" 빠른 체크 상태 (기존 meal-check-store.ts와 동일한 용도) */
-export const quickMealCheckStore = createLocalStore<Record<string, QuickMealStatus>>(
-  "grandfood-app-meal-check",
+type QuickMealCheckEntry = { date: string; status: QuickMealStatus };
+
+/** wardId -> 오늘 "다 먹었어요/남겼어요" 빠른 체크 상태 (기존 meal-check-store.ts와 동일한 용도).
+ *  status만 저장하던 예전 스키마는 날짜가 없어서, 어제 누른 체크가 오늘도 그대로 남아있는
+ *  문제가 있었다 — date를 같이 저장해 오늘 게 아니면 무시한다(getTodayQuickMealCheck 참고).
+ *  키를 v2로 바꿔서 옛 스키마(QuickMealStatus만 저장)가 새 타입인 척 섞여 들어오는 걸 막는다. */
+export const quickMealCheckStore = createLocalStore<Record<string, QuickMealCheckEntry>>(
+  "grandfood-app-meal-check-v2",
   {}
 );
 
+// todayDateString()은 기기/브라우저 로컬 시간 기준이다 — ward-meal-dashboard.ts(보호자 화면)가
+// 항상 KST로 고정하는 것과 의도적으로 다르다: 이 스토어는 어르신 본인 기기에서만 쓰이고
+// (위 grep: home-view.tsx 한 곳뿐), 어르신은 한국에 물리적으로 있다고 가정할 수 있는 반면
+// 보호자는 해외 출장 등 비-KST 타임존에서 접속할 수 있어 그 화면만 따로 고정해뒀다
+// (코드 리뷰 지적 — 파일마다 기준이 다르게 "보이지만" 실은 각자 맞는 가정을 쓴 것).
 export function setQuickMealCheck(wardId: string, status: QuickMealStatus) {
-  quickMealCheckStore.update((prev) => ({ ...prev, [wardId]: status }));
+  quickMealCheckStore.update((prev) => ({ ...prev, [wardId]: { date: todayDateString(), status } }));
+}
+
+/** 오늘 날짜로 찍힌 체크만 유효하다고 본다 — 날짜가 다르면(어제 이전) "오늘은 아직 체크
+ *  안 함"과 같게 취급한다. */
+export function getTodayQuickMealCheck(
+  all: Record<string, QuickMealCheckEntry>,
+  wardId: string
+): QuickMealStatus {
+  const entry = all[wardId];
+  if (!entry || entry.date !== todayDateString()) return null;
+  return entry.status;
 }
 
 export type MealSlot = "아침" | "점심" | "저녁";
@@ -93,11 +126,35 @@ export async function submitMealLogPhotos(params: {
   formData.append("beforePhoto", params.beforePhoto);
   formData.append("afterPhoto", params.afterPhoto);
 
-  const response = await fetch(`${API_BASE_URL}/wards/${access.backendWardId}/meal-logs`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${access.accessToken}` },
-    body: formData,
-  });
+  // fetchWithTimeout을 거쳐야 토큰 만료(401) 시 세션 만료 안내 + 로그아웃이 자동으로
+  // 걸린다(fetch-with-timeout.ts의 notifySessionExpiredIfNeeded 참고) — 예전엔 여기만
+  // raw fetch를 써서 사진 업로드 중 토큰이 만료되면 이 안내 없이 그냥 에러 문구만 뜨고
+  // 세션은 만료된 채로 남아있었다(2026-08-14 발견).
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/wards/${access.backendWardId}/meal-logs`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${access.accessToken}` },
+      body: formData,
+    },
+    UPLOAD_TIMEOUT_MS
+  );
+  let response: Response;
+  try {
+    response = await promise;
+  } catch (err) {
+    // wellness-calls.ts/rag-chat.ts와 같은 관례 — AbortError(타임아웃)를 여기서 먼저
+    // 잡아 안내 문구로 바꿔둔다. 안 그러면 원본 DOMException이 그대로 diet-view.tsx의
+    // catch까지 올라가는데, 거기는 TypeError만 "서버에 연결할 수 없어요"로 특별 취급하고
+    // DOMException은 걸러내지 못해 "잔반 분석 요청에 실패했어요"라는 애매한 문구로
+    // 뭉개진다(코드 리뷰 지적 — 이 파일의 다른 timeout-aware 호출부들과 관례가 달랐음).
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.");
+    }
+    throw err;
+  } finally {
+    clearRequestTimeout();
+  }
   if (!response.ok) {
     throw new Error(`잔반 분석 요청이 실패했어요 (status ${response.status})`);
   }
@@ -105,4 +162,56 @@ export async function submitMealLogPhotos(params: {
   const entry: MealLogEntry = await response.json();
   mealLogStore.update((prev) => ({ ...prev, [params.wardId]: [...(prev[params.wardId] ?? []), entry] }));
   return entry;
+}
+
+export type QuickMealCheckResult = {
+  id: string;
+  wardId: string;
+  mealSlot: MealSlot;
+  /** 이미 사진 기반 실제 기록이 있는 끼니라 이번 원탭이 반영 안 됐으면 false — 그때는
+   *  status도 항상 null이다(백엔드가 실제 기록을 덮어쓰지 않고 그대로 둔다). */
+  applied: boolean;
+  status: "완식" | "남김" | null;
+  loggedAt: string;
+};
+
+// POST /wards/:id/meal-logs/quick-check — 사진 찍을 여유가 없을 때 홈 화면 원탭("완식"/
+// "남김")을 실제 백엔드에 근사 기록으로 남긴다(grandfood_backend 145ee63, 2026-08-14).
+// submitMealLogPhotos와 인증/대상자 해석 방식이 같다 — resolveBackendWardAccess로 보호자/
+// 자가등록 본인 토큰 중 실제로 쓸 수 있는 걸 먼저 확보한다.
+export async function submitQuickMealCheck(params: {
+  wardId: string;
+  wardName: string;
+  wardAge: number;
+  wardAddress: string;
+  mealSlot: MealSlot;
+  status: "완식" | "남김";
+}): Promise<QuickMealCheckResult> {
+  const access = await resolveBackendWardAccess({
+    mockWardId: params.wardId,
+    name: params.wardName,
+    age: params.wardAge,
+    address: params.wardAddress,
+  });
+  if (!access) {
+    throw new Error(
+      "이 대상자를 관리하는 보호자 계정 또는 본인 계정으로 로그인해야 기록을 남길 수 있어요."
+    );
+  }
+
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/wards/${access.backendWardId}/meal-logs/quick-check`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${access.accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ mealSlot: params.mealSlot, status: params.status }),
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  const response = await promise;
+  clearRequestTimeout();
+  if (!response.ok) {
+    throw new Error(`식사 체크 기록에 실패했어요 (status ${response.status})`);
+  }
+  return (await response.json()) as QuickMealCheckResult;
 }
