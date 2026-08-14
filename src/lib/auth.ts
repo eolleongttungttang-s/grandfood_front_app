@@ -141,6 +141,31 @@ export function getAccounts(): Account[] {
 // 있는 정보라(초대 동의 시 linkWardToGuardian으로 기록됨), 백엔드엔 "내 대상자 목록 조회"
 // API가 없어서 여기서 복구할 방법이 없다. 로그인은 되지만 보호자 홈이 빈 상태로 시작하는
 // 것까진 이번 수정의 범위 밖(백엔드에 대상자 목록 API가 생기면 그때 채울 수 있다).
+// ensureLocalGuardianAccount/ensureLocalUserAccount(크로스디바이스 로그인 폴백에서 각자
+// 부름) 둘 다 "로컬에 이미 같은 로그인아이디 계정이 있으면 비밀번호만 최신화하고 끝, 없으면
+// 새로 만든다"는 뼈대가 완전히 같아서 여기 하나로 모았다(코드 리뷰 지적 — 예전엔 두 함수가
+// 이 판정/갱신 로직을 거의 그대로 복붙해서, 나중에 한쪽만 고치고 잊어버리기 쉬웠다).
+//
+// 로컬에 남은 비밀번호가 방금 백엔드 로그인에 성공한 비밀번호와 다르면(다른 기기에서
+// 비밀번호를 바꾼 경우 등) 여기서 갱신 안 해두면, 이후 login()은 계속 옛 로컬 비밀번호와만
+// 비교해서 정확한 비밀번호를 넣어도 로컬 로그인이 영구히 실패한다. wardIds 등 로컬에만
+// 있는 다른 정보는 덮어쓰지 않고 비밀번호만 최신화한다.
+//
+// 반환값: 기존 계정을 찾아서 처리했으면 그 계정(갱신된 비밀번호 반영 전 상태), 없었으면
+// null — 호출부가 이 값으로 "새로 만들어야 하는지"를 판단한다.
+function syncExistingAccountPassword(loginId: string, password: string): Account | null {
+  const existing = findAccountByLoginId(loginId);
+  if (!existing) return null;
+  if (existing.password !== password) {
+    writeRegisteredAccounts(
+      readRegisteredAccounts().map((account) =>
+        account.loginId === loginId ? { ...account, password } : account
+      )
+    );
+  }
+  return existing;
+}
+
 export function ensureLocalGuardianAccount(params: {
   loginId: string;
   password: string;
@@ -148,21 +173,7 @@ export function ensureLocalGuardianAccount(params: {
   phone: string;
   relationship: string;
 }): void {
-  const existing = findAccountByLoginId(params.loginId);
-  if (existing) {
-    // 로컬에 남은 비밀번호가 방금 백엔드 로그인에 성공한 비밀번호와 다르면(다른 기기에서
-    // 비밀번호를 바꾼 경우 등) 여기서 갱신 안 해두면, 이후 login()은 계속 옛 로컬 비밀번호와만
-    // 비교해서 정확한 비밀번호를 넣어도 로컬 로그인이 영구히 실패한다. wardIds 등 로컬에만
-    // 있는 다른 정보는 덮어쓰지 않고 비밀번호만 최신화한다.
-    if (existing.password !== params.password) {
-      writeRegisteredAccounts(
-        readRegisteredAccounts().map((account) =>
-          account.loginId === params.loginId ? { ...account, password: params.password } : account
-        )
-      );
-    }
-    return;
-  }
+  if (syncExistingAccountPassword(params.loginId, params.password)) return;
 
   const account: Account = {
     loginId: params.loginId,
@@ -190,17 +201,7 @@ export function ensureLocalUserAccount(params: {
   name: string;
   selfWardId: string;
 }): void {
-  const existing = findAccountByLoginId(params.loginId);
-  if (existing) {
-    if (existing.password !== params.password) {
-      writeRegisteredAccounts(
-        readRegisteredAccounts().map((account) =>
-          account.loginId === params.loginId ? { ...account, password: params.password } : account
-        )
-      );
-    }
-    return;
-  }
+  if (syncExistingAccountPassword(params.loginId, params.password)) return;
 
   const account: Account = {
     loginId: params.loginId,

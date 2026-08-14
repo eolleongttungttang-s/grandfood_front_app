@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ChevronDown, ChevronUp, Stethoscope } from "lucide-react";
+import { Stethoscope } from "lucide-react";
 
 import { Ward, WardDetail } from "@/lib/wards";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
@@ -11,32 +11,8 @@ import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 import { SpeakableCard } from "@/components/app/speakable-card";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
+import { ExpandToggle } from "@/components/app/expand-toggle";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
-
-// "왜 이 조합인가요"/"질환·알레르기·복약" 카드에 붙는 펼치기/접기 버튼. 카드 전체가
-// SpeakableCard의 탭 영역(눌러서 읽어주기)이라, 이 버튼 클릭이 그대로 버블링되면 펼치기와
-// 동시에 음성 읽기가 토글된다 — stopPropagation으로 막는다(diet-meal-checkin의 사진 업로드
-// 라벨과 동일한 이유).
-//
-// 처음엔 제목 옆에 작은 텍스트 링크로 뒀는데, 터치 영역이 너무 작아서 옆의 TTS 탭 영역과
-// 헷갈려 눌린다는 피드백(2026-08-14)을 받아 카드 너비만큼 넓은 버튼으로 바꿨다 — 70·80대
-// 사용자가 정확히 못 눌러도 실패하지 않게, 카드의 다른 버튼(잔반 분석하기 등)과 비슷한
-// 높이(h-11)를 준다.
-function ExpandToggle({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      className="flex h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-muted text-sm font-semibold text-foreground"
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggle();
-      }}
-    >
-      {expanded ? "접기" : "자세히 보기"}
-      {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-    </button>
-  );
-}
 
 export function DietView({
   ward,
@@ -161,7 +137,11 @@ export function DietView({
           className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
-          <ExpandToggle expanded={reasonsExpanded} onToggle={() => setReasonsExpanded((v) => !v)} />
+          <ExpandToggle
+            expanded={reasonsExpanded}
+            onToggle={() => setReasonsExpanded((v) => !v)}
+            stopPropagation
+          />
           {reasonsExpanded &&
             (todayMenu.isGenerating ? (
               <p className="text-sm text-muted-foreground">{TODAY_MENU_GENERATING_MESSAGE}</p>
@@ -188,7 +168,11 @@ export function DietView({
           className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
           <span className="text-xs font-bold text-foreground">질환 · 알레르기 · 복약</span>
-          <ExpandToggle expanded={conditionsExpanded} onToggle={() => setConditionsExpanded((v) => !v)} />
+          <ExpandToggle
+            expanded={conditionsExpanded}
+            onToggle={() => setConditionsExpanded((v) => !v)}
+            stopPropagation
+          />
           {conditionsExpanded && (
             <>
               <div className="flex flex-col gap-1.5">
