@@ -311,16 +311,16 @@ export function HomeView({
                 막는다(analyzeLeftovers 버튼도 동일, diet-view.tsx에 있던 것과 동일한 이유). */}
             <div className="flex gap-2">
               <label
-                className="flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-border bg-muted/40 p-3 text-center"
+                className="flex flex-1 cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-border bg-muted/40 p-5 text-center"
                 onClick={(e) => e.stopPropagation()}
               >
                 {beforePreview ? (
                   // eslint-disable-next-line @next/next/no-img-element -- 로컬 blob URL 미리보기라 next/image 최적화 대상이 아님
-                  <img src={beforePreview} alt="식전 사진 미리보기" className="h-16 w-16 rounded object-cover" />
+                  <img src={beforePreview} alt="식전 사진 미리보기" className="h-24 w-24 rounded-lg object-cover" />
                 ) : (
-                  <Camera className="h-5 w-5 text-muted-foreground" />
+                  <Camera className="h-9 w-9 text-muted-foreground" />
                 )}
-                <span className="text-xs text-muted-foreground">식전 사진</span>
+                <span className="text-base font-semibold text-foreground">식전 사진</span>
                 <input
                   type="file"
                   accept="image/*"
@@ -330,16 +330,16 @@ export function HomeView({
                 />
               </label>
               <label
-                className="flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-border bg-muted/40 p-3 text-center"
+                className="flex flex-1 cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-border bg-muted/40 p-5 text-center"
                 onClick={(e) => e.stopPropagation()}
               >
                 {afterPreview ? (
                   // eslint-disable-next-line @next/next/no-img-element -- 로컬 blob URL 미리보기라 next/image 최적화 대상이 아님
-                  <img src={afterPreview} alt="식후 사진 미리보기" className="h-16 w-16 rounded object-cover" />
+                  <img src={afterPreview} alt="식후 사진 미리보기" className="h-24 w-24 rounded-lg object-cover" />
                 ) : (
-                  <Camera className="h-5 w-5 text-muted-foreground" />
+                  <Camera className="h-9 w-9 text-muted-foreground" />
                 )}
-                <span className="text-xs text-muted-foreground">식후 사진</span>
+                <span className="text-base font-semibold text-foreground">식후 사진</span>
                 <input
                   type="file"
                   accept="image/*"
