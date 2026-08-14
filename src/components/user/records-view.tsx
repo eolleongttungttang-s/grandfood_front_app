@@ -5,13 +5,7 @@ import { useEffect, useState } from "react";
 import { Pill } from "lucide-react";
 
 import { MealTone, Ward, WardDetail } from "@/lib/wards";
-import {
-  deriveMealTones,
-  deriveTodayToneFromMealStatus,
-  fetchElderDietHistory,
-  fetchElderTodayPlan,
-  MealStatusSummary,
-} from "@/lib/meal-dashboard";
+import { deriveMealTones, fetchElderDietHistory } from "@/lib/meal-dashboard";
 import { getRecommendationForDate, todayDateString } from "@/lib/banchan-recommendation";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { TopBar } from "@/components/app/top-bar";
@@ -23,7 +17,6 @@ import {
   medicationReminderStore,
   setMedicationReminder,
 } from "@/lib/medication-reminder-store";
-import { overrideTodayTone } from "@/lib/meal-log-store";
 import { useLocalStore } from "@/lib/use-store";
 
 const MEAL_TONE_CLASS: Record<string, string> = {
@@ -56,25 +49,7 @@ export function RecordsView({
       cancelled = true;
     };
   }, [ward.id, ward.name, ward.age, ward.address]);
-  // diet-history는 완료 안 된(원탭) 끼니를 "소량"으로만 근사한다 — 오늘 하루만큼은
-  // meal-status/today-plan의 끼니별 quick_check_status로 완식/남김을 정확히 구분해서
-  // 덮어쓴다(meal-dashboard.ts의 deriveTodayToneFromMealStatus 참고).
-  const [todayMealStatus, setTodayMealStatus] = useState<MealStatusSummary | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetchElderTodayPlan({ mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address }).then(
-      (status) => {
-        if (!cancelled) setTodayMealStatus(status);
-      }
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [ward.id, ward.name, ward.age, ward.address]);
-  const mealHistory = overrideTodayTone(
-    backendMealTones ?? detail.mealHistory,
-    deriveTodayToneFromMealStatus(todayMealStatus)
-  );
+  const mealHistory = backendMealTones ?? detail.mealHistory;
 
   const completeCount = mealHistory.filter((m) => m === "완식").length;
   const smallCount = mealHistory.filter((m) => m === "소량").length;

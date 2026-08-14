@@ -11,8 +11,6 @@
 import { API_BASE_URL } from "@/lib/api-config";
 import { resolveCachedBackendWardAccess } from "@/lib/backend-auth";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
-import { deriveTodayToneFromMealStatus, parseMealStatus } from "@/lib/meal-dashboard";
-import { overrideTodayTone } from "@/lib/meal-log-store";
 import type { MealTone } from "@/lib/ward-registry";
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -22,6 +20,10 @@ const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 type BackendDietHistoryItem = {
   meal_date: string; // "YYYY-MM-DD"
   completed: boolean;
+  /** 사진 기반 완료든 원탭 자가 보고든, 이 끼니에 뭐라도 기록이 남았으면 true
+   *  (grandfood_backend 9f01c26). */
+  recorded: boolean;
+  quick_check_status: string | null;
 };
 
 type BackendDietHistoryResponse = {
@@ -63,12 +65,17 @@ function toDateKey(d: Date): string {
 }
 
 // diet-history는 끼니 단위 레코드만 주기 때문에 하루 단위 톤으로 다시 묶는다.
-// completed(식사 후 사진까지 올라옴) 끼니가 하루 중 하나라도 있으면 "완식", 끼니 기록은
-// 있는데(식전 사진만) completed가 없으면 "소량", 그날 기록 자체가 없으면 "미응답"으로 본다 —
-// mock의 3단계 의미를 최대한 살린 근사치일 뿐, 실제 잔반량을 재서 나온 값은 아니다.
+// completed(식사 후 사진까지 올라옴) 끼니가 하루 중 하나라도 있으면 "완식", 그렇지 않고
+// 원탭 자가 보고(quick_check_status)가 있으면 완식 체크가 하나라도 있으면 "완식", 남김만
+// 있으면 "소량"으로 본다(grandfood_backend 9f01c26) — 완료도 원탭도 전혀 없으면(recorded
+// 인 행 자체가 없으면) "미응답"이다.
 function buildMealHistory(items: BackendDietHistoryItem[]): MealTone[] {
-  const completedDates = new Set(items.filter((i) => i.completed).map((i) => i.meal_date));
-  const recordedDates = new Set(items.map((i) => i.meal_date));
+  const byDate = new Map<string, BackendDietHistoryItem[]>();
+  for (const item of items) {
+    const list = byDate.get(item.meal_date) ?? [];
+    list.push(item);
+    byDate.set(item.meal_date, list);
+  }
 
   const history: MealTone[] = [];
   const today = nowInKST();
@@ -76,9 +83,17 @@ function buildMealHistory(items: BackendDietHistoryItem[]): MealTone[] {
     const d = new Date(today);
     d.setUTCDate(d.getUTCDate() - offset);
     const key = toDateKey(d);
-    if (completedDates.has(key)) history.push("완식");
-    else if (recordedDates.has(key)) history.push("소량");
-    else history.push("미응답");
+    const recordedItems = (byDate.get(key) ?? []).filter((i) => i.recorded);
+    if (recordedItems.length === 0) {
+      history.push("미응답");
+      continue;
+    }
+    if (recordedItems.some((i) => i.completed)) {
+      history.push("완식");
+      continue;
+    }
+    const hasFullMeal = recordedItems.some((i) => i.quick_check_status === "완식");
+    history.push(hasFullMeal ? "완식" : "소량");
   }
   return history;
 }
@@ -111,48 +126,28 @@ export async function fetchWardMealDashboard(
     authHeaders,
     REQUEST_TIMEOUT_MS
   );
-  // diet-history는 완료 안 된(원탭) 끼니를 전부 "소량"으로만 근사한다 — 오늘 하루만큼은
-  // meal-status의 끼니별 quick_check_status로 완식/남김을 정확히 구분해서 덮어쓴다
-  // (meal-dashboard.ts의 deriveTodayToneFromMealStatus 참고). target_date를 안 넘기면
-  // 백엔드가 오늘 날짜로 조회한다.
-  const mealStatusReq = fetchWithTimeout(
-    `${API_BASE_URL}/app/guardian/${access.backendWardId}/meal-status`,
-    authHeaders,
-    REQUEST_TIMEOUT_MS
-  );
-  // meal-status는 diet-history/intake-summary와 달리 실패해도 전체를 에러로 만들지 않는다 —
-  // "오늘" 칸 정확도를 살짝 높여주는 보조 데이터일 뿐이라, 이것 때문에 카드 전체가 "불러오기
-  // 실패"로 빠지면 손해가 더 크다. 실패하면 그냥 기존 근사치(소량)를 그대로 둔다. 이 체인은
-  // (아래에서 await 하는 시점과 무관하게) 지금 바로 만들어서 .catch를 붙여둔다 — 안 그러면
-  // dietHistoryReq/intakeSummaryReq가 먼저 실패해서 아래 Promise.all이 던질 때, 이 promise의
-  // 거절을 아무도 못 받는(unhandled rejection) 창이 생긴다.
-  const todayTonePromise = parseJson<Parameters<typeof parseMealStatus>[0]>(mealStatusReq.promise)
-    .then((data) => deriveTodayToneFromMealStatus(parseMealStatus(data)))
-    .catch(() => null);
 
-  // 셋 중 하나가 실패로 확정되거나(catch) 호출부의 signal이 취소되면, 아직 안 끝난 나머지
+  // 둘 중 하나가 실패로 확정되거나(catch) 호출부의 signal이 취소되면, 아직 안 끝난 나머지
   // 요청도 같이 abort한다 — 독립된 컨트롤러를 각자 들면 하나가 이미 버려졌는데도 다른
   // 하나는 끝까지 네트워크를 쓰게 된다.
-  const abortAll = () => {
+  const abortBoth = () => {
     dietHistoryReq.controller.abort();
     intakeSummaryReq.controller.abort();
-    mealStatusReq.controller.abort();
   };
-  options?.signal?.addEventListener("abort", abortAll);
+  options?.signal?.addEventListener("abort", abortBoth);
 
   try {
     const [dietHistory, intakeSummary] = await Promise.all([
       parseJson<BackendDietHistoryResponse>(dietHistoryReq.promise),
       parseJson<BackendIntakeSummaryResponse>(intakeSummaryReq.promise),
     ]);
-    const todayTone = await todayTonePromise;
     return {
       status: "ready",
       leftoverPercent: intakeSummary.average_leftover_pct,
-      mealHistory: overrideTodayTone(buildMealHistory(dietHistory.items), todayTone),
+      mealHistory: buildMealHistory(dietHistory.items),
     };
   } catch (err) {
-    abortAll();
+    abortBoth();
     if (err instanceof DOMException && err.name === "AbortError") {
       return { status: "error", message: "서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요." };
     }
@@ -166,7 +161,6 @@ export async function fetchWardMealDashboard(
   } finally {
     dietHistoryReq.clearTimeout();
     intakeSummaryReq.clearTimeout();
-    mealStatusReq.clearTimeout();
-    options?.signal?.removeEventListener("abort", abortAll);
+    options?.signal?.removeEventListener("abort", abortBoth);
   }
 }

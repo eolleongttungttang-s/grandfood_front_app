@@ -16,7 +16,6 @@ import { resolveBackendWardAccess } from "@/lib/backend-auth";
 import { API_BASE_URL } from "@/lib/api-config";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { todayDateString } from "@/lib/banchan-recommendation";
-import type { MealTone } from "@/lib/ward-registry";
 
 // backend-auth.ts 등과 동일한 관례 — 사진 업로드(submitMealLogPhotos)만 일반 API 호출보다
 // 넉넉하게 UPLOAD_TIMEOUT_MS를 따로 쓴다.
@@ -49,22 +48,6 @@ export function getTodayQuickMealCheck(
   const entry = all[wardId];
   if (!entry || entry.date !== todayDateString()) return null;
   return entry.status;
-}
-
-// 최근 14일 섭취 기록 그리드(records-view.tsx/ward-detail-view.tsx)의 "오늘" 칸을, 호출부가
-// (diet-history 기반 값 대신) 다른 값으로 덮어쓸 때 쓰는 범용 헬퍼 — 오늘 칸이 아직
-// "미응답"일 때만 덮어쓴다. 이전엔 이 자리에서 로컬 quickMealCheckStore 값을 직접 덮어썼지만,
-// grandfood_backend 145ee63부터 원탭이 실제로 백엔드에 저장되고 meal-status/today-plan이
-// 끼니별 quick_check_status까지 정확히 돌려주게 되면서, "오늘" 값은 이제 그 응답에서
-// 계산한다(meal-dashboard.ts의 deriveTodayToneFromMealStatus) — 로컬 스토리지보다 항상
-// 더 정확하고(다른 기기/보호자 화면과도 동기화됨) 실제 기록과도 일치한다.
-export function overrideTodayTone(tones: MealTone[], todayTone: MealTone | null): MealTone[] {
-  if (!todayTone || tones.length === 0) return tones;
-  const lastIndex = tones.length - 1;
-  if (tones[lastIndex] !== "미응답") return tones;
-  const merged = [...tones];
-  merged[lastIndex] = todayTone;
-  return merged;
 }
 
 export type MealSlot = "아침" | "점심" | "저녁";
