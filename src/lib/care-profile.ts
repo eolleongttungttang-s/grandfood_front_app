@@ -22,6 +22,27 @@ export const DISLIKED_INGREDIENT_POOL = [
 // 지금까지 ward-registry.ts에 하드코딩돼 있던 가짜 conditions를 대체하는 실제 입력값.
 export const CONDITION_POOL = ["고혈압", "당뇨", "심부전", "신장질환", "치매", "관절염"] as const;
 
+// 자주 복용하는 약 종류 — 여기 없는 약은 customMedications(기타, 이름 직접 입력)에 적는다.
+export const MEDICATION_POOL = [
+  "혈압약",
+  "당뇨약",
+  "관절염약(소염진통제)",
+  "고지혈증약",
+  "심장약",
+  "수면제 · 신경안정제",
+  "항응고제(와파린 등)",
+] as const;
+
+// 약은 하루에 여러 번(예: 아침·저녁 둘 다) 먹는 경우가 많아서, 복용 시간은 하나만 고르는 게
+// 아니라 중복 체크 가능한 목록으로 둔다.
+export const MEDICATION_TIMING_POOL = ["아침", "점심", "저녁", "자기 전"] as const;
+
+export type MedicationEntry = {
+  name: string;
+  /** MEDICATION_TIMING_POOL의 부분집합 — 복수 선택 가능. */
+  timings: string[];
+};
+
 export type RegisterCareProfileCommand = {
   wardId: string;
   mealsPerDay: 1 | 2 | 3 | 4;
@@ -33,7 +54,13 @@ export type RegisterCareProfileCommand = {
   conditions: string[];
   conditionsNote: string;
   takesMedication: boolean;
-  medicationNote: string;
+  medications: MedicationEntry[];
+  /** MEDICATION_POOL에 없는 약들 — 목록에 없는 약도 여러 개일 수 있고(예: 피부약은 점심에만,
+   *  알레르기약은 아침·저녁), 약마다 복용 시간이 다를 수 있어서 medications와 동일하게
+   *  이름+복용시간을 한 쌍으로 여러 개 담는다(2026-08-14 피드백 — 예전엔 자유 텍스트 한 줄 +
+   *  복용시간 체크 하나를 모든 "기타" 약이 공유해서, 기타 약이 2개 이상이면 각자 언제
+   *  먹는지 구분이 아예 안 됐다). */
+  customMedications: MedicationEntry[];
   chewingDifficulty: boolean;
   mobilityLevel: MobilityLevel;
   emergencyContactName: string;
@@ -88,7 +115,8 @@ export const EMPTY_CARE_PROFILE_COMMAND: RegisterCareProfileCommand = {
   conditions: [],
   conditionsNote: "",
   takesMedication: false,
-  medicationNote: "",
+  medications: [],
+  customMedications: [],
   chewingDifficulty: false,
   mobilityLevel: "independent",
   emergencyContactName: "",

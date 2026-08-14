@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Plus, X } from "lucide-react";
 
 import {
   CARE_SURVEY_STEP,
@@ -11,6 +11,8 @@ import {
   EMPTY_CARE_PROFILE_COMMAND,
   LIVING_ARRANGEMENT_LABEL,
   LivingArrangement,
+  MEDICATION_POOL,
+  MEDICATION_TIMING_POOL,
   MOBILITY_LABEL,
   MobilityLevel,
   RegisterCareProfileCommand,
@@ -77,6 +79,37 @@ function OptionButton({
       )}
     >
       {children}
+    </button>
+  );
+}
+
+// 약 복용 시간(아침/점심/저녁/자기 전) 체크용 — OptionButton보다 작은 보조 컨트롤이라
+// 터치 타겟을 h-11(44px)까지만 줄인다(diet-view.tsx의 ExpandToggle과 같은 기준). 여러 개
+// 동시 선택 가능(하루에 여러 번 먹는 약도 있음)이라 라디오가 아니라 토글이다.
+function TimingChip({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={cn(
+        "h-11 flex-1 rounded-lg border text-sm font-semibold transition-colors",
+        selected
+          ? "border-primary bg-primary/10 text-foreground"
+          : "border-border bg-card text-muted-foreground hover:bg-muted"
+      )}
+    >
+      {label}
     </button>
   );
 }
@@ -159,8 +192,12 @@ export function CareSurveyView({
   const [enteredFromOverview, setEnteredFromOverview] = useState(false);
 
   const [step, setStep] = useState(0);
+  // EMPTY_CARE_PROFILE_COMMAND를 먼저 펼치고 그 위에 initialValues를 덮어쓴다 — 그냥
+  // initialValues를 통째로 쓰면, 이 설문에 필드가 새로 추가된 뒤(예: medications 체크리스트)
+  // 그 필드가 생기기 전에 저장된 옛 localStorage 데이터엔 새 필드 자체가 없어서
+  // undefined가 되고, 그 필드를 쓰는 화면이 그대로 죽는다(실제로 겪은 크래시).
   const [form, setForm] = useState<RegisterCareProfileCommand>(
-    initialValues ?? { ...EMPTY_CARE_PROFILE_COMMAND, wardId }
+    initialValues ? { ...EMPTY_CARE_PROFILE_COMMAND, ...initialValues } : { ...EMPTY_CARE_PROFILE_COMMAND, wardId }
   );
   const [healthForm, setHealthForm] = useState<HealthMetricsForm>(
     initialHealthValues ?? EMPTY_HEALTH_METRICS_FORM
@@ -209,6 +246,77 @@ export function CareSurveyView({
       conditions: prev.conditions.includes(name)
         ? prev.conditions.filter((n) => n !== name)
         : [...prev.conditions, name],
+    }));
+  }
+
+  // "혈압약을 먹는다"는 체크(있음/없음)와 "언제 먹는다"는 체크(아침/점심/저녁/자기 전,
+  // 복수 선택)가 따로 논다 — 있음 체크를 끄면 그 약의 복용 시간 선택도 같이 지운다(꺼진
+  // 약에 시간만 남아있으면 나중에 다시 켰을 때 사용자가 고른 적 없는 시간이 그대로
+  // 남아있는 것처럼 보인다).
+  function toggleMedicationChecked(name: string) {
+    setForm((prev) => ({
+      ...prev,
+      medications: prev.medications.some((m) => m.name === name)
+        ? prev.medications.filter((m) => m.name !== name)
+        : [...prev.medications, { name, timings: [] }],
+    }));
+  }
+
+  function toggleMedicationTiming(name: string, timing: string) {
+    setForm((prev) => ({
+      ...prev,
+      medications: prev.medications.map((m) =>
+        m.name === name
+          ? {
+              ...m,
+              timings: m.timings.includes(timing)
+                ? m.timings.filter((t) => t !== timing)
+                : [...m.timings, timing],
+            }
+          : m
+      ),
+    }));
+  }
+
+  // 기타(목록에 없는 약)는 하나가 아니라 여러 개일 수 있고, 약마다 복용 시간이 다를 수 있다
+  // (2026-08-14 피드백 — 피부약은 점심에만, 알레르기약은 아침·저녁에 먹는 경우 등, 자유
+  // 텍스트 한 줄 + 시간 체크 하나를 공유하면 이 둘을 구분할 방법이 없었다). 그래서 이름도
+  // 자유 입력인 채로 여러 개 담을 수 있게 medications와 같은 모양(이름+시간)의 배열로 관리한다.
+  // 이름이 입력 중엔 비어있거나 일시적으로 겹칠 수 있어 이름이 아니라 배열 인덱스로 다룬다.
+  function addCustomMedication() {
+    setForm((prev) => ({
+      ...prev,
+      customMedications: [...prev.customMedications, { name: "", timings: [] }],
+    }));
+  }
+
+  function removeCustomMedication(index: number) {
+    setForm((prev) => ({
+      ...prev,
+      customMedications: prev.customMedications.filter((_, i) => i !== index),
+    }));
+  }
+
+  function renameCustomMedication(index: number, name: string) {
+    setForm((prev) => ({
+      ...prev,
+      customMedications: prev.customMedications.map((m, i) => (i === index ? { ...m, name } : m)),
+    }));
+  }
+
+  function toggleCustomMedicationTiming(index: number, timing: string) {
+    setForm((prev) => ({
+      ...prev,
+      customMedications: prev.customMedications.map((m, i) =>
+        i === index
+          ? {
+              ...m,
+              timings: m.timings.includes(timing)
+                ? m.timings.filter((t) => t !== timing)
+                : [...m.timings, timing],
+            }
+          : m
+      ),
     }));
   }
 
@@ -280,7 +388,9 @@ export function CareSurveyView({
       {
         step: CARE_SURVEY_STEP.medication,
         label: "복용 중인 약",
-        value: form.takesMedication ? form.medicationNote || "있음" : "없음",
+        value: form.takesMedication
+          ? [...form.medications, ...form.customMedications].map((m) => m.name).filter(Boolean).join(", ") || "있음"
+          : "없음",
       },
       {
         step: CARE_SURVEY_STEP.chewingDifficulty,
@@ -550,18 +660,99 @@ export function CareSurveyView({
               </OptionButton>
             </div>
             {form.takesMedication && (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="medication-note" className="text-base">
-                  약 이름이나 복용 시간을 적어주세요 (아는 만큼만 적어도 괜찮아요)
-                </Label>
-                <Textarea
-                  id="medication-note"
-                  className="min-h-20 text-lg"
-                  placeholder="예: 혈압약, 아침 식후"
-                  value={form.medicationNote}
-                  onChange={(e) => update("medicationNote", e.target.value)}
-                />
-              </div>
+              <>
+                <div className="flex flex-col gap-3">
+                  {MEDICATION_POOL.map((name) => {
+                    const entry = form.medications.find((m) => m.name === name);
+                    return (
+                      <div
+                        key={name}
+                        className={cn(
+                          "flex flex-col gap-3 rounded-2xl border-2 p-4 transition-colors",
+                          entry ? "border-primary bg-primary/10" : "border-border bg-card"
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleMedicationChecked(name)}
+                          className="flex min-h-11 items-center justify-between text-left text-lg font-semibold text-foreground"
+                        >
+                          <span>{name}</span>
+                          <span
+                            className={cn(
+                              "text-sm font-semibold",
+                              entry ? "text-primary" : "text-muted-foreground"
+                            )}
+                          >
+                            {entry ? "있음" : "없음"}
+                          </span>
+                        </button>
+                        {entry && (
+                          <div className="flex gap-2">
+                            {MEDICATION_TIMING_POOL.map((timing) => (
+                              <TimingChip
+                                key={timing}
+                                label={timing}
+                                selected={entry.timings.includes(timing)}
+                                onClick={() => toggleMedicationTiming(name, timing)}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-col gap-3">
+                  <Label className="flex flex-col items-start text-base">
+                    <span>기타 — 목록에 없는 약이 있으면 이름을 적어주세요</span>
+                    <span className="text-sm font-normal text-muted-foreground">
+                      (약마다 따로 추가할 수 있어요)
+                    </span>
+                  </Label>
+                  {form.customMedications.map((med, i) => (
+                    <div
+                      key={i}
+                      className="flex flex-col gap-3 rounded-2xl border-2 border-primary bg-primary/10 p-4"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={med.name}
+                          onChange={(e) => renameCustomMedication(i, e.target.value)}
+                          placeholder="예: 위장약"
+                          className="h-11 flex-1 text-lg"
+                        />
+                        <button
+                          type="button"
+                          aria-label="이 약 지우기"
+                          onClick={() => removeCustomMedication(i)}
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+                      <div className="flex gap-2">
+                        {MEDICATION_TIMING_POOL.map((timing) => (
+                          <TimingChip
+                            key={timing}
+                            label={timing}
+                            selected={med.timings.includes(timing)}
+                            onClick={() => toggleCustomMedicationTiming(i, timing)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addCustomMedication}
+                    className="flex h-11 items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-border text-base font-semibold text-muted-foreground hover:bg-muted"
+                  >
+                    <Plus className="h-4 w-4" />
+                    기타 약 추가
+                  </button>
+                </div>
+              </>
             )}
           </>
         )}

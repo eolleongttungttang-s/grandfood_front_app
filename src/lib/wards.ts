@@ -163,10 +163,19 @@ export function getWardDetail(ward: Ward): WardDetail {
   const medications: { name: string; schedule: string }[] = [];
   if (hasMedicationData) {
     if (careProfile!.takesMedication) {
-      medications.push({
-        name: careProfile!.medicationNote.trim() || "복용 중 (상세 미입력)",
-        schedule: "설문 응답 기준",
-      });
+      // 목록에서 고른 약(medications)과 기타로 직접 적은 약(customMedications) 둘 다 이름+
+      // 복용시간을 따로 들고 있어서(2026-08-14 피드백 — 기타 약이 여러 개면 각자 언제
+      // 먹는지 구분돼야 함), 하나로 합쳐서 약마다 한 줄씩 보여준다.
+      const answeredMeds = [...careProfile!.medications, ...careProfile!.customMedications];
+      for (const med of answeredMeds) {
+        medications.push({
+          name: med.name,
+          schedule: med.timings.length > 0 ? med.timings.join(" · ") : "복용 시간 미입력",
+        });
+      }
+      if (medications.length === 0) {
+        medications.push({ name: "복용 중 (상세 미입력)", schedule: "설문 응답 기준" });
+      }
     } else {
       medications.push({ name: "특이 복약 없음", schedule: "-" });
     }
