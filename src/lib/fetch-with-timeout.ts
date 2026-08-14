@@ -26,7 +26,13 @@ import { toast } from "sonner";
 // 헤더 자체를 깜빡한 호출 등) 뜰 수 있다 — 그런 경우까지 전부 세션을 지우고 로그인
 // 화면으로 쫓아내면 실제로는 로그인 상태인 사용자를 잘못 로그아웃시키는 오탐이 생긴다.
 // grandfood_backend a7426e5부터 401 바디에 code(missing_token/token_expired/
-// token_invalid)가 실려오므로, 그중 진짜 만료(token_expired)일 때만 반응한다.
+// token_invalid)가 실려오므로, 그중 재로그인이 실제로 필요한 code일 때만 반응한다.
+// token_expired(진짜 만료)뿐 아니라 token_invalid도 포함한다 — 코드 리뷰 지적: 서명이
+// 안 맞는(비밀키 로테이션 등) 토큰도 만료와 마찬가지로 이 세션으로는 절대 다시 성공할 수
+// 없는 상태라 재로그인 유도가 필요하다. missing_token은 제외한다 — Authorization 헤더가
+// 아예 없는 건 애초에 로그인한 적 없는 상태(비로그인 방문 등)일 수 있어, "로그인 기간이
+// 만료됐다"는 안내가 오히려 어색하다.
+const RELOGIN_REQUIRED_CODES = new Set(["token_expired", "token_invalid"]);
 let sessionExpiredNotified = false;
 
 async function notifySessionExpiredIfNeeded(response: Response): Promise<Response> {
@@ -36,9 +42,18 @@ async function notifySessionExpiredIfNeeded(response: Response): Promise<Respons
   const path = window.location.pathname;
   if (path.startsWith("/login") || path.startsWith("/signup")) return response;
 
+  // 아래 response.clone().json()이 await라 여기서 제어권이 잠깐 이벤트 루프로 넘어간다 —
+  // 그 사이 다른 401 응답의 notifySessionExpiredIfNeeded가 또 돌면(여러 요청이 동시에
+  // 401을 받은 경우) 그것도 위의 sessionExpiredNotified 체크를 아직 true로 못 보고
+  // 통과해서, 토스트/로그아웃/리다이렉트가 중복 발생할 수 있었다(코드 리뷰 지적: check-
+  // then-await-then-set 레이스). await 전에 먼저 플래그를 선점해서(이 줄 위로는 await가
+  // 없어 동기적으로 끝까지 실행되므로 다른 호출이 끼어들 수 없다) 이 경합을 없앤다 —
+  // 다시 로그인이 필요한 code가 아닌 걸로 밝혀지면 아래에서 선점을 풀어준다.
+  sessionExpiredNotified = true;
+
   // response.json()은 스트림을 한 번만 읽을 수 있어서, 실제 호출부가 나중에 바디를
   // 또 읽어야 하는 경우(에러 메시지 파싱 등)를 위해 clone()에서 읽는다. 바디가
-  // JSON이 아니거나 비어있어도(네트워크 레벨 401 등) 그냥 "만료 아님"으로 취급하고
+  // JSON이 아니거나 비어있어도(네트워크 레벨 401 등) 그냥 "재로그인 불필요"로 취급하고
   // 조용히 넘어간다 — 여기서 실패한다고 원래 응답 처리를 막으면 안 된다.
   let code: string | undefined;
   try {
@@ -46,9 +61,11 @@ async function notifySessionExpiredIfNeeded(response: Response): Promise<Respons
   } catch {
     code = undefined;
   }
-  if (code !== "token_expired") return response;
+  if (!code || !RELOGIN_REQUIRED_CODES.has(code)) {
+    sessionExpiredNotified = false;
+    return response;
+  }
 
-  sessionExpiredNotified = true;
   toast.error("로그인 기간이 만료되었습니다. 다시 로그인해주세요.");
   // "OOO님으로 계속하기"가 다음에 또 세션 없이 홈으로 들여보내지 않도록, 로그인 포인터를
   // 지워서 로그아웃 상태로 만든다(계정 목록 자체는 그대로 둔다 — session.tsx의 logout()과
