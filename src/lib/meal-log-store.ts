@@ -139,8 +139,22 @@ export async function submitMealLogPhotos(params: {
     },
     UPLOAD_TIMEOUT_MS
   );
-  const response = await promise;
-  clearRequestTimeout();
+  let response: Response;
+  try {
+    response = await promise;
+  } catch (err) {
+    // wellness-calls.ts/rag-chat.ts와 같은 관례 — AbortError(타임아웃)를 여기서 먼저
+    // 잡아 안내 문구로 바꿔둔다. 안 그러면 원본 DOMException이 그대로 diet-view.tsx의
+    // catch까지 올라가는데, 거기는 TypeError만 "서버에 연결할 수 없어요"로 특별 취급하고
+    // DOMException은 걸러내지 못해 "잔반 분석 요청에 실패했어요"라는 애매한 문구로
+    // 뭉개진다(코드 리뷰 지적 — 이 파일의 다른 timeout-aware 호출부들과 관례가 달랐음).
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.");
+    }
+    throw err;
+  } finally {
+    clearRequestTimeout();
+  }
   if (!response.ok) {
     throw new Error(`잔반 분석 요청이 실패했어요 (status ${response.status})`);
   }

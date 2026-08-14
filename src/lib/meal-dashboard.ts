@@ -117,7 +117,12 @@ function parseDietHistory(data: {
     mealDate: item.meal_date,
     mealType: item.meal_type,
     completed: item.completed,
-    recorded: item.recorded,
+    // item.recorded ?? item.completed — 응답 타입이 recorded를 필수로 선언하고 있지만,
+    // 배포 시점이 백엔드(9f01c26)보다 앞서거나 캐시된 옛 응답이 섞이면 런타임엔 그 필드
+    // 자체가 없을 수 있다(타입은 거짓말을 할 수 있음, 코드 리뷰 지적) — 그 경우 completed로
+    // 대체하면 최소한 예전 기준(사진 기반 완료)까지는 지켜져서, 그 필드 하나가 없다고 14일
+    // 전체가 "미응답"으로 회귀하는 걸 막는다.
+    recorded: item.recorded ?? item.completed,
     quickCheckStatus:
       item.quick_check_status === "완식" || item.quick_check_status === "남김" ? item.quick_check_status : null,
     dishes: item.dishes.map((d) => ({
@@ -174,6 +179,12 @@ export function deriveMealTones(items: DietHistoryEntry[], days: number): MealTo
       tones.push("미응답");
       continue;
     }
+    // 참고(코드 리뷰 지적, 이 PR 이전부터 있던 차이라 동작은 그대로 둠): 보호자 화면
+    // (ward-meal-dashboard.ts의 buildMealHistory)은 완료된 끼니가 있으면 잔반율과 무관하게
+    // 무조건 "완식"으로 본다 — diet-history가 원래 dishes(반찬별 잔반율)를 안 줘서 시작된
+    // 차이다. 같은 날 같은 데이터를 두고 이 화면(어르신 본인)만 잔반율까지 따져 "완식"이
+    // 아니라 "소량"으로 나올 수 있다 — 실제 잔반량을 더 정확히 반영하는 쪽은 이 화면이라
+    // 일부러 완화하지 않았다.
     const completedItems = recordedItems.filter((m) => m.completed);
     if (completedItems.length > 0) {
       const dishes = completedItems.flatMap((m) => m.dishes);

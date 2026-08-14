@@ -128,6 +128,12 @@ export function HomeView({
     toast.success(message);
     speak(message);
 
+    // 탭한 "지금" 시각 기준 끼니를 여기서 미리 확정한다 — 아래 큐 콜백 안에서
+    // getCurrentMealSlot()을 부르면, 이전 요청이 밀려서 콜백이 실제로 실행되는 시점이
+    // 늦어질 때(예: 16:59에 탭했는데 콜백은 17:01에 실행) 탭한 끼니가 아니라 콜백 실행
+    // 시점의 끼니로 잘못 저장된다(코드 리뷰 지적).
+    const mealSlot = getCurrentMealSlot();
+
     // 실제 저장은 백그라운드로 — 아직 실제 백엔드에 연결 안 된 대상자(데모/자가등록 전
     // 등)나 네트워크 문제로 실패해도 위 로컬 반영/음성 안내는 이미 끝났으니 어르신 경험은
     // 끊기지 않는다. 이전 요청 뒤에 체이닝해서(quickCheckQueueRef) 연달아 탭해도 네트워크
@@ -138,7 +144,7 @@ export function HomeView({
         wardName: ward.name,
         wardAge: ward.age,
         wardAddress: ward.address,
-        mealSlot: getCurrentMealSlot(),
+        mealSlot,
         status,
       })
         .then((result) => {
