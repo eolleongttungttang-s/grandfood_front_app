@@ -17,6 +17,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ExpandToggle } from "@/components/app/expand-toggle";
 import {
   addDaysToDateString,
   addMonthsToMonthString,
@@ -89,15 +90,18 @@ function TargetStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-// 기본으로 펼쳐 보여줄 날짜 — 구독은 오늘 당장이 아니라 다음날 배송부터 반영되므로(2026-08-13
-// 피드백), 내일이 이 달 데이터 안에 있으면 내일을 먼저 고른다. 내일이 없으면(다른 달을 보는
-// 중 등) 오늘, 그것도 없으면 완료된 첫 날짜, 그마저 없으면 첫 칸.
+// 기본으로 펼쳐 보여줄 날짜 — 오늘이 이 달 데이터 안에 있으면 오늘을 먼저 고른다. diet-view.tsx
+// 상단 "AI 반찬 매칭" 카드(합계 나트륨/단백질/열량)와 "왜 이 조합인가요"가 today-menu.ts를 통해
+// 항상 "오늘"(todayDateString()) 기준으로 계산되는데, 예전엔 여기가 "내일"을 기본으로 보여줘서
+// 같은 화면에서 카드 합계랑 달력에 보이는 반찬이 서로 다른 날짜라 안 맞아 보였다(2026-08-14
+// 피드백, "합친 총 열량이 반찬들이랑 상호작용을 안 하는 것 같다"). 오늘이 없으면(다른 달을
+// 보는 중 등) 내일, 그것도 없으면 완료된 첫 날짜, 그마저 없으면 첫 칸.
 function pickDefaultDate(days: DayCell[]): string | null {
   const today = todayDateString();
   const tomorrow = addDaysToDateString(today, 1);
   const fallback =
-    days.find((d) => d.date === tomorrow) ??
     days.find((d) => d.date === today) ??
+    days.find((d) => d.date === tomorrow) ??
     days.find((d) => d.generationStatus === "done" && d.items.length > 0) ??
     days[0] ??
     null;
@@ -166,6 +170,12 @@ export function BanchanRecommendationCalendar({
     return chunks;
   }, [days]);
 
+  // 월 그리드(요일 줄 + 5주치 칸 + 범례)는 기본으로 접어둔다 — 날짜 칸 자체는 터치 기준을
+  // 지키느라 못 줄이니, 대신 필요할 때만 펼쳐보게 해서 평소 화면 길이를 줄인다(2026-08-14
+  // 피드백). 접혀있어도 아래 날짜 상세(오늘 반찬)는 그대로 보인다 — 어차피 매일 보는 건
+  // "오늘 뭐 먹는지"지 달력 자체가 아니다.
+  const [calendarExpanded, setCalendarExpanded] = useState(false);
+
   const [selectedDate, setSelectedDate] = useState<string | null>(() => pickDefaultDate(days));
   // days는 폴링으로 몇 초마다 새 배열로 바뀐다 — 그때마다 선택을 오늘/기본값으로 되돌리면
   // 사용자가 골라둔 날짜가 자꾸 초기화된다. useEffect 대신 렌더 중에 "이전 렌더의 days와
@@ -178,12 +188,40 @@ export function BanchanRecommendationCalendar({
   const [prevDays, setPrevDays] = useState(days);
   if (days !== prevDays) {
     setPrevDays(days);
-    if (!(selectedDate && days.some((d) => d.date === selectedDate))) {
+    // monthLoading(다른 달로 넘어갔는데 아직 그 달 데이터를 못 받아온 상태)인 동안은 days가
+    // 일시적으로 []다 — goToDate(전날/다음날 버튼, 그리드의 다른 달 패딩 칸)가 selectedDate와
+    // viewedMonth를 같이 옮기면, 바로 이 렌더에서 days(=[])엔 방금 옮긴 날짜가 당연히 없으니
+    // "무효한 선택"으로 오판해서 null로 초기화해버리고, 그 달 데이터가 실제로 도착했을 때도
+    // 이미 null이 된 뒤라 사용자가 정말 가려던 날짜로 못 돌아간다(코드 리뷰 지적). 로딩 중엔
+    // 판단을 미루고, 그 달 데이터가 실제로 도착한 뒤에만(monthLoading이 꺼진 뒤) 지금 선택이
+    // 그 데이터 안에 있는지 판단한다.
+    if (!monthLoading && !(selectedDate && days.some((d) => d.date === selectedDate))) {
       setSelectedDate(pickDefaultDate(days));
     }
   }
 
   const selected = days.find((d) => d.date === selectedDate) ?? null;
+  // 날짜 상세 카드 위쪽의 전날/다음날 이동 버튼 — 달력을 안 펼쳐도 하루씩 넘겨볼 수 있게
+  // 한다(2026-08-14 피드백, "달력을 굳이 안 펴고" 요청). buildDayCells가 이번 달 앞뒤로
+  // 해당 주(week)까지는 이미 채워 넣어 두므로(달력 마지막 줄에 다음 달 초 며칠이 옅게
+  // 보이는 것과 동일 데이터), 대부분의 경우 월 경계를 넘어가도 days 안에 이미 있다. 그
+  // 범위 밖으로 더 나가려는 경우에만(가진 데이터가 없음) 버튼을 비활성화한다 — 없는 날짜로
+  // selectedDate를 억지로 옮기면, 아래 prevDays 보정 로직이 "이 날짜는 지금 달에 없다"고
+  // 판단해 엉뚱한 기본값으로 되돌려버린다.
+  const prevDate = selected ? addDaysToDateString(selected.date, -1) : null;
+  const nextDate = selected ? addDaysToDateString(selected.date, 1) : null;
+  const canGoPrev = prevDate != null && days.some((d) => d.date === prevDate);
+  const canGoNext = nextDate != null && days.some((d) => d.date === nextDate);
+
+  // 전날/다음날 버튼이 월 경계를 넘으면(예: 8월 31일 → 9월 1일) selectedDate만 옮기고
+  // viewedMonth는 그대로 둬서, 헤더/달력 그리드는 계속 "8월"을 보여주는데 아래 날짜 상세는
+  // 9월 데이터를 보여주는 불일치가 있었다(코드 리뷰 지적). 날짜의 월(date.slice(0, 7) —
+  // buildDayCells의 inTargetMonth 판정과 같은 방식)이 지금 보는 달과 다르면 같이 옮겨준다.
+  function goToDate(date: string) {
+    setSelectedDate(date);
+    const month = date.slice(0, 7);
+    if (month !== viewedMonth) setViewedMonth(month);
+  }
   const selectedWeek = selected
     ? displayedMonthly?.weeks.find((w) => w.weekStartDate === selected.weekStartDate)
     : undefined;
@@ -196,116 +234,180 @@ export function BanchanRecommendationCalendar({
       recommendation.targetCarbsG != null);
 
   return (
-    <div className="flex flex-col gap-3">
+    // 날짜 칸(터치 대상, aspect-square)은 그대로 두고, 안 누르는 요소들(헤더/요일 줄/여백)만
+    // 줄여서 전체 세로 길이를 줄인다 — 어르신 UX 원칙상 실제로 누르는 영역은 절대 안 줄인다
+    // (2026-08-14 피드백, ATM 벤치마킹 방침). 컨테이너 gap 3→2, 요일 줄과 날짜 그리드 사이
+    // 여백도 같이 좁힌다.
+    <div className="flex flex-col gap-2">
       {polling && isViewingCurrentMonth && (
         <p className="text-xs text-muted-foreground">
           반찬을 고르고 있어요. 완료되는 대로 달력에 자동으로 표시돼요...
         </p>
       )}
 
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          aria-label="이전 달"
-          onClick={() => setViewedMonth((m) => addMonthsToMonthString(m, -1))}
-          className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-        <span className="text-sm font-bold text-foreground">{formatMonthLabel(viewedMonth)}</span>
-        <button
-          type="button"
-          aria-label="다음 달"
-          onClick={() => setViewedMonth((m) => addMonthsToMonthString(m, 1))}
-          className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
+      {/* 날짜 칸은 못 줄이니, 평소엔 이 버튼 하나로 접어두고 필요할 때만 달력 전체를
+          펼친다 — 라벨에 "월 배송"을 그대로 남겨서 접혀있어도 이게 월 단위 배송이라는
+          맥락은 계속 보인다. */}
+      <ExpandToggle
+        expanded={calendarExpanded}
+        onToggle={() => setCalendarExpanded((v) => !v)}
+        label={`${formatMonthLabel(viewedMonth)} 월 배송 달력`}
+        expandLabel="달력 보기"
+      />
 
-      {!isViewingCurrentMonth && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="w-fit self-center text-xs text-muted-foreground"
-          onClick={() => setViewedMonth(monthly.month)}
-        >
-          이번 달로 돌아가기
-        </Button>
-      )}
-
-      {monthLoading ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">불러오는 중...</p>
-      ) : !displayedMonthly || displayedMonthly.weeks.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">
-          {formatMonthLabel(viewedMonth)}은 아직 요청한 추천이 없어요.
-        </p>
-      ) : (
+      {calendarExpanded && (
         <>
-          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-muted-foreground">
-            {WEEKDAY_LABELS.map((label) => (
-              <span key={label}>{label}</span>
-            ))}
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              aria-label="이전 달"
+              onClick={() => setViewedMonth((m) => addMonthsToMonthString(m, -1))}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="text-sm font-bold text-foreground">{formatMonthLabel(viewedMonth)}</span>
+            <button
+              type="button"
+              aria-label="다음 달"
+              onClick={() => setViewedMonth((m) => addMonthsToMonthString(m, 1))}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
           </div>
 
-          <div className="flex flex-col gap-1">
-            {weeks.map((week) => (
-              <div key={week[0]?.weekStartDate} className="grid grid-cols-7 gap-1">
-                {week.map((day) => {
-                  // 오늘까지(포함)는 이미 확정된 배송이라, 이번 달을 보는 중일 때만 옅게
-                  // 죽이고 점도 안 보여준다 — 구독은 다음날 배송부터 반영되므로 "실제 활성
-                  // 식단"은 내일부터라는 게 한눈에 보이게 한다(2026-08-13 피드백). 지난달을
-                  // 직접 넘겨서 보는 중이면(isViewingCurrentMonth=false) 그 달은 원래 전체가
-                  // 과거라 이 처리를 안 하고 평소처럼 다 보여준다.
-                  const isPast = isViewingCurrentMonth && day.date <= todayDateString();
-                  const dot = !isPast && day.generationStatus === "done" ? worstSuitability(day.items) : null;
-                  const isSelected = day.date === selectedDate;
-                  return (
-                    <button
-                      key={day.date}
-                      type="button"
-                      onClick={() => setSelectedDate(day.date)}
-                      className={`flex aspect-square flex-col items-center justify-center gap-1 rounded-lg border text-xs transition-colors ${
-                        isSelected
-                          ? "border-primary bg-primary/10 font-bold text-foreground"
-                          : "border-transparent hover:bg-muted/60"
-                      } ${!day.inTargetMonth || isPast ? "text-muted-foreground/40" : "text-foreground"}`}
-                    >
-                      <span>{day.dayOfMonth}</span>
-                      {dot && <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS[dot]}`} />}
-                      {!isPast && day.generationStatus === "generating" && (
-                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/50" />
-                      )}
-                      {!isPast && day.generationStatus === "failed" && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
-                      )}
-                    </button>
-                  );
-                })}
+          {!isViewingCurrentMonth && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-fit self-center text-xs text-muted-foreground"
+              onClick={() => setViewedMonth(monthly.month)}
+            >
+              이번 달로 돌아가기
+            </Button>
+          )}
+
+          {monthLoading ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">불러오는 중...</p>
+          ) : !displayedMonthly || displayedMonthly.weeks.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              {formatMonthLabel(viewedMonth)}은 아직 요청한 추천이 없어요.
+            </p>
+          ) : (
+            <>
+              <div className="grid grid-cols-7 gap-1 text-center text-[11px] leading-none font-semibold text-muted-foreground">
+                {WEEKDAY_LABELS.map((label) => (
+                  <span key={label}>{label}</span>
+                ))}
               </div>
-            ))}
-          </div>
 
-          <div className="flex items-center gap-3 px-1 text-[11px] text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS.recommended}`} />
-              추천
-            </span>
-            <span className="flex items-center gap-1">
-              <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS.caution}`} />
-              주의
-            </span>
-            <span className="flex items-center gap-1">
-              <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS.avoid}`} />
-              피하기
-            </span>
-          </div>
+              <div className="flex flex-col gap-1">
+                {weeks.map((week) => (
+                  <div key={week[0]?.weekStartDate} className="grid grid-cols-7 gap-1">
+                    {week.map((day) => {
+                      // 오늘까지(포함)는 이미 확정된 배송이라, 이번 달을 보는 중일 때만 옅게
+                      // 죽이고 점도 안 보여준다 — 구독은 다음날 배송부터 반영되므로 "실제 활성
+                      // 식단"은 내일부터라는 게 한눈에 보이게 한다(2026-08-13 피드백). 지난달을
+                      // 직접 넘겨서 보는 중이면(isViewingCurrentMonth=false) 그 달은 원래 전체가
+                      // 과거라 이 처리를 안 하고 평소처럼 다 보여준다.
+                      const isPast = isViewingCurrentMonth && day.date <= todayDateString();
+                      const dot = !isPast && day.generationStatus === "done" ? worstSuitability(day.items) : null;
+                      const isSelected = day.date === selectedDate;
+                      return (
+                        <button
+                          key={day.date}
+                          type="button"
+                          // 달력 그리드 마지막 줄엔 다음 달 초 며칠이(또는 첫 줄엔 지난달 말 며칠이)
+                          // 옅게 같이 보인다(buildDayCells) — 그 칸을 탭하면 selectedDate만 옮기고
+                          // viewedMonth는 그대로라 헤더/그리드는 여전히 원래 달을 보여주는데 아래
+                          // 날짜 상세는 다른 달 데이터를 보여주는 불일치가 생긴다. 전날/다음날
+                          // 버튼과 같은 이유로 goToDate를 쓴다.
+                          onClick={() => goToDate(day.date)}
+                          className={`flex aspect-square flex-col items-center justify-center gap-1 rounded-lg border text-xs transition-colors ${
+                            isSelected
+                              ? "border-primary bg-primary/10 font-bold"
+                              : "border-transparent hover:bg-muted/60"
+                          } ${
+                            // 선택된 칸(isSelected)의 글자색은 항상 text-foreground여야 한다 — 예전엔
+                            // 이 색 판정이 isSelected와 무관하게 따로 돌아서, 기본 선택일이 "오늘"로
+                            // 바뀐 뒤(pickDefaultDate) 선택된 오늘 칸에 isPast(오늘까지는 흐리게)
+                            // 조건까지 같이 걸려 text-foreground와 text-muted-foreground/40이 동시에
+                            // 붙었다. 컴파일된 CSS에서 text-muted-foreground/40이 나중에 정의돼
+                            // 이겨버려서, 선택된 칸인데도 숫자가 흐리게 보이는 문제가 있었다(코드
+                            // 리뷰 지적). 선택 상태를 항상 우선하도록 분기 순서를 바꿔서 고쳤다.
+                            isSelected
+                              ? "text-foreground"
+                              : !day.inTargetMonth || isPast
+                                ? "text-muted-foreground/40"
+                                : "text-foreground"
+                          }`}
+                        >
+                          <span>{day.dayOfMonth}</span>
+                          {dot && <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS[dot]}`} />}
+                          {!isPast && day.generationStatus === "generating" && (
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/50" />
+                          )}
+                          {!isPast && day.generationStatus === "failed" && (
+                            <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-3 px-1 text-[11px] text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS.recommended}`} />
+                  추천
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS.caution}`} />
+                  주의
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS.avoid}`} />
+                  피하기
+                </span>
+              </div>
+            </>
+          )}
         </>
       )}
 
       {selected && (
         <div className="flex flex-col gap-3 rounded-xl border border-border/60 p-3">
-          <span className="text-sm font-bold text-foreground">{formatDayLabel(selected.date)}</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="전날"
+              disabled={!canGoPrev}
+              onClick={() => prevDate && goToDate(prevDate)}
+              className={`flex h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg ${
+                canGoPrev ? "text-muted-foreground hover:bg-muted" : "text-muted-foreground/30"
+              }`}
+            >
+              <span className="text-[11px]">전날</span>
+              <span className="text-xs font-semibold">{prevDate && formatDayLabel(prevDate)}</span>
+            </button>
+            <span className="shrink-0 px-2 text-base font-bold text-foreground">
+              {formatDayLabel(selected.date)}
+            </span>
+            <button
+              type="button"
+              aria-label="다음날"
+              disabled={!canGoNext}
+              onClick={() => nextDate && goToDate(nextDate)}
+              className={`flex h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg ${
+                canGoNext ? "text-muted-foreground hover:bg-muted" : "text-muted-foreground/30"
+              }`}
+            >
+              <span className="text-[11px]">다음날</span>
+              <span className="text-xs font-semibold">{nextDate && formatDayLabel(nextDate)}</span>
+            </button>
+          </div>
 
           {selected.generationStatus === "not_started" && (
             <p className="text-xs text-muted-foreground">아직 생성을 요청하지 않았어요.</p>
@@ -347,25 +449,29 @@ export function BanchanRecommendationCalendar({
                 </div>
               )}
 
+              {/* 7080 사용자 UX는 은행 ATM처럼 화면 자체가 설명이 되어야 한다는 방침(2026-08-14
+                  피드백) — item.reason(반찬별 문장)을 여기서도 또 보여주면, 위 "왜 이 조합인가요"
+                  카드(today-menu.ts가 이 항목들의 reason을 그대로 모아 보여줌)와 같은 문장이
+                  한 화면에 두 번 나온다. 여기서는 반찬 하나를 식별하는 데 필요한 최소 정보
+                  (분류 · 100g당 영양성분)만 보여주고, "왜 이 조합인지"는 그 카드 하나에 맡긴다. */}
               <div className="flex flex-col gap-1.5">
                 {[...selected.items]
                   .sort((a, b) => a.slotIndex - b.slotIndex)
                   .map((item) => (
-                    <div key={item.banchanId} className="flex flex-col gap-1 rounded-lg bg-muted/60 p-2.5">
+                    <div key={item.banchanId} className="flex flex-col gap-1.5 rounded-lg bg-muted/60 p-3">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold text-foreground">{item.name}</span>
+                        <span className="text-lg font-bold text-foreground">{item.name}</span>
                         <Badge className={SUITABILITY_CLASS[item.suitability]}>
                           {SUITABILITY_LABEL[item.suitability]}
                         </Badge>
                       </div>
-                      <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-base text-foreground/80">
                         <span>{item.category}</span>
                         {item.caloriePer100g != null && <span>{item.caloriePer100g}kcal/100g</span>}
                         {item.proteinPer100g != null && <span>단백질 {item.proteinPer100g}g</span>}
                         {item.sodiumPer100g != null && <span>나트륨 {item.sodiumPer100g}mg</span>}
                         {item.carbsPer100g != null && <span>탄수 {item.carbsPer100g}g</span>}
                       </div>
-                      {item.reason && <p className="text-xs text-foreground/80">{item.reason}</p>}
                     </div>
                   ))}
               </div>

@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  Camera,
   ChevronRight,
-  Mic,
   Sparkles,
   Truck,
 } from "lucide-react";
-import { toast } from "sonner";
 
 import { Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
@@ -16,6 +15,7 @@ import { getRepresentativeDish } from "@/lib/dishes";
 import { NotificationItem, fetchElderNotifications, notificationBadgeClass } from "@/lib/notifications";
 import { SUITABILITY_CLASS, SUITABILITY_LABEL } from "@/lib/banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
+import { getCurrentMealSlot, mealLogStore, submitMealLogPhotos, wardMealLogs } from "@/lib/meal-log-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
@@ -24,16 +24,21 @@ import { DislikeToggleButton } from "@/components/app/dislike-toggle-button";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { getNutritionTip } from "@/lib/nutrition-tip";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
-import {
-  getCurrentMealSlot,
-  getTodayQuickMealCheck,
-  quickMealCheckStore,
-  setQuickMealCheck,
-  submitQuickMealCheck,
-} from "@/lib/meal-log-store";
 import { useLocalStore } from "@/lib/use-store";
-import { getSpeechRecognition, speak } from "@/lib/accessibility";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
+
+// diet-view.tsx에 있던 "식사 체크인 · 잔반 분석"을 홈 화면으로 옮기며 같이 옮긴 헬퍼 — 선택한
+// File을 <img>로 미리보기할 blob URL로 바꿔준다. object URL은 브라우저 메모리에 남는 리소스라
+// 파일이 바뀌거나 컴포넌트가 사라질 때 revoke까지 해줘야 한다.
+function useObjectUrl(file: File | null): string | null {
+  const url = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+  useEffect(() => {
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [url]);
+  return url;
+}
 
 export function HomeView({
   name,
@@ -45,23 +50,6 @@ export function HomeView({
   detail: WardDetail;
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
-  const mealCheck = getTodayQuickMealCheck(useLocalStore(quickMealCheckStore), ward.id);
-  const [listening, setListening] = useState(false);
-  // checkMeal이 연달아 두 번(완식→남김 등) 탭되면 두 submitQuickMealCheck 요청이 동시에
-  // 나가는데, 네트워크 지연으로 응답이 보낸 순서와 다르게 도착할 수 있어 최종적으로 백엔드에
-  // 저장되는 값이 마지막 탭과 반대가 될 위험이 있다(코드 리뷰 지적). 이 ref에 매번 이전
-  // 요청 뒤에 체이닝해서, 실제 네트워크 요청 자체가 탭한 순서대로만 나가게 직렬화한다.
-  const quickCheckQueueRef = useRef<Promise<void>>(Promise.resolve());
-  // 낙관적 화면 표시(setQuickMealCheck)는 위 큐와 무관하게 탭할 때마다 즉시 일어난다 —
-  // 그래서 큐로 요청 "발신" 순서는 맞춰도, 오래된 요청의 응답이 그 뒤 늦게 도착해서
-  // applied:false로 화면을 null로 되돌리면, 그사이 사용자가 이미 또 탭해서 최신 상태를
-  // 표시해둔 화면을 옛 응답이 덮어써버리는 문제가 남아있었다(코드 리뷰 재발견 — "applied:
-  // false 처리는 store를 지우는데 성공 케이스는 다시 채워주지 않아서, 연타 시 실제로는
-  // 저장된 마지막 탭 상태가 화면엔 영구히 '미체크'로 잘못 남을 수 있음"). 각 탭마다
-  // 번호를 매겨서, 응답이 왔을 때 그 사이 더 최근 탭이 없었을 때만(자신이 여전히 최신
-  // 탭일 때만) 화면을 건드리게 한다 — 오래된 응답은 이미 최신 탭의 낙관적 표시로 대체된
-  // 화면을 그대로 두고 조용히 넘어간다.
-  const latestCheckIdRef = useRef(0);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   // diet-view.tsx와 같은 이유로 신규 회원(AI 반찬 추천을 한 번도 받은 적 없음)인지 본다 —
   // 여기 있는 카드들도 대부분 오늘의 추천 반찬 조합(목업)에서 파생된 값이라, 아직 실제 추천을
@@ -112,9 +100,6 @@ export function HomeView({
         .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
         .join(", ")}입니다.`;
   const deliverySpeech = `오늘 점심 배송이 ${detail.deliveryEta}에 예정되어 있어요.`;
-  const mealCheckSpeech = mealCheck
-    ? `식사하셨으면 다 먹었어요 또는 남겼어요를 눌러 알려주세요. 오늘은 ${mealCheck}으로 체크하셨어요.`
-    : "식사하셨으면 다 먹었어요 또는 남겼어요를 눌러 알려주세요. 말로 알려주셔도 돼요.";
   // 영양 팁 문장이 카드 폭에 거의 딱 맞게 들어가 있어서, SpeakableCard의 기본(우상단 오버레이)
   // 아이콘이 문장 끝과 겹친다. 이 카드는 원래도 맨 앞에 이모지(💬)가 있으니, 그 자리를 스피커
   // 아이콘으로 "교체"하는 variant="leading"을 쓴다 — 카드 높이/줄바꿈에 영향 없음.
@@ -130,81 +115,53 @@ export function HomeView({
             .join(". ")}`
         : "안내 사항이에요. 아직 새로운 안내 사항이 없어요.";
 
-  function checkMeal(status: "완식" | "남김") {
-    // 로컬에 즉시 반영 — 네트워크 왕복을 기다리지 않고 버튼을 누른 순간 "오늘 체크: 완식"
-    // 표시/TTS가 바로 나온다(낙관적 업데이트).
-    setQuickMealCheck(ward.id, status);
-    const message = status === "완식" ? "잘 하셨어요! 다음 식사도 챙겨드릴게요." : "알겠어요, 남긴 반찬은 다음 식단에 참고할게요.";
-    toast.success(message);
-    speak(message);
+  // "식사하셨으면 알려주세요"(완식/남김 버튼, 목업 상태 기반)는 뺐다 — 어차피 식전/식후
+  // 사진으로 실제 잔반을 확인할 수 있는데 자가 신고 버튼까지 같이 두면 중복이다(2026-08-14
+  // 피드백). 그 자리에 diet-view.tsx에 있던 진짜 사진 기반 잔반 분석을 그대로 옮겨왔다 —
+  // 어르신이 식단을 확인하는 홈 화면에서 바로 사진을 찍게 하는 게, 식단 상세 화면까지
+  // 들어가야 하는 것보다 동선이 짧다.
+  const [beforePhoto, setBeforePhoto] = useState<File | null>(null);
+  const [afterPhoto, setAfterPhoto] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const beforePreview = useObjectUrl(beforePhoto);
+  const afterPreview = useObjectUrl(afterPhoto);
+  const mealLogs = wardMealLogs(useLocalStore(mealLogStore), ward.id);
+  const latestLog = mealLogs[mealLogs.length - 1];
+  const mealCheckinSpeech = latestLog
+    ? `식사 전에 한 장, 식사 후에 한 장, 잊지 말고 찍어주세요. 최근 분석 결과, 전체 잔반율은 ${latestLog.leftoverRatePercent}%입니다.`
+    : "식사 전에 한 장, 식사 후에 한 장, 잊지 말고 찍어주세요.";
 
-    // 탭한 "지금" 시각 기준 끼니를 여기서 미리 확정한다 — 아래 큐 콜백 안에서
-    // getCurrentMealSlot()을 부르면, 이전 요청이 밀려서 콜백이 실제로 실행되는 시점이
-    // 늦어질 때(예: 16:59에 탭했는데 콜백은 17:01에 실행) 탭한 끼니가 아니라 콜백 실행
-    // 시점의 끼니로 잘못 저장된다(코드 리뷰 지적).
-    const mealSlot = getCurrentMealSlot();
-
-    // 이 탭에 번호를 매긴다 — 이 응답이 나중에 도착했을 때, 그 사이 더 최근 탭이 없었을
-    // 때만(자신이 여전히 최신 탭일 때만) 아래에서 화면을 건드리게 하기 위함.
-    const checkId = ++latestCheckIdRef.current;
-
-    // 실제 저장은 백그라운드로 — 아직 실제 백엔드에 연결 안 된 대상자(데모/자가등록 전
-    // 등)나 네트워크 문제로 실패해도 위 로컬 반영/음성 안내는 이미 끝났으니 어르신 경험은
-    // 끊기지 않는다. 이전 요청 뒤에 체이닝해서(quickCheckQueueRef) 연달아 탭해도 네트워크
-    // 요청이 탭한 순서대로만 나가게 한다.
-    quickCheckQueueRef.current = quickCheckQueueRef.current.then(() =>
-      submitQuickMealCheck({
+  async function analyzeLeftovers() {
+    if (!beforePhoto || !afterPhoto) return;
+    setSubmitting(true);
+    setUploadError(null);
+    try {
+      await submitMealLogPhotos({
         wardId: ward.id,
         wardName: ward.name,
         wardAge: ward.age,
         wardAddress: ward.address,
-        mealSlot,
-        status,
-      })
-        .then((result) => {
-          // 이 응답을 기다리는 동안 사용자가 또 탭했으면(latestCheckIdRef.current가
-          // 이 checkId보다 커짐) 화면은 이미 그 최신 탭의 낙관적 표시로 넘어가 있다 —
-          // 이 오래된 응답으로 그걸 덮어쓰면 안 된다(코드 리뷰 재발견: applied:false
-          // 처리는 store를 null로 지우는데 성공 케이스는 다시 채워주지 않아서, 느린
-          // 첫 요청의 실패 응답이 나중에 온 두 번째 탭의 성공 상태를 지워버리고 그대로
-          // 방치되는 문제가 있었다).
-          if (latestCheckIdRef.current !== checkId) return;
-          if (!result.applied) {
-            // 이미 사진 기반 실제 기록이 있는 끼니라 이번 원탭이 반영 안 됐다
-            // (grandfood_backend 145ee63) — 방금 낙관적으로 바꿔둔 로컬 표시를 그대로 두면
-            // 실제로는 반영 안 된 상태가 화면에 계속 남으므로 되돌린다.
-            setQuickMealCheck(ward.id, null);
-            toast.info("이미 사진으로 기록된 끼니라 이번 체크는 반영되지 않았어요.");
-          }
-        })
-        .catch(() => {
-          // 조용히 무시 — submitMealLogPhotos와 달리 이 버튼은 실패해도 사용자에게 막힌 느낌을
-          // 주면 안 되는 가벼운 원탭이다. 큐는 이 catch로 여기서 끝나서 다음 탭까지 끊기지 않는다.
-        })
-    );
-  }
-
-  function listenForMealStatus() {
-    const Recognition = getSpeechRecognition();
-    if (!Recognition) {
-      toast.error("이 브라우저에서는 음성 명령을 지원하지 않아요. 버튼을 눌러주세요.");
-      return;
+        mealSlot: getCurrentMealSlot(),
+        comboId: detail.recommendedCombo.comboId,
+        beforePhoto,
+        afterPhoto,
+      });
+      setBeforePhoto(null);
+      setAfterPhoto(null);
+    } catch (err) {
+      // fetch() 자체가 실패하면(서버 연결 불가 등) 브라우저가 TypeError("Failed to fetch")를 던지는데,
+      // 그 영어 메시지를 그대로 보여주는 대신 사용자에게 이해되는 한글 메시지로 바꾼다.
+      setUploadError(
+        err instanceof TypeError
+          ? "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요."
+          : err instanceof Error
+            ? err.message
+            : "잔반 분석 요청에 실패했어요."
+      );
+    } finally {
+      setSubmitting(false);
     }
-    const recognition = new Recognition();
-    recognition.lang = "ko-KR";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    setListening(true);
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      if (transcript.includes("남")) checkMeal("남김");
-      else checkMeal("완식");
-    };
-    recognition.onerror = () => {
-      toast.error("음성을 잘 듣지 못했어요. 다시 시도해 주세요.");
-    };
-    recognition.onend = () => setListening(false);
-    recognition.start();
   }
 
   // isNewMember가 아직 null(최초 조회 중)이면 판단이 서기 전까지는 기존 홈 화면도, 신규
@@ -294,7 +251,7 @@ export function HomeView({
 
         <SpeakableCard
           id="home-today-meal"
-          text={`${recommendedComboSpeech} ${mealCheckSpeech}`}
+          text={`${recommendedComboSpeech} ${mealCheckinSpeech}`}
           className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
           <div className="flex items-center gap-3">
@@ -344,48 +301,78 @@ export function HomeView({
           </div>
 
           <div className="flex flex-col gap-2.5 border-t border-border pt-4">
-            <span className="text-xs font-semibold text-muted-foreground">
-              식사하셨으면 알려주세요
-            </span>
+            <p className="text-lg font-extrabold leading-snug text-foreground">
+              식사 전에 한 장, 식사 후에 한 장,
+              <br />
+              잊지 말고 찍어주세요!
+            </p>
+            {/* 이 카드 전체가 SpeakableCard의 탭 영역이라, 사진 업로드 라벨을 누른 클릭이
+                그대로 버블링되면 파일 선택과 동시에 음성 읽기가 토글된다 — stopPropagation으로
+                막는다(analyzeLeftovers 버튼도 동일, diet-view.tsx에 있던 것과 동일한 이유). */}
             <div className="flex gap-2">
-              <Button
-                size="lg"
-                className="h-14 flex-1 text-base"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  checkMeal("완식");
-                }}
+              <label
+                className="flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-border bg-muted/40 p-3 text-center"
+                onClick={(e) => e.stopPropagation()}
               >
-                다 먹었어요
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="h-14 flex-1 text-base"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  checkMeal("남김");
-                }}
+                {beforePreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- 로컬 blob URL 미리보기라 next/image 최적화 대상이 아님
+                  <img src={beforePreview} alt="식전 사진 미리보기" className="h-16 w-16 rounded object-cover" />
+                ) : (
+                  <Camera className="h-5 w-5 text-muted-foreground" />
+                )}
+                <span className="text-xs text-muted-foreground">식전 사진</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => setBeforePhoto(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              <label
+                className="flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-lg border border-dashed border-border bg-muted/40 p-3 text-center"
+                onClick={(e) => e.stopPropagation()}
               >
-                남겼어요
-              </Button>
+                {afterPreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- 로컬 blob URL 미리보기라 next/image 최적화 대상이 아님
+                  <img src={afterPreview} alt="식후 사진 미리보기" className="h-16 w-16 rounded object-cover" />
+                ) : (
+                  <Camera className="h-5 w-5 text-muted-foreground" />
+                )}
+                <span className="text-xs text-muted-foreground">식후 사진</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => setAfterPhoto(e.target.files?.[0] ?? null)}
+                />
+              </label>
             </div>
             <Button
-              variant="ghost"
-              className="w-fit self-center text-muted-foreground"
+              size="lg"
+              className="h-14 w-full text-base"
+              disabled={!beforePhoto || !afterPhoto || submitting}
               onClick={(e) => {
                 e.stopPropagation();
-                listenForMealStatus();
+                analyzeLeftovers();
               }}
-              disabled={listening}
             >
-              <Mic className={listening ? "animate-pulse text-destructive" : ""} />
-              {listening ? "듣고 있어요..." : "말로 알려주기"}
+              {submitting ? "분석 요청 중..." : "잔반 분석하기"}
             </Button>
-            {mealCheck && (
-              <p className="text-center text-xs text-muted-foreground">
-                오늘 체크: <span className="font-semibold text-foreground">{mealCheck}</span>
-              </p>
+            {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
+            {latestLog && (
+              <div className="flex flex-col gap-1 pt-1">
+                <span className="text-xs font-semibold text-muted-foreground">
+                  최근 분석 결과 · 전체 잔반율 {latestLog.leftoverRatePercent}%
+                </span>
+                {latestLog.compartments.map((c) => (
+                  <div key={c.dishId} className="flex justify-between text-sm">
+                    <span className="text-foreground">{c.name}</span>
+                    <span className="text-muted-foreground">{c.leftoverPercent}% 남음</span>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </SpeakableCard>
