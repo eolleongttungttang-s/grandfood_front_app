@@ -142,7 +142,16 @@ export const careProfileStore = createLocalStore<Record<string, CareProfileView>
 );
 
 export function getCareProfile(wardId: string): CareProfileView | undefined {
-  return careProfileStore.read()[wardId];
+  const stored = careProfileStore.read()[wardId];
+  if (!stored) return undefined;
+  // 이 필드들(medications/customMedications 등)이 생기기 전에 저장된 옛 데이터엔 이 키
+  // 자체가 없을 수 있다 — care-survey-view.tsx의 폼 초기화(useState)에만 이 EMPTY 병합
+  // 보정이 있고, 다른 소비자(wards.ts의 getWardDetail 등)는 여기 getCareProfile()을 직접
+  // 불러 undefined를 그대로 돌려받았다. getWardDetail의 `[...careProfile.medications,
+  // ...careProfile.customMedications]`가 undefined를 스프레드하려다 실제로 크래시
+  // 났다(코드 리뷰 지적) — 이 공유 접근자 한 곳에서 병합해두면 모든 소비자가 안전해지고,
+  // 앞으로 필드가 또 추가돼도 이 함수만 챙기면 된다.
+  return { ...EMPTY_CARE_PROFILE_COMMAND, ...stored };
 }
 
 // TODO(backend): POST /wards/:id/care-profile — 최초 설문(생활·돌봄 정보) 등록.

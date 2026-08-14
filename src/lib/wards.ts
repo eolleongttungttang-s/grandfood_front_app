@@ -166,10 +166,21 @@ export function getWardDetail(ward: Ward): WardDetail {
       // 목록에서 고른 약(medications)과 기타로 직접 적은 약(customMedications) 둘 다 이름+
       // 복용시간을 따로 들고 있어서(2026-08-14 피드백 — 기타 약이 여러 개면 각자 언제
       // 먹는지 구분돼야 함), 하나로 합쳐서 약마다 한 줄씩 보여준다.
-      const answeredMeds = [...careProfile!.medications, ...careProfile!.customMedications];
-      for (const med of answeredMeds) {
+      //
+      // 이름이 빈 채로 남을 수 있다("기타 약 추가"만 누르고 이름을 안 적은 경우) — care-
+      // survey-view.tsx의 설문 개요 화면은 이런 항목을 .filter(Boolean)으로 걸러내는데
+      // 여기서도 안 걸러내면, 아래 소비자들(ward-detail-view.tsx/diet-view.tsx)이
+      // key={m.name}으로 렌더링하다 빈 이름이 여러 개면 key 충돌까지 난다(코드 리뷰
+      // 지적). trim 후 빈 이름은 건너뛰고, 같은 이름이 두 번 들어오는 경우(예: 목록에서
+      // "혈압약"도 고르고 기타에도 "혈압약"이라고 또 적은 경우)도 같은 이유로 처음
+      // 것만 남긴다.
+      const seenNames = new Set<string>();
+      for (const med of [...careProfile!.medications, ...careProfile!.customMedications]) {
+        const name = med.name.trim();
+        if (!name || seenNames.has(name)) continue;
+        seenNames.add(name);
         medications.push({
-          name: med.name,
+          name,
           schedule: med.timings.length > 0 ? med.timings.join(" · ") : "복용 시간 미입력",
         });
       }
