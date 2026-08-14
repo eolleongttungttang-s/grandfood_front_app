@@ -18,7 +18,13 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { BrandHeader } from "@/components/app/brand-header";
 import { useSession } from "@/lib/session";
-import { UserRole, ensureLocalGuardianAccount, ensureLocalUserAccount, linkWardToGuardian } from "@/lib/auth";
+import {
+  UserRole,
+  ensureLocalGuardianAccount,
+  ensureLocalUserAccount,
+  findAccountByLoginId,
+  linkWardToGuardian,
+} from "@/lib/auth";
 import {
   backendWardIdMapStore,
   fetchGuardianProfile,
@@ -27,7 +33,7 @@ import {
   loginGuardianBackend,
   loginUserBackend,
 } from "@/lib/backend-auth";
-import { addWard, calculateAge, createSelfWard, newWardDefaults } from "@/lib/wards";
+import { addWard, calculateAge, createSelfWard, getWard, newWardDefaults } from "@/lib/wards";
 import { PARTNER_STORES } from "@/lib/partner-stores";
 
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
@@ -128,8 +134,8 @@ export default function LoginPage() {
 
       // 이용자(어르신) 탭도 보호자와 같은 이유로 크로스디바이스 폴백이 필요하다 — 이 기기엔
       // 로컬 계정이 없어도(QR 초대로 다른 기기에서 등록됐거나 저장소가 지워짐) 실제 백엔드
-      // DB엔 있을 수 있다. 로그인 응답이 이름만 주고 생년월일/주소를 안 줘서 실제 정보로
-      // 채운 Ward는 못 만들지만, home-view.tsx가 이미 쓰는 gender/담당매장 placeholder와
+      // DB엔 있을 수 있다. 로그인 응답이 이름만 주고 생년월일/주소/성별을 안 줘서 실제
+      // 정보로 채운 Ward는 못 만들지만, home-view.tsx가 이미 쓰는 담당매장 placeholder와
       // 같은 방침으로 임시값을 채운 Ward를 만든다 — 로그인 자체가 항상 실패하는 것보다
       // 낫고, 어르신이 나중에 생활 정보 설문을 다시 채우거나 보호자가 상세 화면에서 고치면
       // 실제 값으로 덮인다.
@@ -137,22 +143,41 @@ export default function LoginPage() {
         const backendResult = await loginUserBackend(trimmedId, password);
         if ("session" in backendResult) {
           backendSessionEstablished = true;
-          const newWardId = crypto.randomUUID();
-          const placeholderBirthYear = new Date().getFullYear() - 75;
-          addWard(
-            createSelfWard({
-              id: newWardId,
-              name: backendResult.session.name,
-              birthDate: `${placeholderBirthYear}-01-01`,
-              gender: "여",
-              address: "",
-            })
-          );
+          // 이 로그인 아이디로 로컬 계정이 이미 있는데(예: 다른 기기에서 비번을 바꿔서 이
+          // 기기의 로컬 캐시 비번만 안 맞는 경우) 여기서 무조건 새 Ward를 만들면, 그 계정은
+          // 어차피 기존 selfWardId를 그대로 쓰므로(ensureLocalUserAccount는 password만
+          // 갱신하고 selfWardId는 안 건드림) 방금 만든 Ward는 아무도 안 쓰는 채로 WARDS에
+          // 남는다 — 이 경로를 탈 때마다 안 쓰이는 Ward 레코드가 계속 쌓이는 문제가 있었다
+          // (코드 리뷰 지적). 기존 계정 + 기존 Ward가 있으면 그걸 그대로 재사용하고, 정말
+          // 처음 보는 로그인 아이디일 때만(진짜 새 기기) 새 placeholder Ward를 만든다 —
+          // 부수적으로 기존 Ward는 실제 정보(성별 포함)를 갖고 있을 수 있어 추측할 필요도
+          // 없어진다.
+          const existingAccount = findAccountByLoginId(trimmedId);
+          const existingWard = existingAccount?.selfWardId ? getWard(existingAccount.selfWardId) : undefined;
+          const selfWardId = existingWard?.id ?? crypto.randomUUID();
+          if (!existingWard) {
+            // 성별(gender)은 다른 임시값(생년월일/주소)과 달리 나중에 고칠 수 있는 화면이
+            // 앱에 없다(마이페이지/보호자 상세 둘 다 읽기 전용 표시뿐) — 이 추측이 틀리면
+            // (남성 어르신이면) 계속 "여"로 잘못 표시된 채 남는다는 걸 알고 있는 한계다
+            // (코드 리뷰 지적). Ward.gender가 "여"|"남" 중 하나를 반드시 요구해서 "미정"
+            // 값을 넣을 수도 없다 — 완전히 고치려면 성별을 수정할 수 있는 화면을 새로
+            // 만드는 별도 작업이 필요하다.
+            const placeholderBirthYear = new Date().getFullYear() - 75;
+            addWard(
+              createSelfWard({
+                id: selfWardId,
+                name: backendResult.session.name,
+                birthDate: `${placeholderBirthYear}-01-01`,
+                gender: "여",
+                address: "",
+              })
+            );
+          }
           ensureLocalUserAccount({
             loginId: trimmedId,
             password,
             name: backendResult.session.name,
-            selfWardId: newWardId,
+            selfWardId,
           });
           account = login(trimmedId, password);
         }

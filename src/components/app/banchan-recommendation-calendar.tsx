@@ -13,10 +13,11 @@
 // 두 가지 색으로 표현되어 오히려 헷갈린다.
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ExpandToggle } from "@/components/app/expand-toggle";
 import {
   addDaysToDateString,
   addMonthsToMonthString,
@@ -187,7 +188,14 @@ export function BanchanRecommendationCalendar({
   const [prevDays, setPrevDays] = useState(days);
   if (days !== prevDays) {
     setPrevDays(days);
-    if (!(selectedDate && days.some((d) => d.date === selectedDate))) {
+    // monthLoading(다른 달로 넘어갔는데 아직 그 달 데이터를 못 받아온 상태)인 동안은 days가
+    // 일시적으로 []다 — goToDate(전날/다음날 버튼, 그리드의 다른 달 패딩 칸)가 selectedDate와
+    // viewedMonth를 같이 옮기면, 바로 이 렌더에서 days(=[])엔 방금 옮긴 날짜가 당연히 없으니
+    // "무효한 선택"으로 오판해서 null로 초기화해버리고, 그 달 데이터가 실제로 도착했을 때도
+    // 이미 null이 된 뒤라 사용자가 정말 가려던 날짜로 못 돌아간다(코드 리뷰 지적). 로딩 중엔
+    // 판단을 미루고, 그 달 데이터가 실제로 도착한 뒤에만(monthLoading이 꺼진 뒤) 지금 선택이
+    // 그 데이터 안에 있는지 판단한다.
+    if (!monthLoading && !(selectedDate && days.some((d) => d.date === selectedDate))) {
       setSelectedDate(pickDefaultDate(days));
     }
   }
@@ -204,6 +212,16 @@ export function BanchanRecommendationCalendar({
   const nextDate = selected ? addDaysToDateString(selected.date, 1) : null;
   const canGoPrev = prevDate != null && days.some((d) => d.date === prevDate);
   const canGoNext = nextDate != null && days.some((d) => d.date === nextDate);
+
+  // 전날/다음날 버튼이 월 경계를 넘으면(예: 8월 31일 → 9월 1일) selectedDate만 옮기고
+  // viewedMonth는 그대로 둬서, 헤더/달력 그리드는 계속 "8월"을 보여주는데 아래 날짜 상세는
+  // 9월 데이터를 보여주는 불일치가 있었다(코드 리뷰 지적). 날짜의 월(date.slice(0, 7) —
+  // buildDayCells의 inTargetMonth 판정과 같은 방식)이 지금 보는 달과 다르면 같이 옮겨준다.
+  function goToDate(date: string) {
+    setSelectedDate(date);
+    const month = date.slice(0, 7);
+    if (month !== viewedMonth) setViewedMonth(month);
+  }
   const selectedWeek = selected
     ? displayedMonthly?.weeks.find((w) => w.weekStartDate === selected.weekStartDate)
     : undefined;
@@ -230,17 +248,12 @@ export function BanchanRecommendationCalendar({
       {/* 날짜 칸은 못 줄이니, 평소엔 이 버튼 하나로 접어두고 필요할 때만 달력 전체를
           펼친다 — 라벨에 "월 배송"을 그대로 남겨서 접혀있어도 이게 월 단위 배송이라는
           맥락은 계속 보인다. */}
-      <button
-        type="button"
-        onClick={() => setCalendarExpanded((v) => !v)}
-        className="flex h-11 w-full items-center justify-between rounded-lg bg-muted px-3 text-sm font-semibold text-foreground"
-      >
-        <span>{formatMonthLabel(viewedMonth)} 월 배송 달력</span>
-        <span className="flex items-center gap-1 text-muted-foreground">
-          {calendarExpanded ? "접기" : "달력 보기"}
-          {calendarExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </span>
-      </button>
+      <ExpandToggle
+        expanded={calendarExpanded}
+        onToggle={() => setCalendarExpanded((v) => !v)}
+        label={`${formatMonthLabel(viewedMonth)} 월 배송 달력`}
+        expandLabel="달력 보기"
+      />
 
       {calendarExpanded && (
         <>
@@ -305,12 +318,30 @@ export function BanchanRecommendationCalendar({
                         <button
                           key={day.date}
                           type="button"
-                          onClick={() => setSelectedDate(day.date)}
+                          // 달력 그리드 마지막 줄엔 다음 달 초 며칠이(또는 첫 줄엔 지난달 말 며칠이)
+                          // 옅게 같이 보인다(buildDayCells) — 그 칸을 탭하면 selectedDate만 옮기고
+                          // viewedMonth는 그대로라 헤더/그리드는 여전히 원래 달을 보여주는데 아래
+                          // 날짜 상세는 다른 달 데이터를 보여주는 불일치가 생긴다. 전날/다음날
+                          // 버튼과 같은 이유로 goToDate를 쓴다.
+                          onClick={() => goToDate(day.date)}
                           className={`flex aspect-square flex-col items-center justify-center gap-1 rounded-lg border text-xs transition-colors ${
                             isSelected
-                              ? "border-primary bg-primary/10 font-bold text-foreground"
+                              ? "border-primary bg-primary/10 font-bold"
                               : "border-transparent hover:bg-muted/60"
-                          } ${!day.inTargetMonth || isPast ? "text-muted-foreground/40" : "text-foreground"}`}
+                          } ${
+                            // 선택된 칸(isSelected)의 글자색은 항상 text-foreground여야 한다 — 예전엔
+                            // 이 색 판정이 isSelected와 무관하게 따로 돌아서, 기본 선택일이 "오늘"로
+                            // 바뀐 뒤(pickDefaultDate) 선택된 오늘 칸에 isPast(오늘까지는 흐리게)
+                            // 조건까지 같이 걸려 text-foreground와 text-muted-foreground/40이 동시에
+                            // 붙었다. 컴파일된 CSS에서 text-muted-foreground/40이 나중에 정의돼
+                            // 이겨버려서, 선택된 칸인데도 숫자가 흐리게 보이는 문제가 있었다(코드
+                            // 리뷰 지적). 선택 상태를 항상 우선하도록 분기 순서를 바꿔서 고쳤다.
+                            isSelected
+                              ? "text-foreground"
+                              : !day.inTargetMonth || isPast
+                                ? "text-muted-foreground/40"
+                                : "text-foreground"
+                          }`}
                         >
                           <span>{day.dayOfMonth}</span>
                           {dot && <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS[dot]}`} />}
@@ -353,7 +384,7 @@ export function BanchanRecommendationCalendar({
               type="button"
               aria-label="전날"
               disabled={!canGoPrev}
-              onClick={() => prevDate && setSelectedDate(prevDate)}
+              onClick={() => prevDate && goToDate(prevDate)}
               className={`flex h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg ${
                 canGoPrev ? "text-muted-foreground hover:bg-muted" : "text-muted-foreground/30"
               }`}
@@ -368,7 +399,7 @@ export function BanchanRecommendationCalendar({
               type="button"
               aria-label="다음날"
               disabled={!canGoNext}
-              onClick={() => nextDate && setSelectedDate(nextDate)}
+              onClick={() => nextDate && goToDate(nextDate)}
               className={`flex h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg ${
                 canGoNext ? "text-muted-foreground hover:bg-muted" : "text-muted-foreground/30"
               }`}
