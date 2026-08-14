@@ -159,6 +159,11 @@ export function deriveMealTones(items: DietHistoryEntry[], days: number): MealTo
     return String(n).padStart(2, "0");
   }
 
+  // new Date()는 기기/브라우저 로컬 시간 기준이다 — ward-meal-dashboard.ts(보호자 화면)가
+  // 항상 KST로 고정하는 것과 의도적으로 다르다: 이 함수는 어르신 본인 화면(records-view.tsx)
+  // 전용이라 어르신이 한국에 물리적으로 있다고 가정할 수 있는 반면, 보호자는 해외 출장 등
+  // 비-KST 타임존에서 접속할 수 있어 그 화면만 따로 고정해뒀다(코드 리뷰 지적 — 파일마다
+  // 기준이 다르게 "보이지만" 실은 각자 맞는 가정을 쓴 것).
   const tones: MealTone[] = [];
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date();
@@ -298,47 +303,10 @@ export async function fetchElderNutritionSummary(identity: WardIdentity): Promis
   return data ? parseHealthReport(data) : null;
 }
 
-export type MealStatusItemSummary = {
-  mealType: string;
-  /** 식후 사진까지 올라온 정밀 기록 — 기존 의미 그대로. */
-  completed: boolean;
-  /** 정밀 기록이든 원탭 자가 보고든, 이 끼니에 뭐라도 기록이 남았으면 true. */
-  recorded: boolean;
-  /** 원탭 자가 보고 상태 — 정밀 기록이 있으면(completed) 항상 null(원탭 개념이 없음). */
-  quickCheckStatus: "완식" | "남김" | null;
-};
+export type MealStatusSummary = { completedCount: number; totalExpected: number };
 
-export type MealStatusSummary = {
-  completedCount: number;
-  totalExpected: number;
-  /** 오늘 세 끼니 중 하나라도 recorded면 true(grandfood_backend 145ee63) — "오늘 응답
-   *  했는지" 하루 단위 판정. 세 끼 전부를 요구하지 않는다. */
-  responded: boolean;
-  items: MealStatusItemSummary[];
-};
-
-function parseMealStatus(data: {
-  completed_count: number;
-  total_expected: number;
-  responded: boolean;
-  items: {
-    meal_type: string;
-    completed: boolean;
-    recorded: boolean;
-    quick_check_status: string | null;
-  }[];
-}): MealStatusSummary {
-  return {
-    completedCount: data.completed_count,
-    totalExpected: data.total_expected,
-    responded: data.responded,
-    items: data.items.map((i) => ({
-      mealType: i.meal_type,
-      completed: i.completed,
-      recorded: i.recorded,
-      quickCheckStatus: i.quick_check_status === "완식" || i.quick_check_status === "남김" ? i.quick_check_status : null,
-    })),
-  };
+function parseMealStatus(data: { completed_count: number; total_expected: number }): MealStatusSummary {
+  return { completedCount: data.completed_count, totalExpected: data.total_expected };
 }
 
 export async function fetchGuardianMealStatus(identity: WardIdentity): Promise<MealStatusSummary | null> {

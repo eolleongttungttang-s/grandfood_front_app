@@ -35,6 +35,11 @@ export const quickMealCheckStore = createLocalStore<Record<string, QuickMealChec
   {}
 );
 
+// todayDateString()은 기기/브라우저 로컬 시간 기준이다 — ward-meal-dashboard.ts(보호자 화면)가
+// 항상 KST로 고정하는 것과 의도적으로 다르다: 이 스토어는 어르신 본인 기기에서만 쓰이고
+// (위 grep: home-view.tsx 한 곳뿐), 어르신은 한국에 물리적으로 있다고 가정할 수 있는 반면
+// 보호자는 해외 출장 등 비-KST 타임존에서 접속할 수 있어 그 화면만 따로 고정해뒀다
+// (코드 리뷰 지적 — 파일마다 기준이 다르게 "보이지만" 실은 각자 맞는 가정을 쓴 것).
 export function setQuickMealCheck(wardId: string, status: QuickMealStatus) {
   quickMealCheckStore.update((prev) => ({ ...prev, [wardId]: { date: todayDateString(), status } }));
 }

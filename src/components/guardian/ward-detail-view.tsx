@@ -83,9 +83,10 @@ export function WardDetailView({
    *  이 값으로 채운다 — 나머지(추천 반찬/건강 프로필 등)는 여전히 detail의 목업값을 쓴다. */
   mealDashboard: WardMealDashboard | null;
 }) {
-  // "오늘" 칸의 원탭 자가 보고 반영은 ward-meal-dashboard.ts의 fetchWardMealDashboard가 이미
-  // meal-status 응답으로 처리해서 mealHistory에 담아 넘겨준다 — 실제 백엔드 기록이라 여기서
-  // 로컬 스토어를 따로 볼 필요가 없다(2026-08-14, grandfood_backend 145ee63).
+  // "오늘"을 포함한 14일 전체의 원탭 자가 보고 반영은 ward-meal-dashboard.ts의
+  // fetchWardMealDashboard가 diet-history 응답의 quick_check_status로 이미 처리해서
+  // mealHistory에 담아 넘겨준다 — 실제 백엔드 기록이라 여기서 로컬 스토어를 따로 볼 필요가
+  // 없다(2026-08-14, grandfood_backend 9f01c26).
   const mealHistory = mealDashboard?.status === "ready" ? mealDashboard.mealHistory : null;
   const completeCount = mealHistory?.filter((m) => m === "완식").length ?? 0;
   const smallCount = mealHistory?.filter((m) => m === "소량").length ?? 0;

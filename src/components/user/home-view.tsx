@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
   Mic,
@@ -47,6 +47,11 @@ export function HomeView({
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
   const mealCheck = getTodayQuickMealCheck(useLocalStore(quickMealCheckStore), ward.id);
   const [listening, setListening] = useState(false);
+  // checkMeal이 연달아 두 번(완식→남김 등) 탭되면 두 submitQuickMealCheck 요청이 동시에
+  // 나가는데, 네트워크 지연으로 응답이 보낸 순서와 다르게 도착할 수 있어 최종적으로 백엔드에
+  // 저장되는 값이 마지막 탭과 반대가 될 위험이 있다(코드 리뷰 지적). 이 ref에 매번 이전
+  // 요청 뒤에 체이닝해서, 실제 네트워크 요청 자체가 탭한 순서대로만 나가게 직렬화한다.
+  const quickCheckQueueRef = useRef<Promise<void>>(Promise.resolve());
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   // diet-view.tsx와 같은 이유로 신규 회원(AI 반찬 추천을 한 번도 받은 적 없음)인지 본다 —
   // 여기 있는 카드들도 대부분 오늘의 추천 반찬 조합(목업)에서 파생된 값이라, 아직 실제 추천을
@@ -125,25 +130,31 @@ export function HomeView({
 
     // 실제 저장은 백그라운드로 — 아직 실제 백엔드에 연결 안 된 대상자(데모/자가등록 전
     // 등)나 네트워크 문제로 실패해도 위 로컬 반영/음성 안내는 이미 끝났으니 어르신 경험은
-    // 끊기지 않는다. 이미 사진 기반 실제 기록이 있는 끼니면 applied:false로 와서, 그때만
-    // 별도로 알려준다(grandfood_backend 145ee63).
-    submitQuickMealCheck({
-      wardId: ward.id,
-      wardName: ward.name,
-      wardAge: ward.age,
-      wardAddress: ward.address,
-      mealSlot: getCurrentMealSlot(),
-      status,
-    })
-      .then((result) => {
-        if (!result.applied) {
-          toast.info("이미 사진으로 기록된 끼니라 이번 체크는 반영되지 않았어요.");
-        }
+    // 끊기지 않는다. 이전 요청 뒤에 체이닝해서(quickCheckQueueRef) 연달아 탭해도 네트워크
+    // 요청이 탭한 순서대로만 나가게 한다.
+    quickCheckQueueRef.current = quickCheckQueueRef.current.then(() =>
+      submitQuickMealCheck({
+        wardId: ward.id,
+        wardName: ward.name,
+        wardAge: ward.age,
+        wardAddress: ward.address,
+        mealSlot: getCurrentMealSlot(),
+        status,
       })
-      .catch(() => {
-        // 조용히 무시 — submitMealLogPhotos와 달리 이 버튼은 실패해도 사용자에게 막힌 느낌을
-        // 주면 안 되는 가벼운 원탭이다.
-      });
+        .then((result) => {
+          if (!result.applied) {
+            // 이미 사진 기반 실제 기록이 있는 끼니라 이번 원탭이 반영 안 됐다
+            // (grandfood_backend 145ee63) — 방금 낙관적으로 바꿔둔 로컬 표시를 그대로 두면
+            // 실제로는 반영 안 된 상태가 화면에 계속 남으므로 되돌린다.
+            setQuickMealCheck(ward.id, null);
+            toast.info("이미 사진으로 기록된 끼니라 이번 체크는 반영되지 않았어요.");
+          }
+        })
+        .catch(() => {
+          // 조용히 무시 — submitMealLogPhotos와 달리 이 버튼은 실패해도 사용자에게 막힌 느낌을
+          // 주면 안 되는 가벼운 원탭이다. 큐는 이 catch로 여기서 끝나서 다음 탭까지 끊기지 않는다.
+        })
+    );
   }
 
   function listenForMealStatus() {
