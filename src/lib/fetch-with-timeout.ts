@@ -80,7 +80,18 @@ async function notifySessionExpiredIfNeeded(response: Response): Promise<Respons
   const path = window.location.pathname;
   if (path.startsWith("/login") || path.startsWith("/signup")) return response;
 
-  const myTurn = sessionExpiryQueue.then(() => investigateAndHandle(response));
+  // investigateAndHandle이 도중에 던지면(예: localStorage를 못 쓰는 브라우저 환경에서
+  // clearSessionForExpiredToken이 실패) myTurn이 거절된 프라미스가 되고, 그걸 그대로
+  // sessionExpiryQueue에 저장하면 다음 401부터는 이 거절된 프라미스에 .then()을 거는
+  // 셈이라 콜백(investigateAndHandle) 자체가 다시는 안 불린다 — 줄 선 사람이 쓰러진
+  // 채로 그 자리를 영원히 막는 상태(코드 리뷰 지적). .catch()로 여기서 흡수해서
+  // sessionExpiryQueue/myTurn 둘 다 항상 이행(resolved) 상태로 남게 한다 — 이 실패가
+  // fetchWithTimeout이 반환하는 원래 응답 프라미스까지 거절시키면 안 되기도 하고
+  // (지금 이 요청 자체는 401 판정과 무관하게 성공했으니), 다음 401 검사도 정상적으로
+  // 계속 돌아야 하기 때문이다.
+  const myTurn = sessionExpiryQueue.then(() => investigateAndHandle(response)).catch((err) => {
+    console.error("세션 만료 여부 확인 중 오류:", err);
+  });
   sessionExpiryQueue = myTurn;
   await myTurn;
   return response;
