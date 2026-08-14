@@ -842,6 +842,16 @@ export async function fetchBackendWardProfile(params: {
   age: number;
   address: string;
 }): Promise<BackendUserProfile | null> {
+  // 이 브라우저에 보호자 세션이 없으면(자가등록 본인 세션만 있거나 아예 없으면) 이 호출은
+  // 100% 실패할 게 이미 확정이다(바로 위 주석 참고, GET /users/{id}는 보호자 토큰만 받음).
+  // resolveCachedBackendWardAccess까지 가면 이용자 본인 세션으로 폴백해서 기어이 401을
+  // 받아오는데, 그 401엔 code(만료 여부 구분값)가 안 실려서 fetch-with-timeout.ts의 전역
+  // 401 핸들러가 진짜 세션 만료와 구분을 못 한다(2026-08-14 코드리뷰 지적, grandfood_backend
+  // 쪽 get_current_guardian이 이 케이스를 403으로 안 내려주는 게 근본 원인이지만, 백엔드
+  // 수정 전까지는 프론트가 애초에 안 부르는 쪽으로 막는다). 그래서 여기서 미리 걸러
+  // 호출 자체를 안 보낸다.
+  if (!getBackendGuardianSessionForWard(params.mockWardId)) return null;
+
   const access = resolveCachedBackendWardAccess(params.mockWardId);
   if (!access) return null;
 
@@ -869,6 +879,11 @@ export async function updateBackendWardTtsConsent(
   params: { mockWardId: string; name: string; age: number; address: string },
   consent: boolean
 ): Promise<boolean> {
+  // fetchBackendWardProfile과 동일한 이유 — PATCH /users/{id}도 보호자 토큰만 받아서,
+  // 보호자 세션이 없으면(자가등록 본인 세션뿐이면) 100% 실패가 확정이다. 시도조차 안 해서
+  // code 없는 401이 전역 401 핸들러로 새는 것을 막는다.
+  if (!getBackendGuardianSessionForWard(params.mockWardId)) return false;
+
   const access = await resolveBackendWardAccess(params);
   if (!access) return false;
 
