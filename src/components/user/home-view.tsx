@@ -24,7 +24,13 @@ import { DislikeToggleButton } from "@/components/app/dislike-toggle-button";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { getNutritionTip } from "@/lib/nutrition-tip";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
-import { getTodayQuickMealCheck, quickMealCheckStore, setQuickMealCheck } from "@/lib/meal-log-store";
+import {
+  getCurrentMealSlot,
+  getTodayQuickMealCheck,
+  quickMealCheckStore,
+  setQuickMealCheck,
+  submitQuickMealCheck,
+} from "@/lib/meal-log-store";
 import { useLocalStore } from "@/lib/use-store";
 import { getSpeechRecognition, speak } from "@/lib/accessibility";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
@@ -110,10 +116,34 @@ export function HomeView({
         : "안내 사항이에요. 아직 새로운 안내 사항이 없어요.";
 
   function checkMeal(status: "완식" | "남김") {
+    // 로컬에 즉시 반영 — 네트워크 왕복을 기다리지 않고 버튼을 누른 순간 "오늘 체크: 완식"
+    // 표시/TTS가 바로 나온다(낙관적 업데이트).
     setQuickMealCheck(ward.id, status);
     const message = status === "완식" ? "잘 하셨어요! 다음 식사도 챙겨드릴게요." : "알겠어요, 남긴 반찬은 다음 식단에 참고할게요.";
     toast.success(message);
     speak(message);
+
+    // 실제 저장은 백그라운드로 — 아직 실제 백엔드에 연결 안 된 대상자(데모/자가등록 전
+    // 등)나 네트워크 문제로 실패해도 위 로컬 반영/음성 안내는 이미 끝났으니 어르신 경험은
+    // 끊기지 않는다. 이미 사진 기반 실제 기록이 있는 끼니면 applied:false로 와서, 그때만
+    // 별도로 알려준다(grandfood_backend 145ee63).
+    submitQuickMealCheck({
+      wardId: ward.id,
+      wardName: ward.name,
+      wardAge: ward.age,
+      wardAddress: ward.address,
+      mealSlot: getCurrentMealSlot(),
+      status,
+    })
+      .then((result) => {
+        if (!result.applied) {
+          toast.info("이미 사진으로 기록된 끼니라 이번 체크는 반영되지 않았어요.");
+        }
+      })
+      .catch(() => {
+        // 조용히 무시 — submitMealLogPhotos와 달리 이 버튼은 실패해도 사용자에게 막힌 느낌을
+        // 주면 안 되는 가벼운 원탭이다.
+      });
   }
 
   function listenForMealStatus() {

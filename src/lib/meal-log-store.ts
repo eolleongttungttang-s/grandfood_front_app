@@ -5,12 +5,23 @@
 // 그래서 기존의 간단한 탭 기록(quickMealCheckStore로 이름만 바꿔 그대로 유지 — 홈 화면의 빠른 체크는
 // 굳이 사진 없이도 되는 편이 나아서 없애지 않았다)과, 새로 추가하는 사진 기반 기록(mealLogStore)을
 // 분리해서 둔다.
+//
+// quickMealCheckStore는 grandfood_backend 145ee63부터 로컬 전용이 아니다 — 원탭도
+// submitQuickMealCheck으로 실제 백엔드에 저장된다(사진 기반 실제 기록이 이미 있으면
+// applied:false로 무시됨). 다만 로컬 스토어는 여전히 남겨둔다 — 네트워크 왕복 없이 버튼을
+// 누른 즉시 "오늘 체크: 완식" 표시/TTS를 보여주는 낙관적(optimistic) 캐시 용도.
 
 import { createLocalStore } from "@/lib/local-store";
 import { resolveBackendWardAccess } from "@/lib/backend-auth";
 import { API_BASE_URL } from "@/lib/api-config";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { todayDateString } from "@/lib/banchan-recommendation";
 import type { MealTone } from "@/lib/ward-registry";
+
+// backend-auth.ts 등과 동일한 관례 — 사진 업로드(submitMealLogPhotos)만 일반 API 호출보다
+// 넉넉하게 UPLOAD_TIMEOUT_MS를 따로 쓴다.
+const REQUEST_TIMEOUT_MS = 15_000;
+const UPLOAD_TIMEOUT_MS = 30_000;
 
 export type QuickMealStatus = "완식" | "남김" | null;
 
@@ -40,24 +51,19 @@ export function getTodayQuickMealCheck(
   return entry.status;
 }
 
-// 최근 14일 섭취 기록 그리드(records-view.tsx/ward-detail-view.tsx)는 사진 기반 정밀 기록
-// (diet-history)만 반영해서, 사진 찍을 여유가 없었던 날은 실제로 뭘 어떻게 드셨든 전부
-// "미응답"으로만 표시됐다 — 홈 화면 원탭 자가 보고는 로컬에만 저장되고 그리드엔 전혀
-// 반영되지 않았다(2026-08-14 피드백: "잔반 분석할 때 14일간의 기록, 어떤 식으로 기록을
-// 남기면 좋을까?"). 오늘 칸에 사진 기반 정밀 기록이 아직 없을 때(= "미응답")만, 원탭
-// 자가 보고를 최소한의 근사 기록으로 대신 채운다 — 정밀 기록이 이미 있으면 그게 항상
-// 우선한다(GPU 비전 분석이 자가 보고보다 정확하므로).
-//
-// 주의: 이 반영은 이 브라우저 안에서만 보인다 — create_meal_log이 GPU가 비교할 전후 사진을
-// 필수로 받는 구조라, 사진 없는 자가 보고를 실제로 저장할 백엔드 엔드포인트가 아직 없다
-// (프론트 먼저 진행하기로 함 — 다른 기기/보호자 화면과 진짜로 동기화하려면 백엔드 작업이
-// 후속으로 필요하다).
-export function mergeTodayQuickCheck(tones: MealTone[], quickCheck: QuickMealStatus): MealTone[] {
-  if (!quickCheck || tones.length === 0) return tones;
+// 최근 14일 섭취 기록 그리드(records-view.tsx/ward-detail-view.tsx)의 "오늘" 칸을, 호출부가
+// (diet-history 기반 값 대신) 다른 값으로 덮어쓸 때 쓰는 범용 헬퍼 — 오늘 칸이 아직
+// "미응답"일 때만 덮어쓴다. 이전엔 이 자리에서 로컬 quickMealCheckStore 값을 직접 덮어썼지만,
+// grandfood_backend 145ee63부터 원탭이 실제로 백엔드에 저장되고 meal-status/today-plan이
+// 끼니별 quick_check_status까지 정확히 돌려주게 되면서, "오늘" 값은 이제 그 응답에서
+// 계산한다(meal-dashboard.ts의 deriveTodayToneFromMealStatus) — 로컬 스토리지보다 항상
+// 더 정확하고(다른 기기/보호자 화면과도 동기화됨) 실제 기록과도 일치한다.
+export function overrideTodayTone(tones: MealTone[], todayTone: MealTone | null): MealTone[] {
+  if (!todayTone || tones.length === 0) return tones;
   const lastIndex = tones.length - 1;
   if (tones[lastIndex] !== "미응답") return tones;
   const merged = [...tones];
-  merged[lastIndex] = quickCheck === "완식" ? "완식" : "소량";
+  merged[lastIndex] = todayTone;
   return merged;
 }
 
@@ -132,11 +138,21 @@ export async function submitMealLogPhotos(params: {
   formData.append("beforePhoto", params.beforePhoto);
   formData.append("afterPhoto", params.afterPhoto);
 
-  const response = await fetch(`${API_BASE_URL}/wards/${access.backendWardId}/meal-logs`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${access.accessToken}` },
-    body: formData,
-  });
+  // fetchWithTimeout을 거쳐야 토큰 만료(401) 시 세션 만료 안내 + 로그아웃이 자동으로
+  // 걸린다(fetch-with-timeout.ts의 notifySessionExpiredIfNeeded 참고) — 예전엔 여기만
+  // raw fetch를 써서 사진 업로드 중 토큰이 만료되면 이 안내 없이 그냥 에러 문구만 뜨고
+  // 세션은 만료된 채로 남아있었다(2026-08-14 발견).
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/wards/${access.backendWardId}/meal-logs`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${access.accessToken}` },
+      body: formData,
+    },
+    UPLOAD_TIMEOUT_MS
+  );
+  const response = await promise;
+  clearRequestTimeout();
   if (!response.ok) {
     throw new Error(`잔반 분석 요청이 실패했어요 (status ${response.status})`);
   }
@@ -144,4 +160,56 @@ export async function submitMealLogPhotos(params: {
   const entry: MealLogEntry = await response.json();
   mealLogStore.update((prev) => ({ ...prev, [params.wardId]: [...(prev[params.wardId] ?? []), entry] }));
   return entry;
+}
+
+export type QuickMealCheckResult = {
+  id: string;
+  wardId: string;
+  mealSlot: MealSlot;
+  /** 이미 사진 기반 실제 기록이 있는 끼니라 이번 원탭이 반영 안 됐으면 false — 그때는
+   *  status도 항상 null이다(백엔드가 실제 기록을 덮어쓰지 않고 그대로 둔다). */
+  applied: boolean;
+  status: "완식" | "남김" | null;
+  loggedAt: string;
+};
+
+// POST /wards/:id/meal-logs/quick-check — 사진 찍을 여유가 없을 때 홈 화면 원탭("완식"/
+// "남김")을 실제 백엔드에 근사 기록으로 남긴다(grandfood_backend 145ee63, 2026-08-14).
+// submitMealLogPhotos와 인증/대상자 해석 방식이 같다 — resolveBackendWardAccess로 보호자/
+// 자가등록 본인 토큰 중 실제로 쓸 수 있는 걸 먼저 확보한다.
+export async function submitQuickMealCheck(params: {
+  wardId: string;
+  wardName: string;
+  wardAge: number;
+  wardAddress: string;
+  mealSlot: MealSlot;
+  status: "완식" | "남김";
+}): Promise<QuickMealCheckResult> {
+  const access = await resolveBackendWardAccess({
+    mockWardId: params.wardId,
+    name: params.wardName,
+    age: params.wardAge,
+    address: params.wardAddress,
+  });
+  if (!access) {
+    throw new Error(
+      "이 대상자를 관리하는 보호자 계정 또는 본인 계정으로 로그인해야 기록을 남길 수 있어요."
+    );
+  }
+
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/wards/${access.backendWardId}/meal-logs/quick-check`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${access.accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ mealSlot: params.mealSlot, status: params.status }),
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  const response = await promise;
+  clearRequestTimeout();
+  if (!response.ok) {
+    throw new Error(`식사 체크 기록에 실패했어요 (status ${response.status})`);
+  }
+  return (await response.json()) as QuickMealCheckResult;
 }

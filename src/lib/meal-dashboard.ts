@@ -127,9 +127,18 @@ function parseDietHistory(data: {
 // 저녁) 전부 식전+식후 사진을 다 찍어야만 그날이 기록으로 인정됐던 셈이라, 어르신 입장에선
 // 하루 최대 6장을 찍어야 겨우 미응답을 면했다. 대부분의 집은 매 끼니를 다 못 찍을 거라
 // 실질적으로 거의 항상 미응답만 쌓이는 문제가 있었다(2026-08-14 피드백: "잔반 분석할 때
-// 14일간의 기록, 어떤 식으로 기록을 남기면 좋을까?"). 완료되지 않은 끼니는 그냥 집계에서
-// 빼고, 완료된 끼니가 하루 중 하나라도 있으면 그걸로 그날을 판정하도록 완화했다 — 세 끼 중
+// 14일간의 기록, 어떤 식으로 기록을 남기면 좋을까?"). 완료되지 않은 끼니는 평균 잔반율
+// 집계에서 빼고, 완료된 끼니가 하루 중 하나라도 있으면 그걸로 그날을 판정한다 — 세 끼 중
 // 한 끼만 찍어도 그날은 "기록 있음"으로 인정된다.
+//
+// 완료된 끼니가 하나도 없어도, 그날 끼니 행 자체가 있으면(dayItems.length > 0) 원탭
+// 자가 보고(quick-check)가 남아있다는 뜻이다 — grandfood_backend 145ee63부터 원탭도
+// MEALS 행을 만들지만(after_image_url은 없음), 사진 업로드는 전/후 사진을 한 번에 받아
+// 항상 즉시 completed로 생성되므로, 지금 시점엔 completed=false인 행 = 원탭 기록으로
+// 봐도 된다. diet-history 응답엔 quick_check_status가 없어 완식/남김을 구분 못 하니
+// "소량"으로 근사한다(ward-meal-dashboard.ts의 guardian쪽과 동일한 근사 — 오늘 하루는
+// deriveTodayToneFromMealStatus가 meal-status/today-plan의 실제 quick_check_status로
+// 더 정확하게 덮어쓴다).
 export function deriveMealTones(items: DietHistoryEntry[], days: number): MealTone[] {
   const byDate = new Map<string, DietHistoryEntry[]>();
   for (const item of items) {
@@ -148,9 +157,13 @@ export function deriveMealTones(items: DietHistoryEntry[], days: number): MealTo
     d.setDate(d.getDate() - i);
     const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     const dayItems = byDate.get(key) ?? [];
+    if (dayItems.length === 0) {
+      tones.push("미응답");
+      continue;
+    }
     const completedItems = dayItems.filter((m) => m.completed);
     if (completedItems.length === 0) {
-      tones.push("미응답");
+      tones.push("소량");
       continue;
     }
     const dishes = completedItems.flatMap((m) => m.dishes);
@@ -274,10 +287,50 @@ export async function fetchElderNutritionSummary(identity: WardIdentity): Promis
   return data ? parseHealthReport(data) : null;
 }
 
-export type MealStatusSummary = { completedCount: number; totalExpected: number };
+export type MealStatusItemSummary = {
+  mealType: string;
+  /** 식후 사진까지 올라온 정밀 기록 — 기존 의미 그대로. */
+  completed: boolean;
+  /** 정밀 기록이든 원탭 자가 보고든, 이 끼니에 뭐라도 기록이 남았으면 true. */
+  recorded: boolean;
+  /** 원탭 자가 보고 상태 — 정밀 기록이 있으면(completed) 항상 null(원탭 개념이 없음). */
+  quickCheckStatus: "완식" | "남김" | null;
+};
 
-function parseMealStatus(data: { completed_count: number; total_expected: number }): MealStatusSummary {
-  return { completedCount: data.completed_count, totalExpected: data.total_expected };
+export type MealStatusSummary = {
+  completedCount: number;
+  totalExpected: number;
+  /** 오늘 세 끼니 중 하나라도 recorded면 true(grandfood_backend 145ee63) — "오늘 응답
+   *  했는지" 하루 단위 판정. 세 끼 전부를 요구하지 않는다. */
+  responded: boolean;
+  items: MealStatusItemSummary[];
+};
+
+// export — ward-meal-dashboard.ts(guardian 상세 화면)가 이미 resolveCachedBackendWardAccess로
+// 확보해둔 토큰으로 직접 meal-status를 불러와야 해서(이 파일의 fetchGuardianMealStatus를
+// 쓰면 접근 해석을 중복으로 한 번 더 하게 됨), raw 응답 파싱만 이 함수로 공유한다.
+export function parseMealStatus(data: {
+  completed_count: number;
+  total_expected: number;
+  responded: boolean;
+  items: {
+    meal_type: string;
+    completed: boolean;
+    recorded: boolean;
+    quick_check_status: string | null;
+  }[];
+}): MealStatusSummary {
+  return {
+    completedCount: data.completed_count,
+    totalExpected: data.total_expected,
+    responded: data.responded,
+    items: data.items.map((i) => ({
+      mealType: i.meal_type,
+      completed: i.completed,
+      recorded: i.recorded,
+      quickCheckStatus: i.quick_check_status === "완식" || i.quick_check_status === "남김" ? i.quick_check_status : null,
+    })),
+  };
 }
 
 export async function fetchGuardianMealStatus(identity: WardIdentity): Promise<MealStatusSummary | null> {
@@ -298,5 +351,21 @@ export async function fetchElderTodayPlan(identity: WardIdentity): Promise<MealS
     access.accessToken
   );
   return data ? parseMealStatus(data) : null;
+}
+
+// meal-status/today-plan은 "오늘(또는 특정 날짜) 하루"만 보는 엔드포인트라 14일 grid엔 못
+// 쓰지만(diet-history가 그 역할), quick_check_status까지 끼니별로 정확히 알려주는 건
+// 이쪽뿐이다 — deriveMealTones는 diet-history만 보고 "완식/남김"을 구분 못 해 전부
+// "소량"으로 근사하는데, 오늘 하루만큼은 이 응답으로 정확한 값을 덮어쓴다. 사진 기반
+// 완료가 하나라도 있으면(deriveMealTones가 이미 정확히 판정했을 것이므로) null을 돌려줘서
+// 호출부가 기존 값을 그대로 쓰게 한다.
+export function deriveTodayToneFromMealStatus(status: MealStatusSummary | null): MealTone | null {
+  if (!status) return null;
+  if (status.items.some((i) => i.completed)) return null;
+  const checks = status.items
+    .map((i) => i.quickCheckStatus)
+    .filter((s): s is "완식" | "남김" => s !== null);
+  if (checks.length === 0) return null;
+  return checks.includes("완식") ? "완식" : "소량";
 }
 

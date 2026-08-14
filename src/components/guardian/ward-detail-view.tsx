@@ -35,7 +35,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
-import { getTodayQuickMealCheck, mergeTodayQuickCheck, quickMealCheckStore } from "@/lib/meal-log-store";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { MealToneSummary } from "@/components/app/meal-tone-summary";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
@@ -84,12 +83,10 @@ export function WardDetailView({
    *  이 값으로 채운다 — 나머지(추천 반찬/건강 프로필 등)는 여전히 detail의 목업값을 쓴다. */
   mealDashboard: WardMealDashboard | null;
 }) {
-  // 오늘 칸이 사진 기반 정밀 기록 없이 "미응답"이면, 이 어르신이 홈 화면에서 원탭으로 남긴
-  // 자가 보고를 최소한의 근사 기록으로 대신 보여준다(같은 브라우저에서 이용자로도 로그인한
-  // 데모 환경 한정 — meal-log-store.ts의 mergeTodayQuickCheck 참고).
-  const todayQuickCheck = getTodayQuickMealCheck(useLocalStore(quickMealCheckStore), ward.id);
-  const mealHistory =
-    mealDashboard?.status === "ready" ? mergeTodayQuickCheck(mealDashboard.mealHistory, todayQuickCheck) : null;
+  // "오늘" 칸의 원탭 자가 보고 반영은 ward-meal-dashboard.ts의 fetchWardMealDashboard가 이미
+  // meal-status 응답으로 처리해서 mealHistory에 담아 넘겨준다 — 실제 백엔드 기록이라 여기서
+  // 로컬 스토어를 따로 볼 필요가 없다(2026-08-14, grandfood_backend 145ee63).
+  const mealHistory = mealDashboard?.status === "ready" ? mealDashboard.mealHistory : null;
   const completeCount = mealHistory?.filter((m) => m === "완식").length ?? 0;
   const smallCount = mealHistory?.filter((m) => m === "소량").length ?? 0;
   const noResponseCount = mealHistory?.filter((m) => m === "미응답").length ?? 0;
