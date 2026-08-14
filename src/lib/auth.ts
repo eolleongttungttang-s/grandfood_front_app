@@ -178,6 +178,42 @@ export function ensureLocalGuardianAccount(params: {
   writeRegisteredAccounts([...readRegisteredAccounts(), account]);
 }
 
+// ensureLocalGuardianAccount와 짝을 이루는 이용자(어르신 본인) 버전 — login/page.tsx의
+// 이용자 탭 크로스디바이스 폴백 로그인에서만 쓴다. 보호자와 달리 백엔드 로그인 응답이
+// 이름만 주고 phone이 없어서(GET /auth/me 같은 자기 프로필 조회 엔드포인트가 이용자
+// 토큰으론 안 먹힘 — backend-auth.ts의 fetchBackendWardProfile 주석 참고), phone은
+// ensureBackendWardId()가 이미 쓰는 것과 같은 더미값으로 채운다. selfWardId는 호출부가
+// createSelfWard로 미리 만들어 넘긴다.
+export function ensureLocalUserAccount(params: {
+  loginId: string;
+  password: string;
+  name: string;
+  selfWardId: string;
+}): void {
+  const existing = findAccountByLoginId(params.loginId);
+  if (existing) {
+    if (existing.password !== params.password) {
+      writeRegisteredAccounts(
+        readRegisteredAccounts().map((account) =>
+          account.loginId === params.loginId ? { ...account, password: params.password } : account
+        )
+      );
+    }
+    return;
+  }
+
+  const account: Account = {
+    loginId: params.loginId,
+    password: params.password,
+    role: "user",
+    org: "개인 이용자",
+    name: params.name,
+    phone: "000-0000-0000",
+    selfWardId: params.selfWardId,
+  };
+  writeRegisteredAccounts([...readRegisteredAccounts(), account]);
+}
+
 export function findAccountByLoginId(loginId: string): Account | null {
   return getAccounts().find((account) => account.loginId === loginId) ?? null;
 }

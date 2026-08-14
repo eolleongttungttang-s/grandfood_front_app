@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { BrandHeader } from "@/components/app/brand-header";
 import { useSession } from "@/lib/session";
-import { UserRole, ensureLocalGuardianAccount, linkWardToGuardian } from "@/lib/auth";
+import { UserRole, ensureLocalGuardianAccount, ensureLocalUserAccount, linkWardToGuardian } from "@/lib/auth";
 import {
   backendWardIdMapStore,
   fetchGuardianProfile,
@@ -27,7 +27,7 @@ import {
   loginGuardianBackend,
   loginUserBackend,
 } from "@/lib/backend-auth";
-import { addWard, calculateAge, newWardDefaults } from "@/lib/wards";
+import { addWard, calculateAge, createSelfWard, newWardDefaults } from "@/lib/wards";
 import { PARTNER_STORES } from "@/lib/partner-stores";
 
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
@@ -126,6 +126,38 @@ export default function LoginPage() {
         }
       }
 
+      // 이용자(어르신) 탭도 보호자와 같은 이유로 크로스디바이스 폴백이 필요하다 — 이 기기엔
+      // 로컬 계정이 없어도(QR 초대로 다른 기기에서 등록됐거나 저장소가 지워짐) 실제 백엔드
+      // DB엔 있을 수 있다. 로그인 응답이 이름만 주고 생년월일/주소를 안 줘서 실제 정보로
+      // 채운 Ward는 못 만들지만, home-view.tsx가 이미 쓰는 gender/담당매장 placeholder와
+      // 같은 방침으로 임시값을 채운 Ward를 만든다 — 로그인 자체가 항상 실패하는 것보다
+      // 낫고, 어르신이 나중에 생활 정보 설문을 다시 채우거나 보호자가 상세 화면에서 고치면
+      // 실제 값으로 덮인다.
+      if (!account && tab === "user") {
+        const backendResult = await loginUserBackend(trimmedId, password);
+        if ("session" in backendResult) {
+          backendSessionEstablished = true;
+          const newWardId = crypto.randomUUID();
+          const placeholderBirthYear = new Date().getFullYear() - 75;
+          addWard(
+            createSelfWard({
+              id: newWardId,
+              name: backendResult.session.name,
+              birthDate: `${placeholderBirthYear}-01-01`,
+              gender: "여",
+              address: "",
+            })
+          );
+          ensureLocalUserAccount({
+            loginId: trimmedId,
+            password,
+            name: backendResult.session.name,
+            selfWardId: newWardId,
+          });
+          account = login(trimmedId, password);
+        }
+      }
+
       if (!account) {
         setSubmitting(false);
         setError("아이디 또는 비밀번호가 올바르지 않아요.");
@@ -160,10 +192,9 @@ export default function LoginPage() {
       // (signup/page.tsx)으로 만든 계정과, 초대(QR)로 등록된 계정(invite/service.py의
       // register_elder_from_invite가 이름/전화번호 뒷자리로 로그인 수단을 함께 만들어준다)
       // 둘 다 여기서 대응 레코드를 찾는다 — 데모 계정(gf-user01)처럼 애초에 백엔드에 없는
-      // 계정만 조용히 실패한다. 크로스디바이스 폴백은 이용자 쪽엔 없다 — 백엔드가 로그인
-      // 응답으로 이름만 돌려주고 생년월일/주소가 없어서, 로컬 계정을 새로 만들어도 대상자
-      // (Ward) 정보가 없는 반쪽짜리 홈 화면이 된다.
-      if (account.role === "user") {
+      // 계정만 조용히 실패한다. backendSessionEstablished면 위 크로스디바이스 폴백에서
+      // 이미 로그인했으니 다시 하지 않는다(가드가 guardian 분기와 동일한 이유).
+      if (!backendSessionEstablished && account.role === "user") {
         await loginUserBackend(trimmedId, password);
       }
 
