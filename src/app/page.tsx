@@ -7,10 +7,23 @@ import { Button } from "@/components/ui/button";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { BrandHeader } from "@/components/app/brand-header";
 import { useSession } from "@/lib/session";
+import { backendUserSessionStore, hasBackendGuardianSession } from "@/lib/backend-auth";
 
 export default function Home() {
   const { account, isLoading } = useSession();
   const homeHref = account?.role === "guardian" ? "/guardian/home" : "/user/home";
+
+  // "OOO님으로 계속하기"는 로컬에 저장된 계정 정보만 보고 화면을 열어주는 지름길이라, 실제
+  // 백엔드 로그인 토큰(RAG/구독/반찬추천 등 서버 기능에 필요)이 없는 상태로도 눌러진다 —
+  // 그러면 홈 화면은 뜨지만 서버가 필요한 기능은 전부 "요청 자체가 안 나가는" 방식으로
+  // 조용히 실패한다. 진짜 토큰이 있을 때만 홈으로 곧장 보내고, 없으면 실제 로그인 폼
+  // (/login, loginUserBackend/loginGuardianBackend가 토큰을 발급·저장함)으로 보낸다.
+  const hasBackendSession = account
+    ? account.role === "guardian"
+      ? hasBackendGuardianSession(account.loginId)
+      : account.loginId in backendUserSessionStore.read()
+    : false;
+  const continueHref = hasBackendSession ? homeHref : "/login";
 
   return (
     <div className="flex flex-1 flex-col">
@@ -39,7 +52,7 @@ export default function Home() {
 
         {!isLoading && account ? (
           <div className="flex w-full max-w-xs flex-col gap-2">
-            <Button size="lg" nativeButton={false} render={<Link href={homeHref} />}>
+            <Button size="lg" nativeButton={false} render={<Link href={continueHref} />}>
             {account.name}님으로 계속하기
             </Button>
             <Button variant="outline" size="lg" nativeButton={false} render={<Link href="/login" />}>

@@ -1,3 +1,5 @@
+import { toast } from "sonner";
+
 // fetch에 타임아웃을 붙이는 공용 헬퍼. accessibility.ts(speakRaw)와 rag-chat.ts
 // (askHealthQuestion) 양쪽에 거의 같은 AbortController+setTimeout 패턴이 각자 있었는데,
 // 그중 하나가 "fetch()가 헤더를 받자마자 clearTimeout을 호출해서, 그 뒤 response.blob()/
@@ -13,6 +15,30 @@
 // fetch가 아직 끝나기 전부터 controller 참조를 들고 있어야 한다. await 뒤에야 controller를
 // 돌려주면, fetch가 진행 중인 동안 들어온 새 요청이 이전 요청을 취소할 방법이 없는 시간차가
 // 생긴다.
+//
+// 백엔드 호출은 전부 이 함수를 거치기 때문에(backend-auth.ts/rag-chat.ts/subscription.ts 등),
+// "토큰 만료/무효" 응답(401)을 여기 한 곳에서만 감지해도 앱 전체에 적용된다 — 토큰 유효
+// 시간을 백엔드에서 몇 분으로 바꾸든(core/config.py의 jwt_access_token_expire_minutes),
+// 프론트는 그 값을 몰라도 되고 그냥 실제 401 응답이 왔을 때만 반응한다.
+let sessionExpiredNotified = false;
+
+function notifySessionExpiredIfNeeded(response: Response): Response {
+  if (response.status !== 401 || typeof window === "undefined") return response;
+  if (sessionExpiredNotified) return response;
+  // 이미 로그인/회원가입 화면이면 "다시 로그인하라"는 안내가 의미 없으니 건너뛴다.
+  const path = window.location.pathname;
+  if (path.startsWith("/login") || path.startsWith("/signup")) return response;
+
+  sessionExpiredNotified = true;
+  toast.error("세션이 만료되었습니다. 다시 로그인해주세요.");
+  // "OOO님으로 계속하기"가 다음에 또 세션 없이 홈으로 들여보내지 않도록, 로그인 포인터를
+  // 지워서 로그아웃 상태로 만든다(계정 목록 자체는 그대로 둔다 — session.tsx의 logout()과
+  // 동일한 동작).
+  window.localStorage.removeItem("grandfood-app-session");
+  window.location.href = "/login";
+  return response;
+}
+
 export function fetchWithTimeout(
   url: string,
   options: RequestInit,
@@ -20,6 +46,8 @@ export function fetchWithTimeout(
 ): { promise: Promise<Response>; controller: AbortController; clearTimeout: () => void } {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  const promise = fetch(url, { ...options, signal: controller.signal });
+  const promise = fetch(url, { ...options, signal: controller.signal }).then(
+    notifySessionExpiredIfNeeded
+  );
   return { promise, controller, clearTimeout: () => clearTimeout(timeoutId) };
 }
