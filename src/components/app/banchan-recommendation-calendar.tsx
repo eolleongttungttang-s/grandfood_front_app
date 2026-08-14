@@ -323,9 +323,14 @@ export function BanchanRecommendationCalendar({
           {selected.generationStatus === "done" && selected.items.length > 0 && (
             <>
               {hasTargets && recommendation && (
+                // "이번 주 목표"라고 부르면 주마다 값이 바뀔 것처럼 보이지만, 실제로는
+                // 건강 프로필(키/체중/활동 수준 등)이 그대로면 매주 같은 값이 나오는 개인
+                // 고정 하루 목표다(BMR/TDEE + KDRI 계산, 주 단위 변동 로직 없음 — 2026-08-13
+                // 피드백, "왜 매주 목표가 안 바뀌냐"). 라벨을 "나의 하루 목표"로 바꿔서 매주
+                // 달라지는 값이라는 오해를 없앤다.
                 <div className="flex flex-wrap gap-4 rounded-lg bg-muted/60 p-3 text-xs">
                   <span className="w-full text-[11px] font-semibold text-muted-foreground">
-                    이번 주 목표
+                    나의 하루 목표
                   </span>
                   {recommendation.targetCalorieKcal != null && (
                     <TargetStat label="열량" value={`${Math.round(recommendation.targetCalorieKcal)}kcal`} />

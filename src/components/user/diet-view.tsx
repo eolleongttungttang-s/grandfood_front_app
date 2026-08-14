@@ -8,12 +8,13 @@ import { Ward, WardDetail } from "@/lib/wards";
 import { getRepresentativeDish } from "@/lib/dishes";
 import { getCurrentMealSlot, mealLogStore, submitMealLogPhotos, wardMealLogs } from "@/lib/meal-log-store";
 import { SUITABILITY_CLASS, SUITABILITY_LABEL } from "@/lib/banchan-recommendation";
-import { resolveTodayMenu } from "@/lib/today-menu";
+import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 import { SpeakableCard } from "@/components/app/speakable-card";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
+import { DislikeToggleButton } from "@/components/app/dislike-toggle-button";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
 import { useLocalStore } from "@/lib/use-store";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
@@ -59,16 +60,25 @@ export function DietView({
   const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   // 대표 이모지는 목업 카탈로그(dishes.ts)의 카테고리 매핑에만 있어서, 실제 추천을 쓰는
-  // 중엔 적용할 방법이 없다 — 그냥 기본 그릇 이모지로 대신한다.
-  const menuEmoji = todayMenu.isReal ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
+  // 중엔 적용할 방법이 없다 — 그냥 기본 그릇 이모지로 대신한다. 생성 중(isGenerating)일
+  // 때도 목업 이모지를 보여주면 "생성 중" 문구 바로 옆에 무관한 목업 반찬의 이모지가
+  // 남아있는, 이 파일이 고치려던 것과 같은 종류의 문제가 생긴다 — 그때도 기본 이모지를 쓴다.
+  const menuEmoji =
+    todayMenu.isReal || todayMenu.isGenerating ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
 
   // 카드별 TTS(SpeakableCard)가 읽어줄 문장 — 화면에 보이는 값 그대로를 문장으로 풀어 쓴다.
-  const recommendedComboSpeech =
-    `오늘의 추천 반찬 조합이에요. 나트륨 ${todayMenu.totalSodiumMg}mg, ` +
-    `단백질 ${todayMenu.totalProteinG}g, 열량 ${todayMenu.totalKcal}kcal입니다.`;
-  const menuCompositionSpeech = `오늘 메뉴 구성은, ${todayMenu.items
-    .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
-    .join(", ")}입니다.`;
+  // isGenerating일 땐 totalSodiumMg 등이 전부 0/items가 빈 배열이라, 그대로 문장을 지으면
+  // "나트륨 0mg..." 같은 잘못된 값이나 빈 목록 문장이 화면 문구와 다르게 읽힌다 — 시각 카드와
+  // 똑같이 생성 중 안내로 맞춘다.
+  const recommendedComboSpeech = todayMenu.isGenerating
+    ? TODAY_MENU_GENERATING_MESSAGE
+    : `오늘의 추천 반찬 조합이에요. 나트륨 ${todayMenu.totalSodiumMg}mg, ` +
+      `단백질 ${todayMenu.totalProteinG}g, 열량 ${todayMenu.totalKcal}kcal입니다.`;
+  const menuCompositionSpeech = todayMenu.isGenerating
+    ? TODAY_MENU_GENERATING_MESSAGE
+    : `오늘 메뉴 구성은, ${todayMenu.items
+        .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
+        .join(", ")}입니다.`;
   const reasonsSpeech = todayMenu.reasons.join(" ");
   const conditionsSpeech =
     `진단 질환은 ${detail.conditions.join(", ") || "없음"}입니다. ` +
@@ -167,20 +177,24 @@ export function DietView({
             AI 반찬 매칭
           </span>
           <span className="text-xl font-extrabold">오늘의 추천 반찬 조합</span>
-          <div className="flex gap-4 pt-1 text-xs">
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">나트륨</span>
-              <span className="font-semibold">{todayMenu.totalSodiumMg}mg</span>
+          {todayMenu.isGenerating ? (
+            <p className="text-sm text-sidebar-foreground/80">{TODAY_MENU_GENERATING_MESSAGE}</p>
+          ) : (
+            <div className="flex gap-4 pt-1 text-xs">
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">나트륨</span>
+                <span className="font-semibold">{todayMenu.totalSodiumMg}mg</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">단백질</span>
+                <span className="font-semibold">{todayMenu.totalProteinG}g</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">열량</span>
+                <span className="font-semibold">{todayMenu.totalKcal}kcal</span>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">단백질</span>
-              <span className="font-semibold">{todayMenu.totalProteinG}g</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sidebar-foreground/60">열량</span>
-              <span className="font-semibold">{todayMenu.totalKcal}kcal</span>
-            </div>
-          </div>
+          )}
         </SpeakableCard>
 
         <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" />
@@ -192,45 +206,38 @@ export function DietView({
         >
           <span className="text-xs font-bold text-foreground">{menuEmoji} 오늘 메뉴 구성</span>
           <div className="flex flex-col gap-1.5">
-            {todayMenu.items.length === 0 && (
+            {todayMenu.isGenerating ? (
+              <p className="text-sm text-muted-foreground">{TODAY_MENU_GENERATING_MESSAGE}</p>
+            ) : todayMenu.items.length === 0 ? (
               <p className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</p>
-            )}
-            {todayMenu.items.map((item) => {
-              const disliked = dislikes.includes(item.id);
-              return (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
-                    >
-                      {item.name}
-                    </span>
-                    {item.suitability && (
-                      <Badge className={SUITABILITY_CLASS[item.suitability]}>
-                        {SUITABILITY_LABEL[item.suitability]}
-                      </Badge>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleDislike(ward.id, item.id);
-                    }}
-                    className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      disliked
-                        ? "bg-destructive/10 text-destructive"
-                        : "bg-transparent text-muted-foreground hover:bg-muted"
-                    }`}
+            ) : (
+              todayMenu.items.map((item) => {
+                const disliked = dislikes.includes(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2"
                   >
-                    {disliked ? "기피 표시됨" : "이거 싫어요"}
-                  </button>
-                </div>
-              );
-            })}
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
+                      >
+                        {item.name}
+                      </span>
+                      {item.suitability && (
+                        <Badge className={SUITABILITY_CLASS[item.suitability]}>
+                          {SUITABILITY_LABEL[item.suitability]}
+                        </Badge>
+                      )}
+                    </div>
+                    <DislikeToggleButton
+                      disliked={disliked}
+                      onClick={() => toggleDislike(ward.id, item.id)}
+                    />
+                  </div>
+                );
+              })
+            )}
           </div>
           {dislikes.length > 0 && (
             <p className="text-xs text-muted-foreground">
@@ -239,6 +246,35 @@ export function DietView({
           )}
         </SpeakableCard>
 
+        <SpeakableCard
+          id="diet-reasons"
+          text={reasonsSpeech}
+          className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
+        >
+          <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
+          {todayMenu.isGenerating ? (
+            <p className="text-sm text-muted-foreground">{TODAY_MENU_GENERATING_MESSAGE}</p>
+          ) : (
+            todayMenu.reasons.length === 0 && (
+              <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
+            )
+          )}
+          {todayMenu.reasons.map((reason, i) => (
+            <div
+              key={i}
+              className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-bold text-background">
+                {i + 1}
+              </span>
+              {reason}
+            </div>
+          ))}
+        </SpeakableCard>
+
+        {/* "왜 이 조합인가요" 다음 순서로 옮김 — 잔반 분석은 "오늘 조합이 왜 나왔는지"를
+            먼저 이해한 다음에 "그걸 실제로 얼마나 남겼는지" 기록하는 흐름이 더 자연스럽다
+            (2026-08-13 피드백). */}
         <SpeakableCard
           id="diet-meal-checkin"
           text={mealCheckinSpeech}
@@ -315,28 +351,6 @@ export function DietView({
               ))}
             </div>
           )}
-        </SpeakableCard>
-
-        <SpeakableCard
-          id="diet-reasons"
-          text={reasonsSpeech}
-          className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm"
-        >
-          <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
-          {todayMenu.reasons.length === 0 && (
-            <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
-          )}
-          {todayMenu.reasons.map((reason, i) => (
-            <div
-              key={i}
-              className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-bold text-background">
-                {i + 1}
-              </span>
-              {reason}
-            </div>
-          ))}
         </SpeakableCard>
 
         <SpeakableCard

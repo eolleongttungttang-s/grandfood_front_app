@@ -15,11 +15,12 @@ import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import { NotificationItem, fetchElderNotifications, notificationBadgeClass } from "@/lib/notifications";
 import { SUITABILITY_CLASS, SUITABILITY_LABEL } from "@/lib/banchan-recommendation";
-import { resolveTodayMenu } from "@/lib/today-menu";
+import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 import { SpeakableCard } from "@/components/app/speakable-card";
+import { DislikeToggleButton } from "@/components/app/dislike-toggle-button";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { getNutritionTip } from "@/lib/nutrition-tip";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
@@ -78,10 +79,17 @@ export function HomeView({
   // 다른 답을 보여주던 문제).
   const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
-  const menuEmoji = todayMenu.isReal ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
-  const recommendedComboSpeech = `오늘의 추천 반찬 조합이에요. ${partnerStore?.name ?? "담당 반찬가게"}에서 준비했어요. ${todayMenu.items
-    .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
-    .join(", ")}입니다.`;
+  // isGenerating일 때도 목업 이모지를 그대로 두면 "생성 중" 문구 옆에 무관한 목업 반찬
+  // 이모지가 남는다 — diet-view.tsx와 동일하게 그때도 기본 이모지를 쓴다.
+  const menuEmoji =
+    todayMenu.isReal || todayMenu.isGenerating ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
+  // isGenerating이면 items가 비어 있어 그대로 문장을 지으면 "...준비했어요. 입니다." 같은
+  // 빈 목록 문장이 되므로, 화면 문구와 같은 생성 중 안내로 맞춘다.
+  const recommendedComboSpeech = todayMenu.isGenerating
+    ? TODAY_MENU_GENERATING_MESSAGE
+    : `오늘의 추천 반찬 조합이에요. ${partnerStore?.name ?? "담당 반찬가게"}에서 준비했어요. ${todayMenu.items
+        .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
+        .join(", ")}입니다.`;
   const deliverySpeech = `오늘 점심 배송이 ${detail.deliveryEta}에 예정되어 있어요.`;
   const mealCheckSpeech = mealCheck
     ? `식사하셨으면 다 먹었어요 또는 남겼어요를 눌러 알려주세요. 오늘은 ${mealCheck}으로 체크하셨어요.`
@@ -233,45 +241,38 @@ export function HomeView({
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            {todayMenu.items.length === 0 && (
+            {todayMenu.isGenerating ? (
+              <p className="text-sm text-muted-foreground">{TODAY_MENU_GENERATING_MESSAGE}</p>
+            ) : todayMenu.items.length === 0 ? (
               <p className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</p>
-            )}
-            {todayMenu.items.map((item) => {
-              const disliked = dislikes.includes(item.id);
-              return (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
-                    >
-                      {item.name}
-                    </span>
-                    {item.suitability && (
-                      <Badge className={SUITABILITY_CLASS[item.suitability]}>
-                        {SUITABILITY_LABEL[item.suitability]}
-                      </Badge>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleDislike(ward.id, item.id);
-                    }}
-                    className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      disliked
-                        ? "bg-destructive/10 text-destructive"
-                        : "bg-transparent text-muted-foreground hover:bg-muted"
-                    }`}
+            ) : (
+              todayMenu.items.map((item) => {
+                const disliked = dislikes.includes(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2"
                   >
-                    {disliked ? "기피 표시됨" : "이거 싫어요"}
-                  </button>
-                </div>
-              );
-            })}
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
+                      >
+                        {item.name}
+                      </span>
+                      {item.suitability && (
+                        <Badge className={SUITABILITY_CLASS[item.suitability]}>
+                          {SUITABILITY_LABEL[item.suitability]}
+                        </Badge>
+                      )}
+                    </div>
+                    <DislikeToggleButton
+                      disliked={disliked}
+                      onClick={() => toggleDislike(ward.id, item.id)}
+                    />
+                  </div>
+                );
+              })
+            )}
           </div>
 
           <div className="flex flex-col gap-2.5 border-t border-border pt-4">
