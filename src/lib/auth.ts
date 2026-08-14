@@ -201,7 +201,23 @@ export function ensureLocalUserAccount(params: {
   name: string;
   selfWardId: string;
 }): void {
-  if (syncExistingAccountPassword(params.loginId, params.password)) return;
+  const existing = syncExistingAccountPassword(params.loginId, params.password);
+  if (existing) {
+    // 보통은 existing.selfWardId === params.selfWardId라 여기서 할 일이 없다(호출부인
+    // login/page.tsx가 기존 Ward를 찾아 그 id를 그대로 넘겨줌). 다만 existing.selfWardId가
+    // 가리키던 Ward를 더 이상 못 찾을 때(저장소 일부만 유실된 경우 등)는 호출부가 새
+    // placeholder Ward를 만들어 새 id를 넘겨주는데, 그 갱신을 여기서 계정에도 반영하지
+    // 않으면 계정은 계속 사라진 옛 Ward id를 가리키고 새로 만든 Ward는 아무도 안 쓰는
+    // 채로 남는다(코드 리뷰 지적).
+    if (existing.selfWardId !== params.selfWardId) {
+      writeRegisteredAccounts(
+        readRegisteredAccounts().map((account) =>
+          account.loginId === params.loginId ? { ...account, selfWardId: params.selfWardId } : account
+        )
+      );
+    }
+    return;
+  }
 
   const account: Account = {
     loginId: params.loginId,

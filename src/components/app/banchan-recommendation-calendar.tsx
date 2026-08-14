@@ -188,7 +188,14 @@ export function BanchanRecommendationCalendar({
   const [prevDays, setPrevDays] = useState(days);
   if (days !== prevDays) {
     setPrevDays(days);
-    if (!(selectedDate && days.some((d) => d.date === selectedDate))) {
+    // monthLoading(다른 달로 넘어갔는데 아직 그 달 데이터를 못 받아온 상태)인 동안은 days가
+    // 일시적으로 []다 — goToDate(전날/다음날 버튼, 그리드의 다른 달 패딩 칸)가 selectedDate와
+    // viewedMonth를 같이 옮기면, 바로 이 렌더에서 days(=[])엔 방금 옮긴 날짜가 당연히 없으니
+    // "무효한 선택"으로 오판해서 null로 초기화해버리고, 그 달 데이터가 실제로 도착했을 때도
+    // 이미 null이 된 뒤라 사용자가 정말 가려던 날짜로 못 돌아간다(코드 리뷰 지적). 로딩 중엔
+    // 판단을 미루고, 그 달 데이터가 실제로 도착한 뒤에만(monthLoading이 꺼진 뒤) 지금 선택이
+    // 그 데이터 안에 있는지 판단한다.
+    if (!monthLoading && !(selectedDate && days.some((d) => d.date === selectedDate))) {
       setSelectedDate(pickDefaultDate(days));
     }
   }
