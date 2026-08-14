@@ -3,11 +3,18 @@
 // "식사 체크인·잔반 분석" 단계 — 식전/식후 사진을 남기고 칸(compartment)별 잔반율까지 분석한다.
 // 예전엔 사진 없이 "완식/남김" 버튼만 누르는 빠른 체크(quickMealCheckStore)도 따로 있었는데,
 // 실제 사진으로 잔반을 확인할 수 있는 이상 자가 신고 버튼은 중복이라 없앴다(2026-08-14 피드백,
-// 홈 화면에 이 사진 체크인을 그대로 옮기며 정리).
+// 홈 화면에 이 사진 체크인을 그대로 옮기며 정리). 그 원탭 버튼을 실제 백엔드에 저장하던
+// submitQuickMealCheck(grandfood_backend 145ee63)도 호출부가 없어져 같이 제거했다 — 백엔드
+// 엔드포인트(POST .../meal-logs/quick-check) 자체는 남아있지만 이제 프론트 어디서도 안 쓴다.
 
 import { createLocalStore } from "@/lib/local-store";
 import { resolveBackendWardAccess } from "@/lib/backend-auth";
 import { API_BASE_URL } from "@/lib/api-config";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+
+// 사진 업로드(submitMealLogPhotos)는 일반 API 호출보다 넉넉하게 UPLOAD_TIMEOUT_MS를 쓴다 —
+// backend-auth.ts 등과 동일한 관례.
+const UPLOAD_TIMEOUT_MS = 30_000;
 
 export type MealSlot = "아침" | "점심" | "저녁";
 
@@ -80,11 +87,35 @@ export async function submitMealLogPhotos(params: {
   formData.append("beforePhoto", params.beforePhoto);
   formData.append("afterPhoto", params.afterPhoto);
 
-  const response = await fetch(`${API_BASE_URL}/wards/${access.backendWardId}/meal-logs`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${access.accessToken}` },
-    body: formData,
-  });
+  // fetchWithTimeout을 거쳐야 토큰 만료(401) 시 세션 만료 안내 + 로그아웃이 자동으로
+  // 걸린다(fetch-with-timeout.ts의 notifySessionExpiredIfNeeded 참고) — 예전엔 여기만
+  // raw fetch를 써서 사진 업로드 중 토큰이 만료되면 이 안내 없이 그냥 에러 문구만 뜨고
+  // 세션은 만료된 채로 남아있었다(2026-08-14 발견).
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/wards/${access.backendWardId}/meal-logs`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${access.accessToken}` },
+      body: formData,
+    },
+    UPLOAD_TIMEOUT_MS
+  );
+  let response: Response;
+  try {
+    response = await promise;
+  } catch (err) {
+    // wellness-calls.ts/rag-chat.ts와 같은 관례 — AbortError(타임아웃)를 여기서 먼저
+    // 잡아 안내 문구로 바꿔둔다. 안 그러면 원본 DOMException이 그대로 diet-view.tsx의
+    // catch까지 올라가는데, 거기는 TypeError만 "서버에 연결할 수 없어요"로 특별 취급하고
+    // DOMException은 걸러내지 못해 "잔반 분석 요청에 실패했어요"라는 애매한 문구로
+    // 뭉개진다(코드 리뷰 지적 — 이 파일의 다른 timeout-aware 호출부들과 관례가 달랐음).
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.");
+    }
+    throw err;
+  } finally {
+    clearRequestTimeout();
+  }
   if (!response.ok) {
     throw new Error(`잔반 분석 요청이 실패했어요 (status ${response.status})`);
   }

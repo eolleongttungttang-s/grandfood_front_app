@@ -20,6 +20,10 @@ const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 type BackendDietHistoryItem = {
   meal_date: string; // "YYYY-MM-DD"
   completed: boolean;
+  /** 사진 기반 완료든 원탭 자가 보고든, 이 끼니에 뭐라도 기록이 남았으면 true
+   *  (grandfood_backend 9f01c26). */
+  recorded: boolean;
+  quick_check_status: string | null;
 };
 
 type BackendDietHistoryResponse = {
@@ -61,12 +65,17 @@ function toDateKey(d: Date): string {
 }
 
 // diet-history는 끼니 단위 레코드만 주기 때문에 하루 단위 톤으로 다시 묶는다.
-// completed(식사 후 사진까지 올라옴) 끼니가 하루 중 하나라도 있으면 "완식", 끼니 기록은
-// 있는데(식전 사진만) completed가 없으면 "소량", 그날 기록 자체가 없으면 "미응답"으로 본다 —
-// mock의 3단계 의미를 최대한 살린 근사치일 뿐, 실제 잔반량을 재서 나온 값은 아니다.
+// completed(식사 후 사진까지 올라옴) 끼니가 하루 중 하나라도 있으면 "완식", 그렇지 않고
+// 원탭 자가 보고(quick_check_status)가 있으면 완식 체크가 하나라도 있으면 "완식", 남김만
+// 있으면 "소량"으로 본다(grandfood_backend 9f01c26) — 완료도 원탭도 전혀 없으면(recorded
+// 인 행 자체가 없으면) "미응답"이다.
 function buildMealHistory(items: BackendDietHistoryItem[]): MealTone[] {
-  const completedDates = new Set(items.filter((i) => i.completed).map((i) => i.meal_date));
-  const recordedDates = new Set(items.map((i) => i.meal_date));
+  const byDate = new Map<string, BackendDietHistoryItem[]>();
+  for (const item of items) {
+    const list = byDate.get(item.meal_date) ?? [];
+    list.push(item);
+    byDate.set(item.meal_date, list);
+  }
 
   const history: MealTone[] = [];
   const today = nowInKST();
@@ -74,9 +83,22 @@ function buildMealHistory(items: BackendDietHistoryItem[]): MealTone[] {
     const d = new Date(today);
     d.setUTCDate(d.getUTCDate() - offset);
     const key = toDateKey(d);
-    if (completedDates.has(key)) history.push("완식");
-    else if (recordedDates.has(key)) history.push("소량");
-    else history.push("미응답");
+    // i.recorded ?? i.completed — 응답 타입이 recorded를 필수로 선언하지만, 배포 시점이
+    // 백엔드(9f01c26)보다 앞서거나 캐시된 옛 응답이 섞이면 런타임엔 그 필드가 없을 수
+    // 있다(타입은 거짓말을 할 수 있음, 코드 리뷰 지적) — completed로 대체하면 최소한
+    // 예전 기준까지는 지켜져서, 필드 하나가 없다고 14일 전체가 "미응답"으로 회귀하지
+    // 않는다.
+    const recordedItems = (byDate.get(key) ?? []).filter((i) => i.recorded ?? i.completed);
+    if (recordedItems.length === 0) {
+      history.push("미응답");
+      continue;
+    }
+    if (recordedItems.some((i) => i.completed)) {
+      history.push("완식");
+      continue;
+    }
+    const hasFullMeal = recordedItems.some((i) => i.quick_check_status === "완식");
+    history.push(hasFullMeal ? "완식" : "소량");
   }
   return history;
 }
