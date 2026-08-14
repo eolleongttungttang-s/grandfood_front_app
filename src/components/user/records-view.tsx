@@ -1,12 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Pill } from "lucide-react";
 
 import { MealTone, Ward, WardDetail } from "@/lib/wards";
-import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
 import { deriveMealTones, fetchElderDietHistory } from "@/lib/meal-dashboard";
+import { getRecommendationForDate, todayDateString } from "@/lib/banchan-recommendation";
+import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { TopBar } from "@/components/app/top-bar";
+import { MealToneSummary } from "@/components/app/meal-tone-summary";
+import { NutrientMeter } from "@/components/app/nutrient-meter";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
   medicationReminderStore,
@@ -19,15 +24,6 @@ const MEAL_TONE_CLASS: Record<string, string> = {
   소량: "bg-risk-caution-foreground",
   미응답: "bg-risk-high-foreground",
 };
-
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between border-b border-border py-2.5 text-sm last:border-0">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-semibold text-foreground">{children}</span>
-    </div>
-  );
-}
 
 export function RecordsView({
   ward,
@@ -60,6 +56,20 @@ export function RecordsView({
   const noResponseCount = mealHistory.filter((m) => m === "미응답").length;
   const reminderEnabled = useLocalStore(medicationReminderStore)[ward.id] ?? false;
   const hasRealMeds = detail.medications[0]?.name !== "특이 복약 없음";
+
+  // 오늘 영양성분 분석 — "정확히 얼마나 드셨는지" 실측 데이터는 없어서(사진 기반 잔반 분석은
+  // 완식/소량/미응답 판정만 함), 대신 오늘 AI가 실제로 배정한 반찬들의 영양가 합(100g당 값
+  // 기준)과 그 사람의 하루 목표 영양치(BMR/TDEE 기반)를 비교해서 보여준다 — "정확히 이만큼
+  // 먹었다"가 아니라 "오늘 배정된 반찬 구성이 목표치에 얼마나 맞는지"를 보여주는 것.
+  const banchanIdentity = { wardId: ward.id, wardName: ward.name, wardAge: ward.age, wardAddress: ward.address };
+  const banchanRecommendation = useMonthlyBanchanRecommendation(banchanIdentity);
+  const todayRecommendation = getRecommendationForDate(banchanRecommendation.monthly, todayDateString());
+  const todayItems = todayRecommendation?.items ?? [];
+  const hasTodayNutritionData = todayRecommendation?.status === "done" && todayItems.length > 0;
+  const todayKcal = todayItems.reduce((sum, i) => sum + (i.caloriePer100g ?? 0), 0);
+  const todayProteinG = todayItems.reduce((sum, i) => sum + (i.proteinPer100g ?? 0), 0);
+  const todaySodiumMg = todayItems.reduce((sum, i) => sum + (i.sodiumPer100g ?? 0), 0);
+  const todayCarbsG = todayItems.reduce((sum, i) => sum + (i.carbsPer100g ?? 0), 0);
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -95,20 +105,12 @@ export function RecordsView({
         )}
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
-            <span className="text-xs text-muted-foreground">
-              완식 <span className="font-semibold text-foreground">{completeCount}</span> ·
-              소량{" "}
-              <span className="font-semibold text-risk-caution-foreground">
-                {smallCount}
-              </span>{" "}
-              · 미응답{" "}
-              <span className="font-semibold text-risk-high-foreground">
-                {noResponseCount}
-              </span>
-            </span>
-          </div>
+          <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
+          <MealToneSummary
+            completeCount={completeCount}
+            smallCount={smallCount}
+            noResponseCount={noResponseCount}
+          />
           <div className="grid grid-cols-7 gap-1.5">
             {mealHistory.map((tone, i) => (
               <div
@@ -120,39 +122,79 @@ export function RecordsView({
           </div>
         </div>
 
-        <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <div className="flex items-baseline justify-between pb-1">
-            <h2 className="text-sm font-bold text-foreground">건강 프로필</h2>
-            <span className="text-xs text-muted-foreground">
-              {detail.healthProfile.source === "mydata_linked" ? "마이데이터 연동" : "자가 입력"}
-            </span>
-          </div>
-          <DetailRow label="혈압 위쪽 숫자 (수축기)">
-            {detail.healthProfile.systolicBP != null
-              ? `${detail.healthProfile.systolicBP} mmHg`
-              : "미입력"}
-          </DetailRow>
-          <DetailRow label="혈압 아래쪽 숫자 (이완기)">
-            {detail.healthProfile.diastolicBP != null
-              ? `${detail.healthProfile.diastolicBP} mmHg`
-              : "미입력"}
-          </DetailRow>
-          <DetailRow label="공복혈당">
-            {detail.healthProfile.fastingGlucose != null
-              ? `${detail.healthProfile.fastingGlucose} mg/dL`
-              : "미입력"}
-          </DetailRow>
-          <DetailRow label="키">
-            {detail.healthProfile.heightCm != null ? `${detail.healthProfile.heightCm} cm` : "미입력"}
-          </DetailRow>
-          <DetailRow label="체중">
-            {detail.healthProfile.weightKg != null ? `${detail.healthProfile.weightKg} kg` : "미입력"}
-          </DetailRow>
-          <DetailRow label="활동 수준">
-            {detail.healthProfile.activityLevel
-              ? ACTIVITY_LEVEL_LABEL[detail.healthProfile.activityLevel]
-              : "미입력"}
-          </DetailRow>
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <h2 className="text-sm font-bold text-foreground">오늘 영양성분 분석</h2>
+          {!hasTodayNutritionData ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                {todayRecommendation?.status === "generating"
+                  ? "오늘 반찬을 고르고 있어요. 완료되면 분석을 볼 수 있어요."
+                  : "AI 반찬 추천을 받으면 오늘의 영양성분 분석을 볼 수 있어요."}
+              </p>
+              {todayRecommendation?.status !== "generating" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-fit"
+                  nativeButton={false}
+                  render={<Link href="/user/diet" />}
+                >
+                  AI 반찬 추천 받으러 가기
+                </Button>
+              )}
+            </>
+          ) : todayRecommendation.targetCalorieKcal == null ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                목표 영양치를 계산하려면 건강 프로필에 키 · 체중 · 활동 수준이 필요해요.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                nativeButton={false}
+                render={<Link href="/user/profile" />}
+              >
+                건강 프로필 입력하러 가기
+              </Button>
+            </>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <NutrientMeter
+                label="칼로리"
+                value={todayKcal}
+                target={todayRecommendation.targetCalorieKcal}
+                unit="kcal"
+              />
+              {todayRecommendation.targetProteinG != null && (
+                <NutrientMeter
+                  label="단백질"
+                  value={todayProteinG}
+                  target={todayRecommendation.targetProteinG}
+                  unit="g"
+                />
+              )}
+              {todayRecommendation.targetSodiumMg != null && (
+                <NutrientMeter
+                  label="나트륨"
+                  value={todaySodiumMg}
+                  target={todayRecommendation.targetSodiumMg}
+                  unit="mg"
+                />
+              )}
+              {todayRecommendation.targetCarbsG != null && (
+                <NutrientMeter
+                  label="탄수화물"
+                  value={todayCarbsG}
+                  target={todayRecommendation.targetCarbsG}
+                  unit="g"
+                />
+              )}
+              <p className="text-xs text-muted-foreground">
+                오늘 AI가 배정한 반찬의 100g당 영양가 합산 기준이에요.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col gap-1 rounded-2xl bg-muted p-5">

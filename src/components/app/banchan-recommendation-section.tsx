@@ -14,7 +14,7 @@ import { Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { WardIdentity } from "@/lib/banchan-recommendation";
-import { MonthlyBanchanRecommendationState } from "@/lib/use-monthly-banchan-recommendation";
+import { hasAnyProgress, MonthlyBanchanRecommendationState } from "@/lib/use-monthly-banchan-recommendation";
 import { BanchanRecommendationCalendar } from "@/components/app/banchan-recommendation-calendar";
 
 export function BanchanRecommendationSection({
@@ -35,6 +35,11 @@ export function BanchanRecommendationSection({
   // 하도록 안내한다. hasActiveSubscription이 아직 null(확인 중)이면 판단이 서기 전까지는
   // 기존 버튼을 disabled로 두고(깜빡임 방지), false로 확정된 뒤에야 버튼을 통째로 바꾼다.
   const needsSubscription = hasActiveSubscription === false;
+  // monthly는 구독만 있으면(실제로 한 번도 추천을 요청한 적 없어도) 전부 not_started인 채로
+  // null이 아니게 채워진다 — "monthly가 있다" != "받아본 적 있다"라, 그걸로 "다시
+  // 추천받기"/빈 상태 문구를 가르면 구독 직후 첫 진입에서도 "다시" 문구와 빈 달력이 뜬다
+  // (2026-08-13 피드백). 실제로 뭔가 진행된 적 있는지(hasAnyProgress)로 가른다.
+  const hasProgress = hasAnyProgress(monthly);
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
@@ -51,7 +56,7 @@ export function BanchanRecommendationSection({
         ) : (
           <Button size="sm" onClick={request} disabled={requesting || loading || hasActiveSubscription == null}>
             <Sparkles />
-            {requesting ? "요청하는 중..." : monthly ? "다시 추천받기" : "AI 추천받기"}
+            {requesting ? "요청하는 중..." : hasProgress ? "다시 추천받기" : "AI 추천받기"}
           </Button>
         )}
       </div>
@@ -64,7 +69,7 @@ export function BanchanRecommendationSection({
         <p className="text-sm text-muted-foreground">
           구독이 있어야 AI 반찬 추천을 받을 수 있어요. 위 버튼을 눌러 먼저 구독을 시작해 주세요.
         </p>
-      ) : !monthly || monthly.weeks.length === 0 ? (
+      ) : !monthly || !hasProgress ? (
         <p className="text-sm text-muted-foreground">
           아직 이번 달 AI 반찬 추천을 요청하지 않았어요. 위 버튼을 눌러 받아보세요.
         </p>

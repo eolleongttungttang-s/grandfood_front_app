@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ChevronRight } from "lucide-react";
 
 import {
   CARE_SURVEY_STEP,
@@ -8,7 +9,9 @@ import {
   CONDITION_POOL,
   DISLIKED_INGREDIENT_POOL,
   EMPTY_CARE_PROFILE_COMMAND,
+  LIVING_ARRANGEMENT_LABEL,
   LivingArrangement,
+  MOBILITY_LABEL,
   MobilityLevel,
   RegisterCareProfileCommand,
 } from "@/lib/care-profile";
@@ -78,6 +81,25 @@ function OptionButton({
   );
 }
 
+// 수정하려는 항목 하나 때문에 14단계를 처음부터 다시 눌러가야 했던 문제(2026-08-13
+// 피드백) — 이미 한 번 채워진 값이 있을 때(initialValues 있음)는 이 목록 화면을 먼저
+// 보여주고, 항목을 누르면 그 단계로 바로 들어간다.
+function OverviewRow({ label, value, onClick }: { label: string; value: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center justify-between rounded-2xl border border-border bg-card px-5 py-4 text-left transition-colors hover:bg-muted"
+    >
+      <div className="flex flex-col gap-0.5">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className="text-lg font-semibold text-foreground">{value}</span>
+      </div>
+      <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
 function StepHeading({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -109,7 +131,10 @@ export function CareSurveyView({
 }: {
   wardId: string;
   wardName: string;
-  initialValues?: RegisterCareProfileCommand;
+  // completed/answeredStep은 CareProfileView(care-profile.ts)에만 있는 필드라 optional로
+  // 열어둔다 — 호출부가 실제로는 CareProfileView 전체를 넘기지만(user/survey/page.tsx),
+  // 이 컴포넌트가 필요한 만큼만 타입에 요구한다.
+  initialValues?: RegisterCareProfileCommand & { completed?: boolean; answeredStep?: number };
   initialHealthValues?: HealthMetricsForm;
   onComplete: (cmd: RegisterCareProfileCommand, health: HealthMetricsForm) => void | Promise<void>;
   onSkip: (
@@ -118,6 +143,21 @@ export function CareSurveyView({
     health: HealthMetricsForm
   ) => void | Promise<void>;
 }) {
+  // 목록 화면(overview)은 initialValues의 각 필드가 "실제로 답한 값"이라는 전제로 그대로
+  // 보여준다 — completed가 false인 프로필(예전에 "나중에 할게요"로 건너뜀)은 답한 적 없는
+  // 필드도 EMPTY_CARE_PROFILE_COMMAND 기본값(예: 음식 알레르기 "없음", 거동 "혼자 잘
+  // 걸어다님")을 그대로 들고 있어서, 목록에 실제 답변처럼 보여주면 안 된다(코드 리뷰 지적 —
+  // 이 값을 그대로 다시 저장하면 registerCareProfile이 completed:true로 확정해버려서, 실제로는
+  // 안 물어본 답이 영구히 "답함"으로 남는다). 그래서 completed가 확실히 true일 때만 목록을
+  // 보여주고, 아니면(건너뛴 적 있음/최초 온보딩) 지금까지처럼 순서대로 다 물어보게 둔다 —
+  // 그래야 미답변 필드도 반드시 한 번은 화면에 노출된 뒤 저장된다.
+  const isEditMode = initialValues?.completed === true;
+  const [mode, setMode] = useState<"overview" | "wizard">(isEditMode ? "overview" : "wizard");
+  // 목록 화면에서 특정 단계로 바로 들어온 경우, 그 단계를 확인하고 나면 다음 단계로
+  // 넘어가는 게 아니라 목록으로 돌아가야 한다 — 순서대로 진행 중인 것과 버튼 동작이
+  // 달라야 해서 이 값으로 구분한다.
+  const [enteredFromOverview, setEnteredFromOverview] = useState(false);
+
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<RegisterCareProfileCommand>(
     initialValues ?? { ...EMPTY_CARE_PROFILE_COMMAND, wardId }
@@ -126,6 +166,22 @@ export function CareSurveyView({
     initialHealthValues ?? EMPTY_HEALTH_METRICS_FORM
   );
   const [submitting, setSubmitting] = useState(false);
+
+  function jumpToStep(target: number) {
+    setStep(target);
+    setEnteredFromOverview(true);
+    setMode("wizard");
+  }
+
+  async function handleFinishEditing() {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onComplete(form, healthForm);
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   function update<K extends keyof RegisterCareProfileCommand>(
     key: K,
@@ -159,6 +215,13 @@ export function CareSurveyView({
   const isLast = step === TOTAL_STEPS - 1;
 
   async function handleNext() {
+    // 목록에서 골라 들어온 단계면 "다음"이 다음 단계로 넘어가는 게 아니라 방금 고친 값을
+    // 들고 목록으로 돌아간다 — 순서대로 쭉 진행하는 흐름과는 이 버튼의 의미 자체가 다르다.
+    if (enteredFromOverview) {
+      setEnteredFromOverview(false);
+      setMode("overview");
+      return;
+    }
     if (!isLast) {
       setStep((s) => s + 1);
       return;
@@ -190,27 +253,151 @@ export function CareSurveyView({
     }
   }
 
+  if (mode === "overview") {
+    const rows: { step: number; label: string; value: string }[] = [
+      { step: CARE_SURVEY_STEP.mealsPerDay, label: "하루 식사 횟수", value: `${form.mealsPerDay}회` },
+      {
+        step: CARE_SURVEY_STEP.livingArrangement,
+        label: "동거 형태",
+        value: LIVING_ARRANGEMENT_LABEL[form.livingArrangement],
+      },
+      {
+        step: CARE_SURVEY_STEP.dislikedIngredients,
+        label: "못 먹거나 싫어하는 재료",
+        value:
+          [...form.dislikedIngredients, form.dislikedIngredientsNote].filter(Boolean).join(", ") || "없음",
+      },
+      {
+        step: CARE_SURVEY_STEP.allergy,
+        label: "음식 알레르기",
+        value: form.hasAllergy ? form.allergyNote || "있음" : "없음",
+      },
+      {
+        step: CARE_SURVEY_STEP.conditions,
+        label: "진단받은 질환",
+        value: [...form.conditions, form.conditionsNote].filter(Boolean).join(", ") || "없음",
+      },
+      {
+        step: CARE_SURVEY_STEP.medication,
+        label: "복용 중인 약",
+        value: form.takesMedication ? form.medicationNote || "있음" : "없음",
+      },
+      {
+        step: CARE_SURVEY_STEP.chewingDifficulty,
+        label: "씹기 · 삼키기",
+        value: form.chewingDifficulty ? "불편함" : "괜찮음",
+      },
+      { step: CARE_SURVEY_STEP.mobility, label: "거동", value: MOBILITY_LABEL[form.mobilityLevel] },
+      {
+        step: CARE_SURVEY_STEP.emergencyContact,
+        label: "비상연락처",
+        value: form.emergencyContactPhone
+          ? `${form.emergencyContactName}(${form.emergencyContactRelation}) ${form.emergencyContactPhone}`
+          : "미입력",
+      },
+      {
+        step: HEALTH_STEP.height,
+        label: "키",
+        value: healthForm.heightCm != null ? `${healthForm.heightCm}cm` : "미입력",
+      },
+      {
+        step: HEALTH_STEP.weight,
+        label: "체중",
+        value: healthForm.weightKg != null ? `${healthForm.weightKg}kg` : "미입력",
+      },
+      {
+        step: HEALTH_STEP.bloodPressure,
+        label: "혈압",
+        value:
+          healthForm.systolicBP != null && healthForm.diastolicBP != null
+            ? `${healthForm.systolicBP}/${healthForm.diastolicBP} mmHg`
+            : "미입력",
+      },
+      {
+        step: HEALTH_STEP.glucose,
+        label: "공복혈당",
+        value: healthForm.fastingGlucose != null ? `${healthForm.fastingGlucose} mg/dL` : "미입력",
+      },
+      {
+        step: HEALTH_STEP.activityLevel,
+        label: "활동 수준",
+        value: healthForm.activityLevel ? ACTIVITY_LEVEL_LABEL[healthForm.activityLevel] : "미입력",
+      },
+    ];
+
+    return (
+      <div className="flex flex-1 flex-col">
+        <div className="flex flex-col gap-4 px-5 py-6">
+          <StepHeading
+            title="무엇을 수정하시겠어요?"
+            hint="항목을 누르면 그 질문으로 바로 이동해요"
+          />
+          <div className="flex flex-col gap-2.5">
+            {rows.map((row) => (
+              <OverviewRow
+                key={row.step}
+                label={row.label}
+                value={row.value}
+                onClick={() => jumpToStep(row.step)}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="px-5 pb-6">
+          <Button
+            size="lg"
+            className="h-14 w-full text-lg"
+            onClick={handleFinishEditing}
+            disabled={submitting}
+          >
+            {submitting ? "저장하는 중..." : "완료"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col">
-      <div className="flex items-center justify-between px-5 pt-5">
-        <span className="text-base font-semibold text-muted-foreground">
-          {step + 1} / {TOTAL_STEPS}
-        </span>
-        <button
-          type="button"
-          className="text-base font-semibold text-muted-foreground underline underline-offset-2"
-          onClick={handleSkip}
-          disabled={submitting}
-        >
-          나중에 할게요
-        </button>
-      </div>
-      <div className="mx-5 mt-3 h-2 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full bg-primary transition-all"
-          style={{ width: `${((step + 1) / TOTAL_STEPS) * 100}%` }}
-        />
-      </div>
+      {enteredFromOverview ? (
+        // 목록에서 골라 들어온 단계엔 "X / 14" 진행률이나 "나중에 할게요"가 의미가 없다 —
+        // 순서대로 훑는 중이 아니라 이 질문 하나만 고치러 왔기 때문.
+        <div className="px-5 pt-5">
+          <button
+            type="button"
+            className="text-base font-semibold text-muted-foreground underline underline-offset-2"
+            onClick={() => {
+              setEnteredFromOverview(false);
+              setMode("overview");
+            }}
+            disabled={submitting}
+          >
+            ← 목록으로
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between px-5 pt-5">
+            <span className="text-base font-semibold text-muted-foreground">
+              {step + 1} / {TOTAL_STEPS}
+            </span>
+            <button
+              type="button"
+              className="text-base font-semibold text-muted-foreground underline underline-offset-2"
+              onClick={handleSkip}
+              disabled={submitting}
+            >
+              나중에 할게요
+            </button>
+          </div>
+          <div className="mx-5 mt-3 h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{ width: `${((step + 1) / TOTAL_STEPS) * 100}%` }}
+            />
+          </div>
+        </>
+      )}
 
       <div className="flex flex-1 flex-col gap-5 px-5 py-6">
         {step === CARE_SURVEY_STEP.mealsPerDay && (
@@ -573,7 +760,9 @@ export function CareSurveyView({
       </div>
 
       <div className="flex gap-2 px-5 pb-6">
-        {step > 0 && (
+        {/* 목록에서 골라 들어온 단계엔 "이전"이 의미가 없다 — 순서상 앞 단계로 가는 버튼이지,
+            목록으로 돌아가는 버튼이 아니라서 그대로 두면 오히려 헷갈린다. */}
+        {!enteredFromOverview && step > 0 && (
           <Button
             variant="outline"
             size="lg"
@@ -590,7 +779,7 @@ export function CareSurveyView({
           onClick={handleNext}
           disabled={submitting}
         >
-          {isLast ? "완료" : "다음"}
+          {enteredFromOverview ? "확인" : isLast ? "완료" : "다음"}
         </Button>
       </div>
     </div>
