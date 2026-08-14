@@ -1,5 +1,7 @@
 import { toast } from "sonner";
 
+import { clearSessionForExpiredToken } from "@/lib/session";
+
 // fetch에 타임아웃을 붙이는 공용 헬퍼. accessibility.ts(speakRaw)와 rag-chat.ts
 // (askHealthQuestion) 양쪽에 거의 같은 AbortController+setTimeout 패턴이 각자 있었는데,
 // 그중 하나가 "fetch()가 헤더를 받자마자 clearTimeout을 호출해서, 그 뒤 response.blob()/
@@ -35,21 +37,19 @@ import { toast } from "sonner";
 const RELOGIN_REQUIRED_CODES = new Set(["token_expired", "token_invalid"]);
 let sessionExpiredNotified = false;
 
-async function notifySessionExpiredIfNeeded(response: Response): Promise<Response> {
-  if (response.status !== 401 || typeof window === "undefined") return response;
-  if (sessionExpiredNotified) return response;
-  // 이미 로그인/회원가입 화면이면 "다시 로그인하라"는 안내가 의미 없으니 건너뛴다.
-  const path = window.location.pathname;
-  if (path.startsWith("/login") || path.startsWith("/signup")) return response;
+// 여러 401이 동시에 오면 "재로그인이 필요한 code인지" 조사를 순서대로(직렬로) 처리한다 —
+// 처음엔 await 전에 플래그를 선점하고 필요 없으면 되돌리는 방식으로 짰었는데, 그것도
+// 레이스가 있었다(코드 리뷰 지적): A(missing_token, 재로그인 불필요)와 B(token_expired,
+// 재로그인 필요)가 거의 동시에 도착하면 A가 먼저 플래그를 선점→await→"필요 없음" 판정
+// →플래그 해제 하는 사이, B는 A가 선점해둔 플래그를 이미 true로 보고 조기 반환해버려
+// 정말 만료된 세션의 알림이 조용히 사라질 수 있었다. 매번 이전 조사가 완전히 끝난
+// 뒤에만 다음 조사를 시작하도록 프라미스 체인으로 직렬화하면, 각 401이 항상 자기
+// 차례에 정확한 최종 상태를 보고 판단하므로 이 문제가 없다 — 401은 흔한 경로가 아니라
+// 약간의 지연은 문제 되지 않는다.
+let sessionExpiryQueue: Promise<void> = Promise.resolve();
 
-  // 아래 response.clone().json()이 await라 여기서 제어권이 잠깐 이벤트 루프로 넘어간다 —
-  // 그 사이 다른 401 응답의 notifySessionExpiredIfNeeded가 또 돌면(여러 요청이 동시에
-  // 401을 받은 경우) 그것도 위의 sessionExpiredNotified 체크를 아직 true로 못 보고
-  // 통과해서, 토스트/로그아웃/리다이렉트가 중복 발생할 수 있었다(코드 리뷰 지적: check-
-  // then-await-then-set 레이스). await 전에 먼저 플래그를 선점해서(이 줄 위로는 await가
-  // 없어 동기적으로 끝까지 실행되므로 다른 호출이 끼어들 수 없다) 이 경합을 없앤다 —
-  // 다시 로그인이 필요한 code가 아닌 걸로 밝혀지면 아래에서 선점을 풀어준다.
-  sessionExpiredNotified = true;
+async function investigateAndHandle(response: Response): Promise<void> {
+  if (sessionExpiredNotified) return;
 
   // response.json()은 스트림을 한 번만 읽을 수 있어서, 실제 호출부가 나중에 바디를
   // 또 읽어야 하는 경우(에러 메시지 파싱 등)를 위해 clone()에서 읽는다. 바디가
@@ -61,17 +61,28 @@ async function notifySessionExpiredIfNeeded(response: Response): Promise<Respons
   } catch {
     code = undefined;
   }
-  if (!code || !RELOGIN_REQUIRED_CODES.has(code)) {
-    sessionExpiredNotified = false;
-    return response;
-  }
+  if (!code || !RELOGIN_REQUIRED_CODES.has(code)) return;
 
+  sessionExpiredNotified = true;
   toast.error("로그인 기간이 만료되었습니다. 다시 로그인해주세요.");
-  // "OOO님으로 계속하기"가 다음에 또 세션 없이 홈으로 들여보내지 않도록, 로그인 포인터를
-  // 지워서 로그아웃 상태로 만든다(계정 목록 자체는 그대로 둔다 — session.tsx의 logout()과
-  // 동일한 동작).
-  window.localStorage.removeItem("grandfood-app-session");
+  // "OOO님으로 계속하기"가 다음에 또 세션 없이 홈으로 들여보내지 않도록 로그아웃 상태로
+  // 만든다 — session.tsx가 실제 로그아웃 버튼에 쓰는 것과 완전히 같은 동작을 그대로
+  // 호출한다(예전엔 window.localStorage.removeItem을 여기서 직접 다시 구현해서, 그
+  // STORAGE_KEY 문자열이 두 파일에 중복되고 — 리네임 시 한쪽을 깜빡할 위험 — session.tsx가
+  // 하는 listeners.forEach 알림도 빠져 있었다, 코드 리뷰 지적).
+  clearSessionForExpiredToken();
   window.location.href = "/login";
+}
+
+async function notifySessionExpiredIfNeeded(response: Response): Promise<Response> {
+  if (response.status !== 401 || typeof window === "undefined") return response;
+  // 이미 로그인/회원가입 화면이면 "다시 로그인하라"는 안내가 의미 없으니 건너뛴다.
+  const path = window.location.pathname;
+  if (path.startsWith("/login") || path.startsWith("/signup")) return response;
+
+  const myTurn = sessionExpiryQueue.then(() => investigateAndHandle(response));
+  sessionExpiryQueue = myTurn;
+  await myTurn;
   return response;
 }
 
