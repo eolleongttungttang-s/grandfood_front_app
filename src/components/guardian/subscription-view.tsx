@@ -1,17 +1,85 @@
 "use client";
 
+import { useState } from "react";
 import { Check } from "lucide-react";
 import { toast } from "sonner";
 
 import { TopBar } from "@/components/app/top-bar";
 import { Button } from "@/components/ui/button";
-import { PLANS, PAYMENT_METHOD, subscriptionStore, formatWon, syncSubscriptionToBackend } from "@/lib/subscription";
+import {
+  PLANS,
+  PAYMENT_METHOD,
+  subscriptionStore,
+  formatWon,
+  syncSubscriptionToBackend,
+  subscriptionSyncFailureMessage,
+} from "@/lib/subscription";
 import { useLocalStore } from "@/lib/use-store";
 import type { Ward } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 
 export function SubscriptionView({ wards }: { wards: Ward[] }) {
   const currentPlanId = useLocalStore(subscriptionStore);
+  const [syncingPlanId, setSyncingPlanId] = useState<string | null>(null);
+
+  // 대상자 수만큼 syncSubscriptionToBackend를 반복 호출한 뒤(이 화면은 보호자 계정 전체에
+  // 플랜 하나만 고르는 UI라 관리하는 모든 대상자에게 동일 플랜을 반영, subscription.ts
+  // 주석 참고) 결과를 종합한다. 예전엔 이 결과를 아예 안 보고 항상 성공 토스트를 먼저
+  // 띄웠다 — 실제로는 no-backend-session(이 보호자로 백엔드에 로그인한 적이 없어 토큰
+  // 자체를 못 구함)이라 fetch조차 한 번도 안 나갔는데도 "변경했어요"만 보이는, 버튼이
+  // 눌러도 아무 반응이 없는 것처럼 느껴지던 원인이었다.
+  async function handleSelectPlan(planId: string) {
+    setSyncingPlanId(planId);
+    const results = await Promise.all(
+      wards.map((w) =>
+        syncSubscriptionToBackend(
+          { mockWardId: w.id, name: w.name, age: w.age, address: w.address },
+          planId,
+          "guardian"
+        )
+      )
+    );
+    setSyncingPlanId(null);
+
+    const plan = PLANS.find((p) => p.id === planId);
+    const succeeded = results.filter((r) => r.ok).length;
+
+    // 대상자가 아예 없으면(관리하는 어르신을 아직 안 만든 보호자) 백엔드에 반영할 대상이
+    // 없는 게 정상이라 바로 성공 처리한다 — results가 빈 배열이라 succeeded도 0이 돼서,
+    // wards.length(마찬가지로 0)와 그대로 같아져 이 조건 하나로 자연스럽게 걸러진다.
+    if (succeeded === wards.length) {
+      subscriptionStore.write(planId);
+      toast.success(`${plan?.name ?? "선택하신"} 플랜으로 변경했어요.`);
+      return;
+    }
+
+    if (succeeded > 0) {
+      // 일부 대상자만 반영된 상태 — 여기서 subscriptionStore를 쓰면 이 플랜이 곧바로
+      // "이용중"(isCurrent) 처리돼서, 실패한 대상자를 다시 반영할 "이 플랜으로 변경"
+      // 버튼(!isCurrent 조건)이 화면에서 사라져버린다(코드 리뷰 지적) — 그래서 로컬
+      // 표시는 갱신하지 않고, 나머지는 재시도해야 한다는 것만 알려준다.
+      toast.warning(
+        `${succeeded}/${wards.length}명에게만 플랜이 반영됐어요. 나머지는 잠시 후 다시 시도해 주세요.`
+      );
+      return;
+    }
+
+    // 전부 실패 — 세션 만료(401)로 인한 실패라면 fetch-with-timeout.ts의 전역 핸들러가
+    // 이미 "다시 로그인해주세요" 토스트+리다이렉트를 처리 중이라 여기서 또 안내하지 않는다.
+    const failures = results.filter((r): r is Extract<typeof r, { ok: false }> => !r.ok);
+    if (failures.some((r) => r.reason === "session-expired")) return;
+
+    // 사유 → 문구 매핑은 user/subscription-view.tsx와 공유하는
+    // subscriptionSyncFailureMessage()에 모아뒀다(코드 리뷰 지적 — 두 화면이 각자
+    // 복제해두면 한쪽만 고치고 잊어버리기 쉽다). 대상자가 여럿이라 실패 사유가 섞일 수
+    // 있는데, 전부 같은 사유일 때만 그 사유에 맞는 구체적 안내를 주고(예: 전원
+    // no-backend-session이면 재로그인 안내), 사유가 섞여 있으면 일반 안내로 충분하다.
+    const fallback = "구독 변경에 실패했어요. 잠시 후 다시 시도해 주세요.";
+    const uniqueReasons = new Set(failures.map((r) => r.reason));
+    const uniformReason = uniqueReasons.size === 1 ? failures[0].reason : null;
+    const message = uniformReason ? subscriptionSyncFailureMessage(uniformReason, fallback) : fallback;
+    if (message) toast.error(message);
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -49,24 +117,10 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
                 <Button
                   size="sm"
                   className="w-fit"
-                  onClick={async () => {
-                    subscriptionStore.write(plan.id);
-                    toast.success(`${plan.name} 플랜으로 변경했어요.`);
-                    // 이 화면은 보호자 계정 전체에 플랜 하나만 고르는 UI라, 관리하는 모든
-                    // 대상자에게 같은 플랜을 백엔드에도 반영한다(subscription.ts 주석 참고).
-                    // 실패해도(서버 일시 장애 등) 이미 로컬 변경/안내는 끝난 뒤라 조용히 넘어간다.
-                    await Promise.all(
-                      wards.map((w) =>
-                        syncSubscriptionToBackend(
-                          { mockWardId: w.id, name: w.name, age: w.age, address: w.address },
-                          plan.id,
-                          "guardian"
-                        )
-                      )
-                    );
-                  }}
+                  disabled={syncingPlanId !== null}
+                  onClick={() => handleSelectPlan(plan.id)}
                 >
-                  이 플랜으로 변경
+                  {syncingPlanId === plan.id ? "변경 중..." : "이 플랜으로 변경"}
                 </Button>
               )}
             </div>
