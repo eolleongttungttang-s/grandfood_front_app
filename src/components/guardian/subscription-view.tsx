@@ -1,163 +1,196 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { toast } from "sonner";
 
 import { TopBar } from "@/components/app/top-bar";
 import { Button } from "@/components/ui/button";
+import { ButtonSelectGroup } from "@/components/app/button-select-group";
 import {
   PLANS,
   PAYMENT_METHOD,
-  subscriptionStore,
+  resolveDisplayPlanId,
   formatWon,
   syncSubscriptionToBackend,
   subscriptionSyncFailureMessage,
+  fetchActiveSubscriptionBackend,
 } from "@/lib/subscription";
-import { useLocalStore } from "@/lib/use-store";
 import type { Ward } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 
+type WardPlanState = { planId: string; fundingSource: string } | null;
+
 export function SubscriptionView({ wards }: { wards: Ward[] }) {
-  const currentPlanId = useLocalStore(subscriptionStore);
+  const [selectedWardId, setSelectedWardId] = useState(wards[0]?.id ?? "");
+  // 대상자별로 플랜이 다를 수 있어서(2026-08-18 피드백 — 식사 준비가 아예 어려운
+  // 어르신과 하루 한 끼만 챙겨도 되는 어르신처럼 필요한 수준이 다르다) 대상자 id를
+  // 키로 하는 맵으로 관리한다. 값이 null이면 "확인했지만 구독 없음", 키 자체가
+  // 없으면 아직 확인 전이라는 뜻이다 — "확인 전"과 "확인했지만 없음"을 별도
+  // checkingBackend 불리언으로 구분하면(2026-08-18 코드 리뷰 지적), 대상자 목록이
+  // 나중에 바뀌어(예: 보호자 백그라운드 동기화로 새 대상자가 추가됨) 이 맵을 다시
+  // 채우는 동안 그 불리언을 true로 되돌리는 걸 깜빡하기 쉽고, 실제로 그래서 방금
+  // 동기화된 대상자가 잠깐 "구독 없음"으로 잘못 보이는 문제가 있었다. 이 맵에 그
+  // 대상자의 키가 있는지 없는지만으로 "확인 여부"를 그때그때 파생시키면 그런
+  // 불일치 자체가 생길 수 없다.
+  const [wardPlans, setWardPlans] = useState<Record<string, WardPlanState>>({});
   const [syncingPlanId, setSyncingPlanId] = useState<string | null>(null);
 
-  // 대상자 수만큼 syncSubscriptionToBackend를 반복 호출한 뒤(이 화면은 보호자 계정 전체에
-  // 플랜 하나만 고르는 UI라 관리하는 모든 대상자에게 동일 플랜을 반영, subscription.ts
-  // 주석 참고) 결과를 종합한다. 예전엔 이 결과를 아예 안 보고 항상 성공 토스트를 먼저
-  // 띄웠다 — 실제로는 no-backend-session(이 보호자로 백엔드에 로그인한 적이 없어 토큰
-  // 자체를 못 구함)이라 fetch조차 한 번도 안 나갔는데도 "변경했어요"만 보이는, 버튼이
-  // 눌러도 아무 반응이 없는 것처럼 느껴지던 원인이었다.
-  async function handleSelectPlan(planId: string) {
-    setSyncingPlanId(planId);
-    const results = await Promise.all(
+  const wardIdsKey = wards.map((w) => w.id).join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
       wards.map((w) =>
-        syncSubscriptionToBackend(
-          { mockWardId: w.id, name: w.name, age: w.age, address: w.address },
-          planId,
-          "guardian"
+        fetchActiveSubscriptionBackend({ mockWardId: w.id }).then(
+          (result) =>
+            [w.id, result ? { planId: resolveDisplayPlanId(result.planType), fundingSource: result.fundingSource } : null] as const
         )
       )
+    ).then((entries) => {
+      if (cancelled) return;
+      setWardPlans(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wardIdsKey]);
+
+  const selectedWard = wards.find((w) => w.id === selectedWardId) ?? null;
+  const selectedWardChecked = selectedWard !== null && selectedWard.id in wardPlans;
+  const selectedWardPlan = selectedWard ? (wardPlans[selectedWard.id] ?? null) : null;
+
+  async function handleSelectPlan(planId: string) {
+    if (!selectedWard) return;
+    const plan = PLANS.find((p) => p.id === planId);
+
+    if (selectedWardPlan) {
+      const warning =
+        selectedWardPlan.fundingSource !== "guardian"
+          ? `${selectedWard.name}님이 본인 명의로 직접 구독을 관리하고 있어요. 지금 변경하면 그 구독이 취소되고 이 플랜으로 바뀌어요. 계속할까요?`
+          : `${selectedWard.name}님의 플랜을 "${plan?.name ?? "선택하신"}"(으)로 바꿀까요?`;
+      if (!window.confirm(warning)) return;
+    }
+
+    setSyncingPlanId(planId);
+    const result = await syncSubscriptionToBackend(
+      { mockWardId: selectedWard.id, name: selectedWard.name, age: selectedWard.age, address: selectedWard.address },
+      planId,
+      "guardian"
     );
     setSyncingPlanId(null);
 
-    const plan = PLANS.find((p) => p.id === planId);
-    const succeeded = results.filter((r) => r.ok).length;
-
-    // 대상자가 아예 없으면(관리하는 어르신을 아직 안 만든 보호자) 백엔드에 반영할 대상이
-    // 없는 게 정상이라 바로 성공 처리한다 — results가 빈 배열이라 succeeded도 0이 돼서,
-    // wards.length(마찬가지로 0)와 그대로 같아져 이 조건 하나로 자연스럽게 걸러진다.
-    if (succeeded === wards.length) {
-      subscriptionStore.write(planId);
-      toast.success(`${plan?.name ?? "선택하신"} 플랜으로 변경했어요.`);
-      return;
-    }
-
-    if (succeeded > 0) {
-      // 일부 대상자만 반영된 상태 — 여기서 subscriptionStore를 쓰면 이 플랜이 곧바로
-      // "이용중"(isCurrent) 처리돼서, 실패한 대상자를 다시 반영할 "이 플랜으로 변경"
-      // 버튼(!isCurrent 조건)이 화면에서 사라져버린다(코드 리뷰 지적) — 그래서 로컬
-      // 표시는 갱신하지 않고, 나머지는 재시도해야 한다는 것만 알려준다.
-      toast.warning(
-        `${succeeded}/${wards.length}명에게만 플랜이 반영됐어요. 나머지는 잠시 후 다시 시도해 주세요.`
+    if (!result.ok) {
+      const message = subscriptionSyncFailureMessage(
+        result.reason,
+        "구독 변경에 실패했어요. 잠시 후 다시 시도해 주세요."
       );
+      if (message) toast.error(message);
       return;
     }
 
-    // 전부 실패 — 세션 만료(401)로 인한 실패라면 fetch-with-timeout.ts의 전역 핸들러가
-    // 이미 "다시 로그인해주세요" 토스트+리다이렉트를 처리 중이라 여기서 또 안내하지 않는다.
-    const failures = results.filter((r): r is Extract<typeof r, { ok: false }> => !r.ok);
-    if (failures.some((r) => r.reason === "session-expired")) return;
-
-    // 사유 → 문구 매핑은 user/subscription-view.tsx와 공유하는
-    // subscriptionSyncFailureMessage()에 모아뒀다(코드 리뷰 지적 — 두 화면이 각자
-    // 복제해두면 한쪽만 고치고 잊어버리기 쉽다). 대상자가 여럿이라 실패 사유가 섞일 수
-    // 있는데, 전부 같은 사유일 때만 그 사유에 맞는 구체적 안내를 주고(예: 전원
-    // no-backend-session이면 재로그인 안내), 사유가 섞여 있으면 일반 안내로 충분하다.
-    const fallback = "구독 변경에 실패했어요. 잠시 후 다시 시도해 주세요.";
-    const uniqueReasons = new Set(failures.map((r) => r.reason));
-    const uniformReason = uniqueReasons.size === 1 ? failures[0].reason : null;
-    const message = uniformReason ? subscriptionSyncFailureMessage(uniformReason, fallback) : fallback;
-    if (message) toast.error(message);
+    setWardPlans((prev) => ({ ...prev, [selectedWard.id]: { planId, fundingSource: "guardian" } }));
+    toast.success(`${selectedWard.name}님을 "${plan?.name ?? "선택하신"}" 플랜으로 변경했어요.`);
   }
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
-      <TopBar title="구독 관리" subtitle="플랜과 결제수단" />
+      <TopBar title="구독 관리" subtitle="대상자별 플랜과 결제수단" />
 
-      <div className="flex flex-col gap-3 px-5">
-        {PLANS.map((plan) => {
-          const isCurrent = plan.id === currentPlanId;
-          return (
-            <div
-              key={plan.id}
-              className={`flex flex-col gap-2 rounded-2xl border bg-card p-5 shadow-sm ${
-                isCurrent ? "border-primary" : "border-border"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-base font-extrabold text-foreground">{plan.name}</span>
-                {isCurrent && (
-                  <span className="flex items-center gap-1 text-xs font-semibold text-primary">
-                    <Check className="h-3.5 w-3.5" />
-                    이용중
-                  </span>
+      {wards.length === 0 ? (
+        <div className="mx-5 rounded-2xl border border-border bg-card p-5 text-sm text-muted-foreground">
+          아직 관리하는 대상자가 없어요. 대상자를 먼저 추가해주세요.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3 px-5">
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <ButtonSelectGroup
+              label="어느 대상자의 플랜을 바꿀까요?"
+              options={wards.map((w) => ({ value: w.id, label: w.name }))}
+              value={selectedWardId}
+              onChange={setSelectedWardId}
+              columns={wards.length > 2 ? 3 : 2}
+            />
+          </div>
+
+          {PLANS.map((plan) => {
+            const isCurrent = selectedWardChecked && selectedWardPlan?.planId === plan.id;
+            return (
+              <div
+                key={plan.id}
+                className={`flex flex-col gap-2 rounded-2xl border bg-card p-5 shadow-sm ${
+                  isCurrent ? "border-primary" : "border-border"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-base font-extrabold text-foreground">{plan.name}</span>
+                  {isCurrent && (
+                    <span className="flex items-center gap-1 text-xs font-semibold text-primary">
+                      <Check className="h-3.5 w-3.5" />
+                      {selectedWard?.name}님 이용중
+                    </span>
+                  )}
+                </div>
+                <span className="text-lg font-bold text-foreground">
+                  {formatWon(plan.priceWon)}
+                  <span className="text-xs font-normal text-muted-foreground"> /월</span>
+                </span>
+                <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+                  {plan.features.map((f) => (
+                    <li key={f}>· {f}</li>
+                  ))}
+                </ul>
+                {!isCurrent && (
+                  <Button
+                    size="sm"
+                    className="w-fit"
+                    disabled={!selectedWardChecked || syncingPlanId !== null}
+                    onClick={() => handleSelectPlan(plan.id)}
+                  >
+                    {syncingPlanId === plan.id
+                      ? "변경 중..."
+                      : selectedWardPlan
+                        ? "이 플랜으로 변경"
+                        : "이 플랜으로 시작하기"}
+                  </Button>
                 )}
               </div>
-              <span className="text-lg font-bold text-foreground">
-                {formatWon(plan.priceWon)}
-                <span className="text-xs font-normal text-muted-foreground"> /월</span>
-              </span>
-              <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-                {plan.features.map((f) => (
-                  <li key={f}>· {f}</li>
-                ))}
-              </ul>
-              {!isCurrent && (
-                <Button
-                  size="sm"
-                  className="w-fit"
-                  disabled={syncingPlanId !== null}
-                  onClick={() => handleSelectPlan(plan.id)}
-                >
-                  {syncingPlanId === plan.id ? "변경 중..." : "이 플랜으로 변경"}
-                </Button>
-              )}
+            );
+          })}
+
+          <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <span className="text-xs font-bold text-foreground">배송 파트너 매장</span>
+            <div className="flex flex-col gap-1">
+              {wards.map((ward) => {
+                const store = getPartnerStore(ward.partnerStoreId);
+                return (
+                  <div key={ward.id} className="flex justify-between text-sm">
+                    <span className="text-foreground">{ward.name}</span>
+                    <span className="text-muted-foreground">{store?.name ?? "-"}</span>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          </div>
 
-        <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <span className="text-xs font-bold text-foreground">배송 파트너 매장</span>
-          <div className="flex flex-col gap-1">
-            {wards.map((ward) => {
-              const store = getPartnerStore(ward.partnerStoreId);
-              return (
-                <div key={ward.id} className="flex justify-between text-sm">
-                  <span className="text-foreground">{ward.name}</span>
-                  <span className="text-muted-foreground">{store?.name ?? "-"}</span>
-                </div>
-              );
-            })}
+          <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <span className="text-xs font-bold text-foreground">결제 수단</span>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-foreground">
+                {PAYMENT_METHOD.brand} •••• {PAYMENT_METHOD.last4}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => toast.info("결제수단 변경 화면으로 연결할게요.")}
+              >
+                변경
+              </Button>
+            </div>
           </div>
         </div>
-
-        <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <span className="text-xs font-bold text-foreground">결제 수단</span>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-foreground">
-              {PAYMENT_METHOD.brand} •••• {PAYMENT_METHOD.last4}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => toast.info("결제수단 변경 화면으로 연결할게요.")}
-            >
-              변경
-            </Button>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

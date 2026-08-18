@@ -6,8 +6,10 @@ import { Pill } from "lucide-react";
 
 import { MealTone, Ward, WardDetail } from "@/lib/wards";
 import { deriveMealTones, fetchElderDietHistory } from "@/lib/meal-dashboard";
-import { getRecommendationForDate, todayDateString } from "@/lib/banchan-recommendation";
+import { computeTodayNutritionSnapshot, getRecommendationForDate, todayDateString } from "@/lib/banchan-recommendation";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
+import { deriveHealthInsight } from "@/lib/health-insights";
+import { getRecipeRecommendations, type RecipeRecommendation } from "@/lib/recipe-recommendations";
 import { TopBar } from "@/components/app/top-bar";
 import { MealToneSummary } from "@/components/app/meal-tone-summary";
 import { NutrientMeter } from "@/components/app/nutrient-meter";
@@ -63,13 +65,28 @@ export function RecordsView({
   // 먹었다"가 아니라 "오늘 배정된 반찬 구성이 목표치에 얼마나 맞는지"를 보여주는 것.
   const banchanIdentity = { wardId: ward.id, wardName: ward.name, wardAge: ward.age, wardAddress: ward.address };
   const banchanRecommendation = useMonthlyBanchanRecommendation(banchanIdentity);
-  const todayRecommendation = getRecommendationForDate(banchanRecommendation.monthly, todayDateString());
-  const todayItems = todayRecommendation?.items ?? [];
-  const hasTodayNutritionData = todayRecommendation?.status === "done" && todayItems.length > 0;
-  const todayKcal = todayItems.reduce((sum, i) => sum + (i.caloriePer100g ?? 0), 0);
-  const todayProteinG = todayItems.reduce((sum, i) => sum + (i.proteinPer100g ?? 0), 0);
-  const todaySodiumMg = todayItems.reduce((sum, i) => sum + (i.sodiumPer100g ?? 0), 0);
-  const todayCarbsG = todayItems.reduce((sum, i) => sum + (i.carbsPer100g ?? 0), 0);
+  // "생성 중" 안내 문구에만 필요한 상태값이라 이것만 따로 뽑는다 — 실제 영양가 합/목표치는
+  // todayNutrition(아래)이 통째로 들고 있다.
+  const todayGenerationStatus = getRecommendationForDate(banchanRecommendation.monthly, todayDateString())?.status;
+  const todayNutrition = computeTodayNutritionSnapshot(banchanRecommendation.monthly);
+
+  // 레시피 추천 — 오늘 영양성분 분석과 같은 목표치 기준으로 결핍을 판단한다(guardian/
+  // report-view.tsx와 공유하는 health-insights.ts). 이 화면은 잔반과 무관하게 건강정보만
+  // 보고 추천해야 해서(2026-08-18 요청) recentMealLogs를 빈 배열로 넘긴다 — 그러면
+  // frequentLeftoverIngredients도 자연히 빈 배열이 되어 잔반 기반 우선순위가 안 걸린다.
+  const recipeInsight = deriveHealthInsight(ward, todayNutrition, []);
+  const [recipes, setRecipes] = useState<RecipeRecommendation[] | null>(null);
+  const deficiencyKey = recipeInsight.deficiencies.join(",");
+  useEffect(() => {
+    let cancelled = false;
+    getRecipeRecommendations(recipeInsight).then((result) => {
+      if (!cancelled) setRecipes(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deficiencyKey만 파생 의존성으로 사용
+  }, [ward.id, deficiencyKey]);
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -124,14 +141,14 @@ export function RecordsView({
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <h2 className="text-sm font-bold text-foreground">오늘 영양성분 분석</h2>
-          {!hasTodayNutritionData ? (
+          {!todayNutrition.hasData ? (
             <>
               <p className="text-sm text-muted-foreground">
-                {todayRecommendation?.status === "generating"
+                {todayGenerationStatus === "generating"
                   ? "오늘 반찬을 고르고 있어요. 완료되면 분석을 볼 수 있어요."
                   : "AI 반찬 추천을 받으면 오늘의 영양성분 분석을 볼 수 있어요."}
               </p>
-              {todayRecommendation?.status !== "generating" && (
+              {todayGenerationStatus !== "generating" && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -143,7 +160,7 @@ export function RecordsView({
                 </Button>
               )}
             </>
-          ) : todayRecommendation.targetCalorieKcal == null ? (
+          ) : todayNutrition.targetCalorieKcal == null ? (
             <>
               <p className="text-sm text-muted-foreground">
                 목표 영양치를 계산하려면 건강 프로필에 키 · 체중 · 활동 수준이 필요해요.
@@ -162,31 +179,31 @@ export function RecordsView({
             <div className="flex flex-col gap-3">
               <NutrientMeter
                 label="칼로리"
-                value={todayKcal}
-                target={todayRecommendation.targetCalorieKcal}
+                value={todayNutrition.kcal}
+                target={todayNutrition.targetCalorieKcal}
                 unit="kcal"
               />
-              {todayRecommendation.targetProteinG != null && (
+              {todayNutrition.targetProteinG != null && (
                 <NutrientMeter
                   label="단백질"
-                  value={todayProteinG}
-                  target={todayRecommendation.targetProteinG}
+                  value={todayNutrition.proteinG}
+                  target={todayNutrition.targetProteinG}
                   unit="g"
                 />
               )}
-              {todayRecommendation.targetSodiumMg != null && (
+              {todayNutrition.targetSodiumMg != null && (
                 <NutrientMeter
                   label="나트륨"
-                  value={todaySodiumMg}
-                  target={todayRecommendation.targetSodiumMg}
+                  value={todayNutrition.sodiumMg}
+                  target={todayNutrition.targetSodiumMg}
                   unit="mg"
                 />
               )}
-              {todayRecommendation.targetCarbsG != null && (
+              {todayNutrition.targetCarbsG != null && (
                 <NutrientMeter
                   label="탄수화물"
-                  value={todayCarbsG}
-                  target={todayRecommendation.targetCarbsG}
+                  value={todayNutrition.carbsG}
+                  target={todayNutrition.targetCarbsG}
                   unit="g"
                 />
               )}
@@ -196,6 +213,32 @@ export function RecordsView({
             </div>
           )}
         </div>
+
+        {todayNutrition.hasData && !recipeInsight.deficiencies.includes("정상") && (
+          <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <span className="text-xs font-bold text-foreground">레시피 추천</span>
+            {recipes === null ? (
+              <p className="text-sm text-muted-foreground">추천을 불러오는 중이에요...</p>
+            ) : recipes.length === 0 ? (
+              <p className="text-sm text-muted-foreground">지금은 특별히 추천할 레시피가 없어요.</p>
+            ) : (
+              recipes.map((r) => (
+                <a
+                  key={r.id}
+                  href={r.youtubeUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground hover:bg-muted"
+                >
+                  <span>
+                    {r.thumbnailEmoji} {r.title}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{r.targetNutrient}</span>
+                </a>
+              ))
+            )}
+          </div>
+        )}
 
         <div className="flex flex-col gap-1 rounded-2xl bg-muted p-5">
           <span className="text-xs font-semibold text-muted-foreground">다음 배송 예정</span>

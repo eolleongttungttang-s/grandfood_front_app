@@ -9,14 +9,12 @@ import { Button } from "@/components/ui/button";
 import {
   PLANS,
   PAYMENT_METHOD,
-  selfSubscriptionPlanStore,
   resolveDisplayPlanId,
   formatWon,
   syncSubscriptionToBackend,
   subscriptionSyncFailureMessage,
   fetchActiveSubscriptionBackend,
 } from "@/lib/subscription";
-import { useLocalStore } from "@/lib/use-store";
 import type { Ward } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 
@@ -33,16 +31,14 @@ import { getPartnerStore } from "@/lib/partner-stores";
 // 확인받는다 — 특히 본인이 이 화면에서 만든 게 아닌 구독(funding_source !== "self", 즉
 // 보호자가 만들었을 가능성이 높은 경우)은 문구를 더 강하게 경고한다.
 export function SelfSubscriptionView({ ward }: { ward: Ward }) {
-  const rememberedPlans = useLocalStore(selfSubscriptionPlanStore);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   const identity = { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address };
 
   const [checkingBackend, setCheckingBackend] = useState(true);
   const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
-  // 백엔드 PlanType은 base/premium 2단계뿐이라 basic/standard를 구분 못 한다 — 실제로
-  // 활성 상태인 plan_type과, 이 화면에서 마지막으로 골랐던 3단계 id를 합쳐서 표시용 id를
-  // 만든다(resolveDisplayPlanId). 아직 백엔드 상태를 확인 전(null)엔 아무 카드도 "이용중"
-  // 취급하지 않는다.
+  // 백엔드 PlanType(base/premium)이 화면 표시용 id(basic/standard)와 1:1로 대응해서
+  // (resolveDisplayPlanId) 백엔드 응답만으로 바로 구할 수 있다. 아직 백엔드 상태를 확인
+  // 전(null)엔 아무 카드도 "이용중" 취급하지 않는다.
   const [displayPlanId, setDisplayPlanId] = useState<string | null>(null);
   const [activeFundingSource, setActiveFundingSource] = useState<string | null>(null);
   const [syncingPlanId, setSyncingPlanId] = useState<string | null>(null);
@@ -53,7 +49,7 @@ export function SelfSubscriptionView({ ward }: { ward: Ward }) {
       if (cancelled) return;
       setHasActiveSubscription(result !== null);
       setActiveFundingSource(result?.fundingSource ?? null);
-      setDisplayPlanId(result ? resolveDisplayPlanId(result.planType, rememberedPlans[ward.id]) : null);
+      setDisplayPlanId(result ? resolveDisplayPlanId(result.planType) : null);
       setCheckingBackend(false);
     });
     return () => {
@@ -86,7 +82,6 @@ export function SelfSubscriptionView({ ward }: { ward: Ward }) {
       if (message) toast.error(message);
       return;
     }
-    selfSubscriptionPlanStore.update((prev) => ({ ...prev, [ward.id]: planId }));
     setHasActiveSubscription(true);
     setActiveFundingSource("self");
     setDisplayPlanId(planId);

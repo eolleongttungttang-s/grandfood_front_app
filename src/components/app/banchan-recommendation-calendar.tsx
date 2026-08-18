@@ -224,6 +224,12 @@ export function BanchanRecommendationCalendar({
   const nextDate = selected ? addDaysToDateString(selected.date, 1) : null;
   const canGoPrev = prevDate != null && days.some((d) => d.date === prevDate);
   const canGoNext = nextDate != null && days.some((d) => d.date === nextDate);
+  // 전날/다음날 버튼이 항상 "전날"/"다음날"이라는 상대 라벨만 보여줘서, 오늘 날짜가
+  // 어느 자리에 있는지(가운데/왼쪽/오른쪽) 오갈 때마다 바뀌다 보니 "오늘이 어디였지"
+  // 헷갈린다는 피드백(2026-08-18) — 실제 오늘 날짜에 해당하는 자리는 라벨을 "오늘"로
+  // 바꾸고 강조색(bottom-tab-bar.tsx의 활성 탭과 같은 text-primary)을 줘서, 어느
+  // 위치에 있든 항상 같은 표시로 바로 알아볼 수 있게 한다.
+  const todayStr = todayDateString();
 
   // 전날/다음날 버튼이 월 경계를 넘으면(예: 8월 31일 → 9월 1일) selectedDate만 옮기고
   // viewedMonth는 그대로 둬서, 헤더/달력 그리드는 계속 "8월"을 보여주는데 아래 날짜 상세는
@@ -411,25 +417,40 @@ export function BanchanRecommendationCalendar({
               disabled={!canGoPrev}
               onClick={() => prevDate && goToDate(prevDate)}
               className={`flex h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg ${
-                canGoPrev ? "text-muted-foreground hover:bg-muted" : "text-muted-foreground/30"
+                !canGoPrev
+                  ? "text-muted-foreground/30"
+                  : prevDate === todayStr
+                    ? "text-primary hover:bg-primary/10"
+                    : "text-muted-foreground hover:bg-muted"
               }`}
             >
-              <span className="text-[11px]">전날</span>
+              <span className="text-[11px]">{prevDate === todayStr ? "오늘" : "전날"}</span>
               <span className="text-xs font-semibold">{prevDate && formatDayLabel(prevDate)}</span>
             </button>
-            <span className="shrink-0 px-2 text-base font-bold text-foreground">
-              {formatDayLabel(selected.date)}
-            </span>
+            <div className="flex shrink-0 flex-col items-center px-2">
+              {selected.date === todayStr && <span className="text-[11px] text-primary">오늘</span>}
+              <span
+                className={`text-base font-bold ${
+                  selected.date === todayStr ? "text-primary" : "text-foreground"
+                }`}
+              >
+                {formatDayLabel(selected.date)}
+              </span>
+            </div>
             <button
               type="button"
               aria-label="다음날"
               disabled={!canGoNext}
               onClick={() => nextDate && goToDate(nextDate)}
               className={`flex h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg ${
-                canGoNext ? "text-muted-foreground hover:bg-muted" : "text-muted-foreground/30"
+                !canGoNext
+                  ? "text-muted-foreground/30"
+                  : nextDate === todayStr
+                    ? "text-primary hover:bg-primary/10"
+                    : "text-muted-foreground hover:bg-muted"
               }`}
             >
-              <span className="text-[11px]">다음날</span>
+              <span className="text-[11px]">{nextDate === todayStr ? "오늘" : "다음날"}</span>
               <span className="text-xs font-semibold">{nextDate && formatDayLabel(nextDate)}</span>
             </button>
           </div>
