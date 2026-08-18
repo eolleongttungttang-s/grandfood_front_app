@@ -7,6 +7,7 @@ import { Ward } from "@/lib/wards";
 import { TopBar } from "@/components/app/top-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SpeakableCard } from "@/components/app/speakable-card";
 import {
   addMessage,
   assistantThreadId,
@@ -65,25 +66,32 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
             {name}님, 식단이나 건강, 오늘 하루에 대해 편하게 물어보세요.
           </p>
         )}
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={`flex ${m.from === "본인" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-line ${
-                m.from === "본인"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-foreground"
-              }`}
-            >
-              {m.from !== "본인" && (
-                <div className="mb-0.5 text-xs font-semibold text-accent">{m.from}</div>
-              )}
-              {m.text}
+        {messages.map((m) =>
+          m.from === "본인" ? (
+            <div key={m.id} className="flex justify-end">
+              <div className="max-w-[80%] rounded-2xl bg-primary px-3.5 py-2 text-sm whitespace-pre-line text-primary-foreground">
+                {m.text}
+              </div>
             </div>
-          </div>
-        ))}
+          ) : (
+            // AI 답변은 눌러서 읽어주기가 되어야 어르신이 화면 대신 귀로 들을 수 있다 —
+            // 홈/식단 화면의 다른 카드들과 같은 SpeakableCard 규칙(작은 아이콘 대신 카드
+            // 전체를 탭 영역으로)을 그대로 따른다. 라벨("AI 도우미")과 답변 사이에 아이콘이
+            // 끼어들지 않도록, 아이콘 뒤에 라벨을 인라인으로 붙이고 답변은 그 아래 새 줄에
+            // 별도 블록으로 둔다(variant="leading"은 children 맨 앞에 아이콘 하나만 붙임).
+            <div key={m.id} className="flex justify-start">
+              <SpeakableCard
+                id={m.id}
+                text={m.text}
+                variant="leading"
+                className="max-w-[80%] rounded-2xl bg-muted px-3.5 py-2 text-sm text-foreground"
+              >
+                <span className="text-xs font-semibold text-accent">{m.from}</span>
+                <div className="mt-0.5 whitespace-pre-line">{m.text}</div>
+              </SpeakableCard>
+            </div>
+          )
+        )}
         {sending && (
           <div className="flex justify-start">
             <div className="max-w-[80%] rounded-2xl bg-muted px-3.5 py-2 text-sm text-muted-foreground">
