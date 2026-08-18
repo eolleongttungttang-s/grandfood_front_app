@@ -34,7 +34,6 @@ export default function SignupPage() {
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState<"여" | "남">("여");
   const [address, setAddress] = useState("");
-  const [planType, setPlanType] = useState("basic");
   const [ttsCallConsent, setTtsCallConsent] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
@@ -84,7 +83,11 @@ export default function SignupPage() {
       phone,
       ...(role === "guardian"
         ? { email, relationship }
-        : { birthDate, address, planType, selfWardId, ttsCallConsent }),
+        : { birthDate, address, selfWardId, ttsCallConsent }),
+      // planType은 여기서 안 받는다 — /user/subscription에서 실제로 구독을 시작해야만
+      // 백엔드에 진짜 Subscription이 생기고, 가입 시 고른 값은 그때까지 아무 의미가 없어
+      // 오히려 "이미 구독 중"이라는 착각을 준다(lib/subscription.ts 주석 참고). registerAccount는
+      // planType 없이 부르면 알아서 "basic"으로 기본 처리한다.
     });
 
     if ("error" in result) {
@@ -112,7 +115,10 @@ export default function SignupPage() {
         birthDate,
         phone,
         address,
-        planType,
+        // registerUserBackend가 요구하는 필드라 값을 채우긴 하지만, 이게 실제 구독을
+        // 만들지는 않는다 — /user/subscription에서 플랜을 실제로 고를 때 syncSubscriptionToBackend가
+        // 진짜 Subscription을 만든다(lib/subscription.ts 주석 참고).
+        planType: "basic",
       });
       if ("error" in backendResult) {
         toast.info("일부 기능은 나중에 이 계정으로 다시 로그인하면 활성화돼요.");
@@ -223,13 +229,11 @@ export default function SignupPage() {
                     <Label htmlFor="signup-address">주소</Label>
                     <Input id="signup-address" value={address} onChange={(event) => setAddress(event.target.value)} autoComplete="street-address" required />
                   </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="signup-plan">이용 플랜</Label>
-                    <select id="signup-plan" value={planType} onChange={(event) => setPlanType(event.target.value)} className="h-10 rounded-md border border-input bg-transparent px-3 text-sm text-foreground">
-                      <option value="basic">기본</option>
-                      <option value="premium">프리미엄</option>
-                    </select>
-                  </div>
+                  {/* 이용 플랜 select는 여기 없다 — 가입 시점엔 아직 무슨 플랜이 실제로 뭘
+                      포함하는지(배달 횟수, 리포트 주기 등) 제대로 안내받지 못한 채 고르게 돼서,
+                      실제로 구독을 만드는 것도 아닌데(위 handleSubmit 주석 참고) "이미 골랐다"는
+                      착각만 준다. 가입 완료 후 /user/subscription에서 플랜별 상세 안내를 보고
+                      제대로 고르게 한다. */}
                   <label className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5">
                     <Checkbox checked={ttsCallConsent} onCheckedChange={setTtsCallConsent} />
                     <span className="text-sm text-foreground">

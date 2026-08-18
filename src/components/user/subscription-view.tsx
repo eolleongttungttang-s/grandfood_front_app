@@ -71,10 +71,18 @@ export function SelfSubscriptionView({ ward }: { ward: Ward }) {
     }
 
     setSyncingPlanId(planId);
-    const ok = await syncSubscriptionToBackend(identity, planId, "self");
+    const result = await syncSubscriptionToBackend(identity, planId, "self");
     setSyncingPlanId(null);
-    if (!ok) {
-      toast.error("구독 신청에 실패했어요. 잠시 후 다시 시도해 주세요.");
+    if (!result.ok) {
+      // "no-backend-access"는 fetch를 시도조차 못 한 경우다(이 대상자로 백엔드에 로그인한
+      // 이력이 없어 resolveBackendWardAccess가 토큰을 못 구함) — 가입 시 백엔드가 일시
+      // 장애였을 때 흔히 생기고, 재로그인하면 그 세션이 새로 만들어져 해결된다. 나머지
+      // (network/rejected)는 일반적인 "잠시 후 다시" 안내로 충분하다.
+      toast.error(
+        result.reason === "no-backend-access"
+          ? "이 계정으로 백엔드에 연결된 적이 없어요. 로그아웃 후 다시 로그인하면 해결될 수 있어요."
+          : "구독 신청에 실패했어요. 잠시 후 다시 시도해 주세요."
+      );
       return;
     }
     selfSubscriptionPlanStore.update((prev) => ({ ...prev, [ward.id]: planId }));

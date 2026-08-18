@@ -98,6 +98,19 @@ function toBackendPlanType(planId: string): "base" | "premium" {
 // 실수를 컴파일 타임에 막는다.
 export type FundingSource = "self" | "guardian";
 
+// syncSubscriptionToBackend()가 boolean 하나로만 성공/실패를 알려주던 때는 호출부가
+// "왜" 실패했는지 구분할 수 없어서, 두 화면 다 실패해도 그냥 조용히 넘어가거나(보호자
+// 화면 — 아래 SubscriptionView 참고) 실패 이유를 알 수 없는 뭉뚱그린 안내만 보여줬다
+// (이용자 본인 화면). 특히 "no-backend-access"(이 대상자로 백엔드에 로그인한 적이
+// 없어서 resolveBackendWardAccess가 토큰 자체를 못 구함)는 fetch를 시도조차 안 하고
+// 끝나는 경우라 — 네트워크 요청 자체가 하나도 안 나가서 "버튼을 눌러도 아무 반응이
+// 없다"로 보이는 원인이었다. 재로그인하면 해결되는 경우라(registerAccount/
+// registerGuardianBackend 실패 시 "나중에 다시 로그인하면 활성화돼요" 안내와 같은
+// 케이스) 호출부가 그 안내를 정확히 보여줄 수 있어야 한다.
+export type SubscriptionSyncResult =
+  | { ok: true }
+  | { ok: false; reason: "no-backend-access" | "network" | "rejected" };
+
 // POST /subscriptions — "이 플랜으로 변경" 버튼이 부른다.
 // - 보호자 화면(guardian/subscription-view.tsx): 대상자마다 별도 Subscription 행을 갖는
 //   백엔드 모델과 달리 이 화면은 보호자 계정 전체에 플랜 하나만 고르는 UI라, 보호자가
@@ -111,9 +124,9 @@ export async function syncSubscriptionToBackend(
   identity: { mockWardId: string; name: string; age: number; address: string },
   planId: string,
   fundingSource: FundingSource
-): Promise<boolean> {
+): Promise<SubscriptionSyncResult> {
   const access = await resolveBackendWardAccess(identity);
-  if (!access) return false;
+  if (!access) return { ok: false, reason: "no-backend-access" };
 
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
     `${API_BASE_URL}/subscriptions`,
@@ -134,9 +147,9 @@ export async function syncSubscriptionToBackend(
   );
   try {
     const response = await promise;
-    return response.ok;
+    return response.ok ? { ok: true } : { ok: false, reason: "rejected" };
   } catch {
-    return false;
+    return { ok: false, reason: "network" };
   } finally {
     clearRequestTimeout();
   }
