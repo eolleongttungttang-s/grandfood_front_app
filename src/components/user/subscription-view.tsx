@@ -13,6 +13,7 @@ import {
   resolveDisplayPlanId,
   formatWon,
   syncSubscriptionToBackend,
+  subscriptionSyncFailureMessage,
   fetchActiveSubscriptionBackend,
 } from "@/lib/subscription";
 import { useLocalStore } from "@/lib/use-store";
@@ -71,10 +72,18 @@ export function SelfSubscriptionView({ ward }: { ward: Ward }) {
     }
 
     setSyncingPlanId(planId);
-    const ok = await syncSubscriptionToBackend(identity, planId, "self");
+    const result = await syncSubscriptionToBackend(identity, planId, "self");
     setSyncingPlanId(null);
-    if (!ok) {
-      toast.error("구독 신청에 실패했어요. 잠시 후 다시 시도해 주세요.");
+    if (!result.ok) {
+      // 사유 → 문구 매핑은 guardian/subscription-view.tsx와 공유하는
+      // subscriptionSyncFailureMessage()에 모아뒀다(코드 리뷰 지적 — 두 화면이 각자
+      // 복제해두면 한쪽만 고치고 잊어버리기 쉽다). null이면 "session-expired"라 이미
+      // 전역 401 핸들러가 안내 중인 상태 — 여기서 또 띄우지 않는다.
+      const message = subscriptionSyncFailureMessage(
+        result.reason,
+        "구독 신청에 실패했어요. 잠시 후 다시 시도해 주세요."
+      );
+      if (message) toast.error(message);
       return;
     }
     selfSubscriptionPlanStore.update((prev) => ({ ...prev, [ward.id]: planId }));
