@@ -4,6 +4,7 @@ import { Bell, Home, UserRound } from "lucide-react";
 
 import { BottomTabBar } from "@/components/app/bottom-tab-bar";
 import { RequireRole } from "@/components/app/require-role";
+import { GuardianWardSync } from "@/components/guardian/guardian-ward-sync";
 
 const TABS = [
   { label: "홈", href: "/guardian/home", icon: Home },
@@ -18,6 +19,7 @@ export default function GuardianLayout({
 }) {
   return (
     <RequireRole role="guardian">
+      <GuardianWardSync />
       <div className="flex flex-1 flex-col overflow-hidden">
         <main className="flex flex-1 flex-col overflow-y-auto">{children}</main>
         <BottomTabBar items={TABS} />

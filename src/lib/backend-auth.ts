@@ -13,10 +13,12 @@
 // 골라 쓰도록 한다.
 import { createLocalStore } from "@/lib/local-store";
 import { API_BASE_URL } from "@/lib/api-config";
-import { getAccounts } from "@/lib/auth";
+import { getAccounts, linkWardToGuardian } from "@/lib/auth";
 import { CONDITION_POOL, getCareProfile } from "@/lib/care-profile";
 import type { BackendActivityLevel } from "@/lib/health-profile";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+import { addWard, calculateAge, newWardDefaults } from "@/lib/wards";
+import { PARTNER_STORES } from "@/lib/partner-stores";
 
 // notifications.ts와 같은 이유로 인증 관련 요청도 무한정 매달리지 않게 상한을 둔다.
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -274,6 +276,73 @@ export async function listOwnUsersBackend(
     return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
   } finally {
     clearRequestTimeout();
+  }
+}
+
+// GET /users로 받아온 "실제로 관리하는 대상자 목록"을 이 기기의 로컬 Ward와 맞춘다(이슈 #11).
+// 이미 로컬에 대응하는 Ward가 있으면(findMockWardIdForBackendUserId) 링크만 다시 걸어주고,
+// 완전히 새 기기라 로컬에 아무것도 없으면 백엔드 데이터로 Ward를 새로 만든다.
+//
+// gender/담당 매장은 백엔드 UserResponse에 아예 없는 필드라 — 실제 값이 아니라 임시
+// 기본값으로 채운다(성별은 임의로 "여", 매장은 첫 번째 파트너 매장). 나중에 어르신이
+// 생활 정보 설문을 다시 채우거나 보호자가 상세 화면에서 고치면 실제 값으로 덮인다 —
+// "정보 없음"으로 막다른 화면을 보여주는 것보다, 자연스러운 초기 상태로 보이게 하는
+// 기존 newWardDefaults()와 같은 방침이다.
+//
+// 원래는 login/page.tsx의 로그인 시점에만 불렸는데, QR로 새로 초대받은 대상자가 다른
+// 기기에서 가입을 끝내도 보호자가 로그아웃 후 재로그인하기 전엔 이 목록에 안 나타나던
+// 문제가 있었다(2026-08-18 피드백) — 이제 guardian-ward-sync.ts가 보호자 화면에 있는
+// 동안 주기적으로도 이 함수를 부른다.
+//
+// 같은 보호자에 대해 이 함수가 겹쳐 불리면(예: 로그인 시점 동기화와 guardian-ward-sync.tsx의
+// 최초 마운트 동기화가 우연히 겹치는 경우), 아직 로컬에 안 만들어진 같은 백엔드 대상자를
+// 두 호출이 동시에 "없다"고 보고 각자 addWard()로 새 목업 Ward를 만들어 중복 생성할 수 있다
+// (2026-08-18 코드 리뷰 지적) — ensureBackendWardId()의 pendingEnsureRequests와 같은 방식으로,
+// 이미 진행 중인 요청이 있으면 그 Promise를 그대로 공유해서 같은 탭 안에서의 겹침은 막는다.
+// (다만 이건 이 탭의 메모리에만 있는 맵이라, 완전히 다른 브라우저 탭 두 개가 동시에 같은
+// 보호자로 처음 동기화하는 경우까지는 못 막는다 — 그 정도까지 막으려면 탭 간에 공유되는 락이
+// 필요한데, 발생 확률이 낮고 생겨도 중복 표시 정도라 지금은 범위 밖으로 둔다.)
+const pendingGuardianWardSyncRequests = new Map<string, Promise<void>>();
+
+export async function syncGuardianWardsFromBackend(
+  accessToken: string,
+  guardianLoginId: string
+): Promise<void> {
+  const pending = pendingGuardianWardSyncRequests.get(guardianLoginId);
+  if (pending) return pending;
+
+  const request = runGuardianWardSync(accessToken, guardianLoginId);
+  pendingGuardianWardSyncRequests.set(guardianLoginId, request);
+  try {
+    await request;
+  } finally {
+    pendingGuardianWardSyncRequests.delete(guardianLoginId);
+  }
+}
+
+async function runGuardianWardSync(accessToken: string, guardianLoginId: string): Promise<void> {
+  const result = await listOwnUsersBackend(accessToken);
+  if ("error" in result) return;
+
+  for (const user of result.users) {
+    const existingMockId = findMockWardIdForBackendUserId(user.userId);
+    if (existingMockId) {
+      linkWardToGuardian(guardianLoginId, existingMockId);
+      continue;
+    }
+
+    const newWardId = crypto.randomUUID();
+    addWard({
+      id: newWardId,
+      name: user.name,
+      age: calculateAge(user.birthDate),
+      gender: "여",
+      address: user.address,
+      partnerStoreId: PARTNER_STORES[0].id,
+      ...newWardDefaults(),
+    });
+    backendWardIdMapStore.update((prev) => ({ ...prev, [newWardId]: user.userId }));
+    linkWardToGuardian(guardianLoginId, newWardId);
   }
 }
 

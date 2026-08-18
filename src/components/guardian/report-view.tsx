@@ -16,6 +16,8 @@ import {
 import { deriveHealthInsight } from "@/lib/health-insights";
 import { getRecipeRecommendations, type RecipeRecommendation } from "@/lib/recipe-recommendations";
 import { mealLogStore, wardMealLogs } from "@/lib/meal-log-store";
+import { computeTodayNutritionSnapshot } from "@/lib/banchan-recommendation";
+import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { useLocalStore } from "@/lib/use-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,10 +87,14 @@ export function ReportView({ ward, detail }: { ward: Ward; detail: WardDetail })
     avgKcal,
   };
 
-  // "건강데이터 결합 해석" — 건강 프로필/오늘의 조합 + 최근 식사 기록을 합쳐서 이상 신호를 판단.
-  // 이미 갖고 있는 props(detail)와 로컬 store에서 동기적으로 계산되는 값이라 useState/useEffect가 필요 없다.
+  // "건강데이터 결합 해석" — 오늘 AI가 배정한 반찬의 영양가 합 vs 목표치(records-view.tsx의
+  // "오늘 영양성분 분석"과 동일한 기준, computeTodayNutritionSnapshot 참고) + 최근 식사 기록을
+  // 합쳐서 이상 신호를 판단한다.
   const mealLogs = wardMealLogs(useLocalStore(mealLogStore), ward.id);
-  const insight = deriveHealthInsight(ward, detail, mealLogs);
+  const banchanIdentity = { wardId: ward.id, wardName: ward.name, wardAge: ward.age, wardAddress: ward.address };
+  const banchanRecommendation = useMonthlyBanchanRecommendation(banchanIdentity);
+  const todayNutrition = computeTodayNutritionSnapshot(banchanRecommendation.monthly);
+  const insight = deriveHealthInsight(ward, todayNutrition, mealLogs);
 
   // "레시피 · 유튜브 추천"만 실제 비동기 조회다 — 이 페이지의 나머지 데이터는 전부 이미 받은
   // props에서 동기 계산되지만, 레시피는 "결핍 상태가 정해진 뒤에야 뭘 추천할지 정해지는" 별도의
