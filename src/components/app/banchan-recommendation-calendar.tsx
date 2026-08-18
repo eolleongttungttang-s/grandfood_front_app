@@ -13,11 +13,14 @@
 // 두 가지 색으로 표현되어 오히려 헷갈린다.
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ExpandToggle } from "@/components/app/expand-toggle";
+import { healthProfileStore } from "@/lib/health-profile";
+import { useLocalStore } from "@/lib/use-store";
 import {
   addDaysToDateString,
   addMonthsToMonthString,
@@ -81,11 +84,13 @@ function buildDayCells(monthly: MonthlyBanchanRecommendation): DayCell[] {
   return cells;
 }
 
+// 아래 반찬 카드(item.name text-lg, 영양성분 text-base)와 나란히 보이는데 여긴 text-xs라
+// 훨씬 작아 보인다는 피드백(2026-08-18) — 라벨/숫자 모두 반찬 카드와 같은 크기로 맞춘다.
 function TargetStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col">
-      <span className="text-muted-foreground/70">{label}</span>
-      <span className="font-semibold text-foreground">{value}</span>
+      <span className="text-sm font-medium text-foreground/70">{label}</span>
+      <span className="text-xl font-extrabold text-foreground">{value}</span>
     </div>
   );
 }
@@ -124,6 +129,7 @@ export function BanchanRecommendationCalendar({
   identity,
   monthly,
   polling,
+  surveyHref,
 }: {
   identity: WardIdentity;
   /** 항상 "실제 오늘이 속한 달"의 최신 상태 — 폴링 중엔 몇 초마다 갱신된다. 아래에서 다른
@@ -131,6 +137,12 @@ export function BanchanRecommendationCalendar({
    *  돌아오면 다시 이 최신 값을 그대로 쓴다. */
   monthly: MonthlyBanchanRecommendation;
   polling: boolean;
+  /** hasTargets가 false일 때(생활정보 미입력) 보여줄 안내에 붙는 "생활 정보 입력하기"
+   *  버튼의 이동 경로 — 이용자 본인 화면(diet-view.tsx)은 본인이 직접 입력하러 갈 수 있어
+   *  "/user/survey"를 넘긴다. 보호자 화면(ward-detail-view.tsx)은 아직 대상자의 생활
+   *  정보를 보호자가 대신 입력/수정할 화면이 없어(이 대상자는 자기 계정으로 직접 입력해야
+   *  함) undefined를 넘기면 버튼 없이 안내 문구만 보여준다. */
+  surveyHref?: string;
 }) {
   const [viewedMonth, setViewedMonth] = useState(monthly.month);
   // 오늘이 속한 달이 아닌 달은 방문할 때마다 조회 결과를 이 캐시에 쌓아둔다 — 달 하나짜리
@@ -232,6 +244,19 @@ export function BanchanRecommendationCalendar({
       recommendation.targetProteinG != null ||
       recommendation.targetSodiumMg != null ||
       recommendation.targetCarbsG != null);
+
+  // 건강 프로필 저장은 이미 생성된 recommendation을 자동으로 다시 계산하지 않는다(2026-08-18
+  // 확인 — 백엔드에 무효화/재계산 로직이 없음, 프론트에서 고칠 수 없는 부분). 그래서 로컬에
+  // 저장된 건강정보(키/체중/활동량)가 있는지로 "아직 한 번도 안 입력함"과 "입력은 했는데
+  // 아직 반영이 안 됨"을 구분해서, 후자일 땐 "생활 정보 입력하기" 대신 "다시 추천받기를
+  // 눌러달라"는 안내로 바꾼다 — 안 그러면 방금 입력하고 돌아왔는데도 똑같이 "입력하면 볼 수
+  // 있어요"라는, 이미 한 행동을 또 하라는 것처럼 보이는 문구가 그대로 남는다(사용자 피드백).
+  const healthProfiles = useLocalStore(healthProfileStore);
+  const localHealthProfile = healthProfiles[identity.wardId];
+  const hasEnteredHealthMetricsLocally =
+    localHealthProfile?.heightCm != null &&
+    localHealthProfile?.weightKg != null &&
+    localHealthProfile?.activityLevel != null;
 
   return (
     // 날짜 칸(터치 대상, aspect-square)은 그대로 두고, 안 누르는 요소들(헤더/요일 줄/여백)만
@@ -424,27 +449,62 @@ export function BanchanRecommendationCalendar({
 
           {selected.generationStatus === "done" && selected.items.length > 0 && (
             <>
-              {hasTargets && recommendation && (
+              {recommendation && hasTargets && (
                 // "이번 주 목표"라고 부르면 주마다 값이 바뀔 것처럼 보이지만, 실제로는
                 // 건강 프로필(키/체중/활동 수준 등)이 그대로면 매주 같은 값이 나오는 개인
                 // 고정 하루 목표다(BMR/TDEE + KDRI 계산, 주 단위 변동 로직 없음 — 2026-08-13
                 // 피드백, "왜 매주 목표가 안 바뀌냐"). 라벨을 "나의 하루 목표"로 바꿔서 매주
                 // 달라지는 값이라는 오해를 없앤다.
-                <div className="flex flex-wrap gap-4 rounded-lg bg-muted/60 p-3 text-xs">
-                  <span className="w-full text-[11px] font-semibold text-muted-foreground">
+                <div className="rounded-lg bg-muted/60 p-3">
+                  <span className="mb-2 block text-base font-bold text-foreground">
                     나의 하루 목표
                   </span>
-                  {recommendation.targetCalorieKcal != null && (
-                    <TargetStat label="열량" value={`${Math.round(recommendation.targetCalorieKcal)}kcal`} />
-                  )}
-                  {recommendation.targetProteinG != null && (
-                    <TargetStat label="단백질" value={`${Math.round(recommendation.targetProteinG)}g`} />
-                  )}
-                  {recommendation.targetSodiumMg != null && (
-                    <TargetStat label="나트륨" value={`${Math.round(recommendation.targetSodiumMg)}mg`} />
-                  )}
-                  {recommendation.targetCarbsG != null && (
-                    <TargetStat label="탄수화물" value={`${Math.round(recommendation.targetCarbsG)}g`} />
+                  <div className="grid grid-cols-2 gap-y-3">
+                    {recommendation.targetCalorieKcal != null && (
+                      <TargetStat label="열량" value={`${Math.round(recommendation.targetCalorieKcal)}kcal`} />
+                    )}
+                    {recommendation.targetProteinG != null && (
+                      <TargetStat label="단백질" value={`${Math.round(recommendation.targetProteinG)}g`} />
+                    )}
+                    {recommendation.targetSodiumMg != null && (
+                      <TargetStat label="나트륨" value={`${Math.round(recommendation.targetSodiumMg)}mg`} />
+                    )}
+                    {recommendation.targetCarbsG != null && (
+                      <TargetStat label="탄수화물" value={`${Math.round(recommendation.targetCarbsG)}g`} />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {recommendation && !hasTargets && (
+                // 건강 프로필(성별/키/체중/활동량)이 하나라도 비어있으면 백엔드가 이 4개
+                // 목표치를 전부 null로 내려주는데(health/service.py _try_calculate_
+                // nutrient_targets), 예전엔 이 카드가 그냥 통째로 사라져서 "왜 없지"를
+                // 알 방법이 없었다(2026-08-18 피드백). 왜 없는지 + 채우러 갈 버튼을 그
+                // 자리에 보여준다. 보호자 화면(surveyHref 없음)은 대상자 본인 계정으로만
+                // 입력 가능해 버튼 없이 안내 문구만 보여준다.
+                //
+                // 건강 프로필을 저장해도 이미 만들어진 recommendation이 자동으로 다시
+                // 계산되지는 않는다(백엔드에 그 로직이 없음, 2026-08-18 확인) — 그래서
+                // hasEnteredHealthMetricsLocally로 "입력은 이미 했는데 반영만 안 된" 경우를
+                // 따로 구분한다. 안 그러면 방금 입력하고 돌아와도 "입력하면 볼 수 있어요"라는
+                // 이미 한 행동을 또 하라는 문구가 그대로 남고, "다시 추천받기"를 눌러야
+                // 반영된다는 것도 알 방법이 없다(사용자 피드백).
+                <div className="flex flex-col items-start gap-2 rounded-lg bg-muted/60 p-3">
+                  <span className="text-base font-bold text-foreground">나의 하루 목표</span>
+                  {hasEnteredHealthMetricsLocally ? (
+                    <p className="text-sm text-foreground">
+                      입력한 생활 정보를 반영하려면 위 &quot;다시 추천받기&quot;를 눌러주세요
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-sm text-foreground">생활정보를 입력하면 하루 목표를 볼 수 있어요</p>
+                      {surveyHref && (
+                        <Button size="sm" variant="outline" className="h-9" nativeButton={false} render={<Link href={surveyHref} />}>
+                          생활 정보 입력하기
+                        </Button>
+                      )}
+                    </>
                   )}
                 </div>
               )}

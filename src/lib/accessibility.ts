@@ -239,3 +239,116 @@ export function getSpeechRecognition(): (new () => SpeechRecognitionLike) | null
   };
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
+
+export type ListenController = { stop: () => void };
+
+// 마이크 권한 팝업이 뜬 채로 사용자가 응답을 미루는 등, onresult/onerror/onend 중
+// 아무것도 안 불리는 상황을 대비한 안전망(코드 리뷰 지적) — 없으면 "듣는 중" state가
+// 영원히 안 풀리고, 그 state로 disabled되는 마이크 버튼도 영구히 눌러지지 않는 상태가
+// 된다(복구법이 "이 화면을 나갔다가 다시 들어오는 것"뿐이었음). TTS_REQUEST_TIMEOUT_MS
+// (10초)보다 넉넉하게 잡는다 — 저긴 순수 네트워크 왕복이지만 여긴 "사용자가 브라우저
+// 권한 팝업을 보고 실제로 클릭"하는 사람의 반응 시간까지 포함해야 한다.
+const LISTEN_TIMEOUT_MS = 20_000;
+
+// 음성 인식 한 번을 시작하고, "끝났다"는 신호(onEnd)를 정확히 한 번, 무조건 불러주는 걸
+// 보장하는 게 이 함수의 핵심 역할이다 — 호출부(예: assistant-chat-view.tsx)는 보통
+// onEnd에서 "듣는 중" state를 끄는데, start()가 동기적으로 던지거나(예: 마이크 권한이
+// 방금 취소된 경우) onerror 뒤에 onend가 안 오는 브라우저에서 onEnd가 한 번도 안 불리면
+// 그 state가 영원히 안 풀린다 — 코드 리뷰에서 지적된 문제. finish()를 한 곳에 모아 어느
+// 경로로 끝나든(정상 종료/에러/시작 실패/타임아웃) 딱 한 번만 불리게 한다.
+//
+// 반환하는 컨트롤러의 stop()은 화면이 언마운트될 때 호출부가 꼭 불러야 한다 — 안 그러면
+// 사용자가 마이크를 켠 채 다른 화면으로 이동해도 인식이 계속 켜져 있고, 나중에 도착하는
+// onresult/onend가 이미 떠난 화면의 오래된 클로저를 건드리게 된다(마찬가지로 코드
+// 리뷰 지적). supported:false면 stop()은 그냥 아무 일도 안 하는 no-op이라 호출부가
+// null 체크 없이 항상 unmount cleanup에서 불러도 안전하다.
+export function listenOnce(callbacks: {
+  onResult: (transcript: string) => void;
+  onError: () => void;
+  onEnd: () => void;
+}): { supported: boolean } & ListenController {
+  const Recognition = getSpeechRecognition();
+  if (!Recognition) {
+    return { supported: false, stop: () => {} };
+  }
+
+  const recognition = new Recognition();
+  recognition.lang = "ko-KR";
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  let ended = false;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  function clearListenTimeout() {
+    if (timeoutId === null) return;
+    clearTimeout(timeoutId);
+    timeoutId = null;
+  }
+
+  function finish() {
+    if (ended) return;
+    ended = true;
+    clearListenTimeout();
+    callbacks.onEnd();
+  }
+
+  // stop()(수동 취소·언마운트·타임아웃)이 recognition.stop()을 부른 뒤에도, Web Speech
+  // API 특성상 마지막 onresult(드물게 onerror)가 한 번 더 비동기로 도착할 수 있다 — 이미
+  // 떠난 화면의 오래된 클로저를 건드려, 사용자가 지금 보고 있는 다른 화면에 뜬금없는
+  // 에러 토스트가 뜨는 원인이었다(코드 리뷰 지적). 핸들러 자체를 무력화해서 늦게 오는
+  // 이벤트가 아무 데도 닿지 않게 한다.
+  function detachHandlers() {
+    recognition.onresult = null;
+    recognition.onerror = null;
+    recognition.onend = null;
+  }
+
+  recognition.onresult = (event) => {
+    callbacks.onResult(event.results[0][0].transcript);
+  };
+  recognition.onerror = () => {
+    // onend가 뒤따를 거라고 믿지 않는다 — onerror 뒤에 onend를 안 불러주는 브라우저가
+    // 있어서(코드 리뷰 지적), 여기서 바로 finish()까지 부른다. 진짜로 onend가 나중에
+    // 또 오더라도 ended 플래그가 막아줘서 onEnd가 두 번 불리진 않는다.
+    callbacks.onError();
+    finish();
+  };
+  recognition.onend = finish;
+
+  try {
+    recognition.start();
+  } catch {
+    // 권한이 막 취소됐거나 이미 다른 인식이 돌고 있는 등, start() 자체가 동기적으로 던지는
+    // 경우 — onerror/onend가 아예 안 불릴 상황이라 여기서 직접 처리해야 한다.
+    callbacks.onError();
+    finish();
+    return { supported: true, stop: () => {} };
+  }
+
+  timeoutId = setTimeout(() => {
+    detachHandlers();
+    try {
+      recognition.stop();
+    } catch {
+      // 이미 끝난 인식에 stop()을 부르면 일부 브라우저가 던진다 — finish()는 아래서
+      // 어차피 부르니 무시해도 안전하다.
+    }
+    callbacks.onError();
+    finish();
+  }, LISTEN_TIMEOUT_MS);
+
+  return {
+    supported: true,
+    stop: () => {
+      detachHandlers();
+      try {
+        recognition.stop();
+      } catch {
+        // 이미 끝난 인식에 stop()을 부르면 일부 브라우저가 던진다 — finish()는 아래서
+        // 어차피 부르니 무시해도 안전하다.
+      }
+      finish();
+    },
+  };
+}

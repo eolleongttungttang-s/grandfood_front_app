@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { BrandHeader } from "@/components/app/brand-header";
 import { Button } from "@/components/ui/button";
+import { ButtonSelectGroup } from "@/components/app/button-select-group";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,21 @@ import { useSession } from "@/lib/session";
 import { addWard, createSelfWard } from "@/lib/wards";
 import { ttsCallConsentReadAloudText } from "@/components/invite/consent-view";
 
+const RELATIONSHIP_OPTIONS = ["딸", "아들", "며느리", "사위", "배우자", "형제자매", "손자녀"] as const;
+type RelationshipMode = (typeof RELATIONSHIP_OPTIONS)[number] | "기타" | "";
+
+// 컴포넌트 바깥의 모듈 스코프 상수로 둔다 — SignupPage 안에 있으면 이름/전화번호 같은 다른
+// 필드를 한 글자 고칠 때마다 리렌더될 때도 매번 새 배열을 만들어, ButtonSelectGroup에 매번
+// 참조가 다른 options를 내려보내게 된다.
+const RELATIONSHIP_SELECT_OPTIONS = [
+  ...RELATIONSHIP_OPTIONS.map((option) => ({ value: option, label: option })),
+  { value: "기타", label: "기타" },
+] as const;
+const GENDER_SELECT_OPTIONS = [
+  { value: "여", label: "여성" },
+  { value: "남", label: "남성" },
+] as const;
+
 export default function SignupPage() {
   const router = useRouter();
   const { login } = useSession();
@@ -30,7 +46,14 @@ export default function SignupPage() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
-  const [relationship, setRelationship] = useState("");
+  // relationshipMode가 유일한 진실 소스다 — RELATIONSHIP_OPTIONS 중 하나, "기타", 또는
+  // 아직 아무것도 안 고른 "" 셋 중 하나만 될 수 있다. 예전엔 relationship(string)과
+  // customRelationship(boolean)을 따로 두고 클릭할 때마다 둘 다 손으로 맞춰야 해서, "기타"로
+  // 직접 입력한 값이 프리셋 문구와 우연히 같아지면 어떤 버튼도 선택된 것처럼 안 보이는 등
+  // 두 state가 어긋나는 경우가 있었다.
+  const [relationshipMode, setRelationshipMode] = useState<RelationshipMode>("");
+  const [customRelationshipText, setCustomRelationshipText] = useState("");
+  const relationship = relationshipMode === "기타" ? customRelationshipText.trim() : relationshipMode;
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState<"여" | "남">("여");
   const [address, setAddress] = useState("");
@@ -46,12 +69,30 @@ export default function SignupPage() {
     setError(null);
   }
 
+  // "기타"를 이미 고른 상태에서 "기타"를 또 눌러도(재확인 탭) 입력 중이던 텍스트는
+  // 지우면 안 되지만(예전 버그), 프리셋으로 갔다가 다시 "기타"로 돌아오면 예전에 입력하다
+  // 만 텍스트가 아무 안내 없이 그대로 되살아나는 것도 문제라 — "기타"를 벗어날 때만
+  // customRelationshipText를 비운다.
+  function handleRelationshipModeChange(next: RelationshipMode) {
+    setRelationshipMode(next);
+    if (next !== "기타") {
+      setCustomRelationshipText("");
+    }
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
 
     if (password !== passwordConfirm) {
       setError("비밀번호가 서로 달라요.");
+      return;
+    }
+
+    if (role === "guardian" && !relationship) {
+      // src/lib/auth.ts registerAccount()의 동일 조건 가드와 문구를 맞춘다 — relationship은
+      // 위에서 이미 trim된 값이라 여기서 다시 trim할 필요가 없다.
+      setError("대상자와의 관계를 입력해 주세요.");
       return;
     }
 
@@ -187,10 +228,34 @@ export default function SignupPage() {
                       나중에 로그인할 때 이 이메일이 아이디가 돼요.
                     </p>
                   </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="signup-relationship">대상자와의 관계</Label>
-                    <Input id="signup-relationship" value={relationship} onChange={(event) => setRelationship(event.target.value)} placeholder="예: 딸, 아들, 며느리" required />
-                  </div>
+                  <ButtonSelectGroup
+                    label="대상자와의 관계"
+                    columns={3}
+                    options={RELATIONSHIP_SELECT_OPTIONS}
+                    value={relationshipMode}
+                    onChange={handleRelationshipModeChange}
+                  />
+                  {relationshipMode === "기타" ? (
+                    <div className="flex flex-col gap-1.5">
+                      {/* 위 버튼 그룹에 이미 "대상자와의 관계" 라벨이 있으니, 여기는 시각적으로
+                          숨기고 스크린리더에만 이 입력창이 뭔지 알려준다. */}
+                      <Label htmlFor="signup-relationship" className="sr-only">
+                        관계 직접 입력
+                      </Label>
+                      {/* required는 "기타"를 골라 이 입력창이 떠 있을 때만 의미가 있다 —
+                          프리셋 버튼 경로는 이 Input 자체가 렌더링되지 않으니 required로
+                          커버되지 않는다. 실제 필수값 검증은 handleSubmit의 relationship
+                          체크가 두 경로 모두에 대해 담당한다. */}
+                      <Input
+                        id="signup-relationship"
+                        value={customRelationshipText}
+                        onChange={(event) => setCustomRelationshipText(event.target.value)}
+                        placeholder="관계를 입력해주세요"
+                        autoFocus
+                        required
+                      />
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -198,27 +263,12 @@ export default function SignupPage() {
                     <Label htmlFor="signup-birth-date-year">생년월일</Label>
                     <BirthDateSelect idPrefix="signup-birth-date" value={birthDate} onChange={setBirthDate} />
                   </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label>성별</Label>
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        variant={gender === "여" ? "default" : "outline"}
-                        className="flex-1"
-                        onClick={() => setGender("여")}
-                      >
-                        여성
-                      </Button>
-                      <Button
-                        type="button"
-                        variant={gender === "남" ? "default" : "outline"}
-                        className="flex-1"
-                        onClick={() => setGender("남")}
-                      >
-                        남성
-                      </Button>
-                    </div>
-                  </div>
+                  <ButtonSelectGroup
+                    label="성별"
+                    options={GENDER_SELECT_OPTIONS}
+                    value={gender}
+                    onChange={setGender}
+                  />
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="signup-address">주소</Label>
                     <Input id="signup-address" value={address} onChange={(event) => setAddress(event.target.value)} autoComplete="street-address" required />

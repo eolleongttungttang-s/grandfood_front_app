@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import {
   ChevronLeft,
+  ClipboardEdit,
   FileText,
   MessageCircle,
   PhoneCall,
@@ -530,6 +531,15 @@ export function WardDetailView({
               ? ACTIVITY_LEVEL_LABEL[detail.healthProfile.activityLevel]
               : "미입력"}
           </DetailRow>
+          <Button
+            variant="outline"
+            className="mt-3 w-full justify-center"
+            nativeButton={false}
+            render={<Link href={`/guardian/wards/detail/survey?id=${ward.id}`} />}
+          >
+            <ClipboardEdit />
+            건강 프로필 수정하기
+          </Button>
         </div>
 
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">

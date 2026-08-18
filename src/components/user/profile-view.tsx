@@ -105,6 +105,15 @@ export function ProfileView({
           <InfoRow label="담당 반찬가게" value={partnerStore?.name ?? "-"} />
           <Separator />
           <InfoRow label="매장 연락처" value={partnerStore?.supportPhone ?? "-"} />
+          <Button
+            variant="outline"
+            className="mt-3 w-full justify-center"
+            nativeButton={false}
+            render={<Link href="/user/profile/edit" />}
+          >
+            <ClipboardEdit />
+            기본 정보 수정하기
+          </Button>
         </div>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
