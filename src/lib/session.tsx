@@ -8,7 +8,7 @@ import {
   useSyncExternalStore,
 } from "react";
 
-import { Account, findAccount, findAccountByLoginId } from "@/lib/auth";
+import { Account, findAccount, findAccountByLoginId, wardLinkOverridesStore } from "@/lib/auth";
 
 const STORAGE_KEY = "grandfood-app-session";
 
@@ -83,9 +83,23 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     getHydratedOnServer
   );
 
+  // wardLinkOverridesStore(보호자가 돌보는 대상자 링크)가 바뀌어도 account를 다시 계산한다 —
+  // 이게 없으면 대상자가 QR로 다른 기기에서 새로 가입해 linkWardToGuardian이 불려도(또는 아래
+  // guardian-ward-sync.ts의 백그라운드 재동기화가 링크를 추가해도), 이미 로그인해서 떠 있는
+  // 이 화면은 loginId 문자열 자체는 그대로라 account가 옛 wardIds를 계속 들고 있었다.
+  const wardLinks = useSyncExternalStore(
+    wardLinkOverridesStore.subscribe,
+    wardLinkOverridesStore.read,
+    wardLinkOverridesStore.getServerSnapshot
+  );
+
   const account = useMemo(
     () => (loginId ? findAccountByLoginId(loginId) : null),
-    [loginId]
+    // wardLinks 자체는 콜백 안에서 안 쓰지만, 이 값이 바뀔 때마다 다시 계산되게 하려고
+    // 일부러 deps에 넣었다(findAccountByLoginId가 내부적으로 최신 wardLinkOverridesStore를
+    // 다시 읽어오므로, 여기선 "다시 계산하라"는 트리거로만 쓰인다).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [loginId, wardLinks]
   );
 
   const login = useCallback((id: string, password: string) => {

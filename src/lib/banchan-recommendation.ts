@@ -335,6 +335,42 @@ const onboardedStore = createLocalStore<Record<string, boolean>>(
   {}
 );
 
+export type TodayNutritionSnapshot = {
+  /** true면 오늘치 반찬이 실제로 배정돼 있어 아래 값들을 믿을 수 있다는 뜻 */
+  hasData: boolean;
+  kcal: number;
+  proteinG: number;
+  sodiumMg: number;
+  carbsG: number;
+  targetCalorieKcal: number | null;
+  targetProteinG: number | null;
+  targetSodiumMg: number | null;
+  targetCarbsG: number | null;
+};
+
+// records-view.tsx("오늘 영양성분 분석")와 health-insights.ts(레시피 추천용 결핍 판단)가
+// 똑같이 "오늘 AI가 배정한 반찬의 영양가 합 vs 그 사람의 BMR/TDEE 목표치"를 구해야 해서
+// 하나로 뺐다(2026-08-18) — 따로 두면 한쪽만 계산식을 고치고 잊어버리기 쉽다. 예전엔
+// health-insights.ts가 WardDetail.recommendedCombo(옛 목업 결합, 고정 임계값)로 결핍을
+// 판단해서, 이 화면의 실제 목표치 기반 분석과 서로 다른 기준으로 어긋나 있었다.
+export function computeTodayNutritionSnapshot(
+  monthly: MonthlyBanchanRecommendation | null
+): TodayNutritionSnapshot {
+  const today = getRecommendationForDate(monthly, todayDateString());
+  const items = today?.items ?? [];
+  return {
+    hasData: today?.status === "done" && items.length > 0,
+    kcal: items.reduce((sum, i) => sum + (i.caloriePer100g ?? 0), 0),
+    proteinG: items.reduce((sum, i) => sum + (i.proteinPer100g ?? 0), 0),
+    sodiumMg: items.reduce((sum, i) => sum + (i.sodiumPer100g ?? 0), 0),
+    carbsG: items.reduce((sum, i) => sum + (i.carbsPer100g ?? 0), 0),
+    targetCalorieKcal: today?.targetCalorieKcal ?? null,
+    targetProteinG: today?.targetProteinG ?? null,
+    targetSodiumMg: today?.targetSodiumMg ?? null,
+    targetCarbsG: today?.targetCarbsG ?? null,
+  };
+}
+
 export function hasEverReceivedBanchanRecommendation(wardId: string): boolean {
   return onboardedStore.read()[wardId] === true;
 }

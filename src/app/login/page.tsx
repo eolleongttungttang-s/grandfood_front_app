@@ -23,55 +23,16 @@ import {
   ensureLocalGuardianAccount,
   ensureLocalUserAccount,
   findAccountByLoginId,
-  linkWardToGuardian,
 } from "@/lib/auth";
 import {
-  backendWardIdMapStore,
   fetchGuardianProfile,
-  findMockWardIdForBackendUserId,
-  listOwnUsersBackend,
   loginGuardianBackend,
   loginUserBackend,
+  syncGuardianWardsFromBackend,
 } from "@/lib/backend-auth";
-import { addWard, calculateAge, createSelfWard, getWard, newWardDefaults } from "@/lib/wards";
-import { PARTNER_STORES } from "@/lib/partner-stores";
+import { addWard, createSelfWard, getWard } from "@/lib/wards";
 
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
-
-// GET /users로 받아온 "실제로 관리하는 대상자 목록"을 이 기기의 로컬 Ward와 맞춘다(이슈 #11).
-// 이미 로컬에 대응하는 Ward가 있으면(findMockWardIdForBackendUserId) 링크만 다시 걸어주고,
-// 완전히 새 기기라 로컬에 아무것도 없으면 백엔드 데이터로 Ward를 새로 만든다.
-//
-// gender/담당 매장은 백엔드 UserResponse에 아예 없는 필드라 — 실제 값이 아니라 임시
-// 기본값으로 채운다(성별은 임의로 "여", 매장은 첫 번째 파트너 매장). 나중에 어르신이
-// 생활 정보 설문을 다시 채우거나 보호자가 상세 화면에서 고치면 실제 값으로 덮인다 —
-// "정보 없음"으로 막다른 화면을 보여주는 것보다, 자연스러운 초기 상태로 보이게 하는
-// 기존 newWardDefaults()와 같은 방침이다.
-async function syncGuardianWardsFromBackend(accessToken: string, guardianLoginId: string) {
-  const result = await listOwnUsersBackend(accessToken);
-  if ("error" in result) return;
-
-  for (const user of result.users) {
-    const existingMockId = findMockWardIdForBackendUserId(user.userId);
-    if (existingMockId) {
-      linkWardToGuardian(guardianLoginId, existingMockId);
-      continue;
-    }
-
-    const newWardId = crypto.randomUUID();
-    addWard({
-      id: newWardId,
-      name: user.name,
-      age: calculateAge(user.birthDate),
-      gender: "여",
-      address: user.address,
-      partnerStoreId: PARTNER_STORES[0].id,
-      ...newWardDefaults(),
-    });
-    backendWardIdMapStore.update((prev) => ({ ...prev, [newWardId]: user.userId }));
-    linkWardToGuardian(guardianLoginId, newWardId);
-  }
-}
 
 const DEMO_CREDENTIALS: Record<UserRole, { loginId: string; password: string }> = {
   user: { loginId: "gf-user01", password: "1234" },
@@ -308,6 +269,29 @@ export default function LoginPage() {
                 {submitting && <Loader2 className="animate-spin" />}
                 {submitting ? "확인하는 중..." : "로그인"}
               </Button>
+
+              {/* 백엔드에 아이디/비밀번호 찾기 API가 아직 없다 — 실제로 동작하진 않지만,
+                  로그인 화면에 이 두 버튼이 아예 없으면 "잊어버리면 방법이 없나?" 하는
+                  불안을 줄 수 있어 형식적으로라도 자리를 만들어둔다(2026-08-18 피드백).
+                  눌렀을 때 아무 반응이 없으면 고장난 것처럼 보이니, 최소한 "아직 준비
+                  중"이라는 안내는 토스트로 준다. */}
+              <div className="flex items-center justify-center gap-3 text-xs text-muted-foreground">
+                <button
+                  type="button"
+                  className="underline underline-offset-4"
+                  onClick={() => toast.info("아이디 찾기는 아직 준비 중이에요.")}
+                >
+                  아이디 찾기
+                </button>
+                <span aria-hidden="true">·</span>
+                <button
+                  type="button"
+                  className="underline underline-offset-4"
+                  onClick={() => toast.info("비밀번호 찾기는 아직 준비 중이에요.")}
+                >
+                  비밀번호 찾기
+                </button>
+              </div>
             </form>
 
             <p className="mt-5 text-center text-xs text-muted-foreground">

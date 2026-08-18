@@ -103,7 +103,11 @@ export function updateAccountTtsCallConsent(loginId: string, consent: boolean): 
   ttsConsentOverridesStore.update((prev) => ({ ...prev, [loginId]: consent }));
 }
 
-const wardLinkOverridesStore = createLocalStore<Record<string, string[]>>(
+// session.tsx가 이 store를 구독해서, 어느 화면에서 linkWardToGuardian이 호출되든(로그인
+// 시점이 아니어도) 이미 떠 있는 화면의 account.wardIds가 즉시 갱신되게 한다 — 그 전엔
+// account가 loginId 문자열이 바뀔 때만(사실상 재로그인) 다시 계산돼서, 로그인된 채로
+// 새 대상자가 링크되면 로그아웃 후 재로그인하거나 새로고침해야만 화면에 보였다.
+export const wardLinkOverridesStore = createLocalStore<Record<string, string[]>>(
   "grandfood-app-guardian-ward-links",
   {}
 );

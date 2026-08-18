@@ -223,10 +223,20 @@ export function stopSpeaking() {
 type SpeechRecognitionLike = {
   lang: string;
   interimResults: boolean;
+  continuous: boolean;
   maxAlternatives: number;
   start: () => void;
   stop: () => void;
-  onresult: ((event: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null;
+  onresult:
+    | ((event: {
+        // continuous=true면 브라우저가 한 문장(구절)이 끝날 때마다 onresult를 여러 번
+        // 부르는데, results 배열엔 이전 구절들이 계속 누적된다 — resultIndex가 "이번
+        // 이벤트에서 새로 확정된 구절이 몇 번째냐"를 알려준다. 이걸 안 쓰고 매번
+        // results[0]만 읽으면 항상 첫 구절만 돌려주게 된다.
+        resultIndex: number;
+        results: { [i: number]: { [j: number]: { transcript: string } } };
+      }) => void)
+    | null;
   onerror: ((event: unknown) => void) | null;
   onend: (() => void) | null;
 };
@@ -243,12 +253,13 @@ export function getSpeechRecognition(): (new () => SpeechRecognitionLike) | null
 export type ListenController = { stop: () => void };
 
 // 마이크 권한 팝업이 뜬 채로 사용자가 응답을 미루는 등, onresult/onerror/onend 중
-// 아무것도 안 불리는 상황을 대비한 안전망(코드 리뷰 지적) — 없으면 "듣는 중" state가
-// 영원히 안 풀리고, 그 state로 disabled되는 마이크 버튼도 영구히 눌러지지 않는 상태가
-// 된다(복구법이 "이 화면을 나갔다가 다시 들어오는 것"뿐이었음). TTS_REQUEST_TIMEOUT_MS
-// (10초)보다 넉넉하게 잡는다 — 저긴 순수 네트워크 왕복이지만 여긴 "사용자가 브라우저
-// 권한 팝업을 보고 실제로 클릭"하는 사람의 반응 시간까지 포함해야 한다.
-const LISTEN_TIMEOUT_MS = 20_000;
+// 아무것도 안 불리는 상황을 대비한 안전망이자, continuous 모드(아래 참고)의 최대
+// 녹음 길이 상한이기도 하다 — 없으면 "듣는 중" state가 영원히 안 풀리고, 그 state로
+// disabled되는 마이크 버튼도 영구히 눌러지지 않는 상태가 된다(복구법이 "이 화면을
+// 나갔다가 다시 들어오는 것"뿐이었음). 원래는 "권한 팝업 응답 대기"용으로만 20초였는데,
+// continuous 모드로 바꾸면서 "한 번에 말할 수 있는 최대 길이"도 겸하게 돼 60초로
+// 늘렸다 — 어르신이 천천히, 끊어가며 길게 말씀하실 수 있다는 피드백(2026-08-18).
+const LISTEN_TIMEOUT_MS = 60_000;
 
 // 음성 인식 한 번을 시작하고, "끝났다"는 신호(onEnd)를 정확히 한 번, 무조건 불러주는 걸
 // 보장하는 게 이 함수의 핵심 역할이다 — 호출부(예: assistant-chat-view.tsx)는 보통
@@ -276,6 +287,13 @@ export function listenOnce(callbacks: {
   recognition.lang = "ko-KR";
   recognition.interimResults = false;
   recognition.maxAlternatives = 1;
+  // continuous=false(기본값)면 브라우저가 짧은 침묵만으로도 "말이 끝났다"고 판단해
+  // 인식을 자동으로 끝내버린다 — 어르신이 단어를 떠올리느라 잠깐 멈추면 그 침묵을 오판해
+  // 문장이 중간에 잘리는 문제가 있었다(2026-08-18 피드백). continuous=true로 바꿔서
+  // 자동 종료를 끄고, 대신 호출부(assistant-chat-view.tsx)가 "그만 말하기" 버튼으로
+  // stop()을 직접 부르게 한다 — 언제 끝날지는 이제 브라우저의 침묵 판단이 아니라
+  // 사용자의 명시적인 조작이 결정한다(최대 길이는 위 LISTEN_TIMEOUT_MS가 여전히 보장).
+  recognition.continuous = true;
 
   let ended = false;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -286,18 +304,21 @@ export function listenOnce(callbacks: {
     timeoutId = null;
   }
 
+  // 여기서 detachHandlers()까지 같이 부른다 — finish()는 정확히 한 번만 실행되고
+  // (ended 플래그), 그것도 항상 실제 완료 시점(정상 onend, onerror, 또는 아래 catch의
+  // 강제 종료)에만 불린다. 그 시점 이후에 더 오는 이벤트만 "늦게 온 것"이므로 안전하게
+  // 막아도 된다 — continuous 모드에서 stop()을 부르면 브라우저가 마지막 구절을 onend
+  // 직전에 한 번 더 onresult로 넘겨주는데, 예전엔 stop() 호출 시점에 바로 handler를
+  // 지워버려서(아래 stop 참고) 그 마지막 구절이 도착하기도 전에 사라지는 버그가 있었다
+  // (2026-08-18 발견 — "말하기 끝났어요" 버튼이 매번 이 경로를 탐).
   function finish() {
     if (ended) return;
     ended = true;
     clearListenTimeout();
+    detachHandlers();
     callbacks.onEnd();
   }
 
-  // stop()(수동 취소·언마운트·타임아웃)이 recognition.stop()을 부른 뒤에도, Web Speech
-  // API 특성상 마지막 onresult(드물게 onerror)가 한 번 더 비동기로 도착할 수 있다 — 이미
-  // 떠난 화면의 오래된 클로저를 건드려, 사용자가 지금 보고 있는 다른 화면에 뜬금없는
-  // 에러 토스트가 뜨는 원인이었다(코드 리뷰 지적). 핸들러 자체를 무력화해서 늦게 오는
-  // 이벤트가 아무 데도 닿지 않게 한다.
   function detachHandlers() {
     recognition.onresult = null;
     recognition.onerror = null;
@@ -305,7 +326,11 @@ export function listenOnce(callbacks: {
   }
 
   recognition.onresult = (event) => {
-    callbacks.onResult(event.results[0][0].transcript);
+    // resultIndex부터가 이번에 새로 확정된 구절이다 — continuous 모드에선 results가
+    // 계속 누적되므로 항상 [0]만 읽으면 첫 구절만 반복해서 돌려주게 된다(위 타입 주석
+    // 참고). 호출부(assistant-chat-view.tsx)가 매 호출마다 기존 텍스트 뒤에 이어
+    // 붙이므로, 여기서는 "이번에 새로 들어온 구절"만 한 번 넘겨주면 된다.
+    callbacks.onResult(event.results[event.resultIndex][0].transcript);
   };
   recognition.onerror = () => {
     // onend가 뒤따를 거라고 믿지 않는다 — onerror 뒤에 onend를 안 불러주는 브라우저가
@@ -341,14 +366,20 @@ export function listenOnce(callbacks: {
   return {
     supported: true,
     stop: () => {
-      detachHandlers();
       try {
         recognition.stop();
       } catch {
-        // 이미 끝난 인식에 stop()을 부르면 일부 브라우저가 던진다 — finish()는 아래서
-        // 어차피 부르니 무시해도 안전하다.
+        // 이미 끝난 인식에 stop()을 부르면 일부 브라우저가 던진다 — 이 경우 onend가
+        // 뒤따르지 않을 수 있으니 여기서 직접 마무리한다(ended 플래그가 중복 호출은
+        // 막아준다).
+        finish();
+        return;
       }
-      finish();
+      // recognition.stop() 호출을 여기서 곧바로 finish()로 이어버리면, 브라우저가 그
+      // 직후 비동기로 넘겨주는 마지막 onresult(연속 모드에서 stop() 직전에 마저 말한
+      // 구절)가 도착하기도 전에 핸들러가 이미 지워져 있어 조용히 사라진다 — 그래서
+      // 여기서는 finish()를 직접 부르지 않고, 위에 이미 연결해둔 recognition.onend가
+      // (그 마지막 onresult 다음에) 자연스럽게 finish()를 부르도록 그대로 둔다.
     },
   };
 }

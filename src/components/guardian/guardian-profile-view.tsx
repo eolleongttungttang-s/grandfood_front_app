@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { TopBar } from "@/components/app/top-bar";
 import { useSession } from "@/lib/session";
-import { PLANS, subscriptionStore } from "@/lib/subscription";
+import { PLANS, resolveDisplayPlanId, fetchActiveSubscriptionBackend } from "@/lib/subscription";
 import { createGuardianInvite, guardianInviteStore } from "@/lib/guardian-invite";
 import { useLocalStore } from "@/lib/use-store";
 
@@ -32,12 +32,15 @@ export function GuardianProfileView({
   // useState로만 관리하면 새로고침할 때 발급받은 코드가 사라졌었는데, 다른 store들처럼
   // localStorage 기반 store(guardian-invite.ts)로 바꿔서 새로고침해도 유지되게 했다.
   const invite = useLocalStore(guardianInviteStore);
-  const currentPlanId = useLocalStore(subscriptionStore);
-  const currentPlan = PLANS.find((p) => p.id === currentPlanId);
   // 로컬 wards 목록 자체는 그대로 두고(백엔드 응답엔 담당 매장/식사기록 같은 이 앱의 목업
   // 전용 필드가 없어서 화면을 통째로 못 채운다), GET /users로 실제 서버에도 대상자가
   // 만들어져 있는지만 확인해서 "서버 연동됨" 표시에 쓴다.
   const [linkedBackendWardIds, setLinkedBackendWardIds] = useState<Set<string>>(new Set());
+  // "서버 연동됨"만으로는 이 대상자가 실제로 어떤 수준의 서비스를 받는지 알 수 없어서
+  // 직관적이지 않다는 피드백(2026-08-18) — 대상자마다 다른 플랜을 쓸 수 있게 되면서
+  // (subscription-view.tsx 참고) 뱃지도 대상자별 실제 플랜명(라이트/스탠다드)을
+  // 보여주도록 바꿨다. 값이 없는 대상자는 연동만 됐고 아직 구독은 없는 경우다.
+  const [wardPlanNames, setWardPlanNames] = useState<Record<string, string>>({});
   // wards는 부모(page.tsx)가 렌더마다 getWards().filter(...)로 새로 만드는 배열이라 참조가
   // 매번 바뀐다 — 그대로 deps에 넣으면 렌더마다 재조회한다. report-view.tsx의
   // deficiencyKey/leftoverKey와 같은 방식으로, "실제로 대상자 목록이 달라졌을 때만" 값이
@@ -65,6 +68,26 @@ export function GuardianProfileView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account.loginId, wardIdsKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      wards.map((w) =>
+        fetchActiveSubscriptionBackend({ mockWardId: w.id }).then(
+          (result) => [w.id, result ? PLANS.find((p) => p.id === resolveDisplayPlanId(result.planType))?.name : null] as const
+        )
+      )
+    ).then((entries) => {
+      if (cancelled) return;
+      setWardPlanNames(
+        Object.fromEntries(entries.filter((entry): entry is [string, string] => entry[1] != null))
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wardIdsKey]);
 
   async function createInvite() {
     await createGuardianInvite({ wardIds: wards.map((w) => w.id) });
@@ -107,10 +130,14 @@ export function GuardianProfileView({
             >
               <span className="flex items-center gap-1.5 text-foreground">
                 {w.name} <span className="text-muted-foreground">({w.relationToGuardian})</span>
-                {linkedBackendWardIds.has(w.id) && (
-                  <Badge variant="secondary" className="text-[10px]">
-                    서버 연동됨
-                  </Badge>
+                {wardPlanNames[w.id] ? (
+                  <Badge className="text-[10px]">{wardPlanNames[w.id]}</Badge>
+                ) : (
+                  linkedBackendWardIds.has(w.id) && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      연동됨
+                    </Badge>
+                  )
                 )}
               </span>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -157,9 +184,7 @@ export function GuardianProfileView({
             <Wallet className="h-4 w-4 text-accent" />
             <div className="flex flex-col">
               <span className="text-sm font-semibold text-foreground">구독 관리</span>
-              <span className="text-xs text-muted-foreground">
-                {currentPlan?.name ?? "스탠다드"} 플랜 이용중
-              </span>
+              <span className="text-xs text-muted-foreground">대상자별 플랜을 확인하고 바꿀 수 있어요</span>
             </div>
           </div>
           <ChevronRight className="h-4 w-4 text-muted-foreground" />

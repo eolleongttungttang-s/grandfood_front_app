@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Ward } from "@/lib/wards";
 import { TopBar } from "@/components/app/top-bar";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { SpeakableCard } from "@/components/app/speakable-card";
 import { listenOnce, type ListenController } from "@/lib/accessibility";
 import {
@@ -29,7 +29,23 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
   const [sending, setSending] = useState(false);
   const [listening, setListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 음성 인식 결과가 막 입력창에 채워졌다는 표시 — 전송 버튼을 강조해서 "이제 이걸
+  // 누르면 보내진다"는 다음 동작을 명확히 알려준다(2026-08-18 피드백: 마이크 버튼이
+  // 뭘 하는 건지 안 와닿고, 인식 후 자동 전송도 안 되니 다음에 뭘 해야 할지 모호함).
+  // 자동 전송 대신 강조로 택한 이유는 — 어르신은 말하다 잠깐씩 멈추는 경우가 잦은데,
+  // 브라우저 음성인식의 침묵 감지가 그걸 "말 끝남"으로 오판해 문장이 잘린 채로
+  // 자동 전송될 위험이 있기 때문(사용자 피드백). 사람이 마지막에 한 번 확인하고
+  // 누르는 단계는 남기되, 그 단계를 최대한 눈에 띄게 만드는 절충.
+  const [justRecognized, setJustRecognized] = useState(false);
   const listenControllerRef = useRef<ListenController | null>(null);
+
+  // 강조를 계속 켜두면 나중엔 그냥 배경처럼 안 보이게 된다 — 몇 초 뒤 스스로 꺼지게
+  // 해서, 그 사이에도 안 누르면 평소(안 강조된) 버튼으로 돌아간다.
+  useEffect(() => {
+    if (!justRecognized) return;
+    const timer = setTimeout(() => setJustRecognized(false), 5000);
+    return () => clearTimeout(timer);
+  }, [justRecognized]);
 
   // 화면을 떠날 때(하단 탭으로 다른 화면 이동 등) 마이크가 계속 켜진 채로 남아있으면 안
   // 된다 — 인식이 계속 돌면서 이미 언마운트된 화면의 오래된 클로저(setText/setListening)를
@@ -45,6 +61,7 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     setError(null);
+    setJustRecognized(false);
     addMessage(threadId, "본인", trimmed);
     setText("");
     setSending(true);
@@ -86,6 +103,7 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
     const controller = listenOnce({
       onResult: (transcript) => {
         setText((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript));
+        setJustRecognized(true);
       },
       onError: () => {
         toast.error("음성을 잘 듣지 못했어요. 다시 시도해 주세요.");
@@ -98,6 +116,18 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
       return;
     }
     listenControllerRef.current = controller;
+  }
+
+  // accessibility.ts의 listenOnce가 이제 continuous 모드라 침묵으로는 자동으로 안
+  // 끝난다(2026-08-18 피드백 — 어르신이 잠깐 멈추는 걸 "말 끝남"으로 오판해 문장이
+  // 잘리는 문제) — 그래서 버튼이 "시작"과 "그만 말하기(종료)"를 겸한다. 듣는 중엔
+  // 눌러도 disabled로 막지 않고, stop()을 직접 불러 그 자리에서 마무리한다.
+  function handleMicButtonClick() {
+    if (listening) {
+      listenControllerRef.current?.stop();
+      return;
+    }
+    listenForMessage();
   }
 
   return (
@@ -145,31 +175,56 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
         )}
         {error && <p className="text-xs text-destructive">{error}</p>}
 
-        <div className="flex items-center gap-2 pt-1">
-          <Input
+        {/* 아이콘만 있는 작은 버튼으로는 "말해도 된다"는 게 한눈에 안 들어온다는
+            피드백(2026-08-18) — 입력창과 나란한 부가 버튼이 아니라, 텍스트 라벨을 단
+            전체너비 버튼으로 따로 한 줄을 차지하게 해서 "여기가 말하는 곳"이라는 신호를
+            분명하게 준다. */}
+        <Button
+          type="button"
+          size="lg"
+          variant={listening ? "default" : "outline"}
+          className="h-14 w-full text-lg font-bold [&_svg:not([class*='size-'])]:size-6"
+          onClick={handleMicButtonClick}
+          aria-label={listening ? "말하기 끝내기" : "말로 물어보기"}
+          disabled={sending}
+        >
+          <Mic className={listening ? "animate-pulse" : ""} />
+          {listening ? "말하기 끝났어요" : "말로 물어보기"}
+        </Button>
+
+        <div className="flex items-end gap-2">
+          {/* 음성 인식 결과가 한 줄 입력창에 다 안 담기고 잘려 보이던 문제(2026-08-18
+              피드백) — Textarea(field-sizing-content, ui/textarea.tsx)로 바꿔서 내용
+              길이에 맞춰 세로로 자동으로 늘어나게 한다. Enter는 여전히 줄바꿈이 아니라
+              전송으로 취급한다 — 이 화면의 목적이 "긴 글을 여러 문단으로 쓰기"가 아니라
+              "음성으로 길게 물어본 걸 보내기 전에 다 보이게 하기"라서, Shift+Enter 같은
+              추가 규칙을 배우게 하는 것보다 기존과 같은 단순한 동작을 유지하는 쪽을 택했다. */}
+          <Textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") send();
+              if (e.key === "Enter") {
+                e.preventDefault();
+                send();
+              }
             }}
             placeholder={listening ? "듣고 있어요..." : "메시지를 입력하세요"}
             disabled={sending}
+            rows={1}
           />
-          <Button
-            type="button"
-            size="icon"
-            variant="outline"
-            onClick={listenForMessage}
-            aria-label={listening ? "음성 듣는 중" : "음성으로 입력"}
-            disabled={sending || listening}
-          >
-            <Mic className={listening ? "animate-pulse text-destructive" : ""} />
-          </Button>
           {/* listening 중에도 막지 않는다 — 인식이 응답 없이 오래 걸리거나(느린 네트워크,
               무음) 안 끝나는 경우에도 이미 입력창에 타이핑해 둔 내용은 언제든 보낼 수 있어야
               한다. 나중에 인식 결과가 뒤늦게 와도 그땐 입력창이 비어있어 새로 채워질 뿐,
-              이미 보낸 메시지에는 영향 없다. */}
-          <Button size="icon" onClick={send} aria-label="전송" disabled={sending}>
+              이미 보낸 메시지에는 영향 없다.
+              justRecognized일 때 링을 둘러 펄스시키는 이유는 위 justRecognized 선언부
+              주석 참고 — 자동 전송 대신 "이제 이 버튼을 누르면 된다"를 강하게 알려준다. */}
+          <Button
+            size="icon"
+            onClick={send}
+            aria-label="전송"
+            disabled={sending}
+            className={justRecognized ? "animate-pulse ring-4 ring-primary/50 ring-offset-2" : ""}
+          >
             <Send />
           </Button>
         </div>
