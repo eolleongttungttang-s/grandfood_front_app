@@ -20,7 +20,7 @@ export function ButtonSelectGroup<T extends string>({
   columns = 2,
 }: {
   label: string;
-  options: ButtonSelectOption<T>[];
+  options: readonly ButtonSelectOption<T>[];
   value: T | "";
   onChange: (next: T) => void;
   columns?: 2 | 3;
