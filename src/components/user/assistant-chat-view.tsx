@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Send } from "lucide-react";
+import { Mic, Send } from "lucide-react";
+import { toast } from "sonner";
 
 import { Ward } from "@/lib/wards";
 import { TopBar } from "@/components/app/top-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SpeakableCard } from "@/components/app/speakable-card";
+import { getSpeechRecognition } from "@/lib/accessibility";
 import {
   addMessage,
   assistantThreadId,
@@ -25,6 +27,7 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
   const messages = threadMessages(useLocalStore(chatStore), threadId);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [listening, setListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function send() {
@@ -54,6 +57,32 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
     } finally {
       setSending(false);
     }
+  }
+
+  // 예전 홈 화면 "완식/남김" 음성 명령(home-view.tsx, 잔반 사진 분석으로 대체되며 제거됨)과
+  // 같은 Web Speech API 패턴을 그대로 가져온다. 다만 거긴 단어 하나짜리 명령이라 인식 결과로
+  // 바로 동작(checkMeal)을 실행했지만, 여긴 자유 문장을 묻는 채팅이라 잘못 알아들은 걸 그대로
+  // AI에 보내면 안 된다 — 입력창에 채우기만 하고 전송은 사용자가 확인 후 직접 누르게 한다.
+  function listenForMessage() {
+    const Recognition = getSpeechRecognition();
+    if (!Recognition) {
+      toast.error("이 브라우저에서는 음성 입력을 지원하지 않아요. 직접 입력해 주세요.");
+      return;
+    }
+    const recognition = new Recognition();
+    recognition.lang = "ko-KR";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    setListening(true);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setText((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript));
+    };
+    recognition.onerror = () => {
+      toast.error("음성을 잘 듣지 못했어요. 다시 시도해 주세요.");
+    };
+    recognition.onend = () => setListening(false);
+    recognition.start();
   }
 
   return (
@@ -108,9 +137,23 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
             onKeyDown={(e) => {
               if (e.key === "Enter") send();
             }}
-            placeholder="메시지를 입력하세요"
+            placeholder={listening ? "듣고 있어요..." : "메시지를 입력하세요"}
             disabled={sending}
           />
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            onClick={listenForMessage}
+            aria-label={listening ? "음성 듣는 중" : "음성으로 입력"}
+            disabled={sending || listening}
+          >
+            <Mic className={listening ? "animate-pulse text-destructive" : ""} />
+          </Button>
+          {/* listening 중에도 막지 않는다 — 인식이 응답 없이 오래 걸리거나(느린 네트워크,
+              무음) 안 끝나는 경우에도 이미 입력창에 타이핑해 둔 내용은 언제든 보낼 수 있어야
+              한다. 나중에 인식 결과가 뒤늦게 와도 그땐 입력창이 비어있어 새로 채워질 뿐,
+              이미 보낸 메시지에는 영향 없다. */}
           <Button size="icon" onClick={send} aria-label="전송" disabled={sending}>
             <Send />
           </Button>
