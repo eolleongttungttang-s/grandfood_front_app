@@ -18,9 +18,9 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
   // 대상자 수만큼 syncSubscriptionToBackend를 반복 호출한 뒤(이 화면은 보호자 계정 전체에
   // 플랜 하나만 고르는 UI라 관리하는 모든 대상자에게 동일 플랜을 반영, subscription.ts
   // 주석 참고) 결과를 종합한다. 예전엔 이 결과를 아예 안 보고 항상 성공 토스트를 먼저
-  // 띄웠다 — 실제로는 no-backend-access(이 보호자로 백엔드에 로그인한 적이 없어 토큰 자체를
-  // 못 구함)라 fetch조차 한 번도 안 나갔는데도 "변경했어요"만 보이는, 버튼이 눌러도 아무
-  // 반응이 없는 것처럼 느껴지던 원인이었다.
+  // 띄웠다 — 실제로는 no-backend-session(이 보호자로 백엔드에 로그인한 적이 없어 토큰
+  // 자체를 못 구함)이라 fetch조차 한 번도 안 나갔는데도 "변경했어요"만 보이는, 버튼이
+  // 눌러도 아무 반응이 없는 것처럼 느껴지던 원인이었다.
   async function handleSelectPlan(planId: string) {
     setSyncingPlanId(planId);
     const results = await Promise.all(
@@ -47,18 +47,23 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
     }
 
     if (succeeded > 0) {
-      // 일부 대상자만 반영된 상태 — 로컬 표시는 갱신하되(대부분은 반영됐으니), 나머지는
-      // 재로그인 등으로 다시 시도해야 한다는 걸 명확히 알려준다.
-      subscriptionStore.write(planId);
+      // 일부 대상자만 반영된 상태 — 여기서 subscriptionStore를 쓰면 이 플랜이 곧바로
+      // "이용중"(isCurrent) 처리돼서, 실패한 대상자를 다시 반영할 "이 플랜으로 변경"
+      // 버튼(!isCurrent 조건)이 화면에서 사라져버린다(코드 리뷰 지적) — 그래서 로컬
+      // 표시는 갱신하지 않고, 나머지는 재시도해야 한다는 것만 알려준다.
       toast.warning(
         `${succeeded}/${wards.length}명에게만 플랜이 반영됐어요. 나머지는 잠시 후 다시 시도해 주세요.`
       );
       return;
     }
 
-    const allNoAccess = results.every((r) => !r.ok && r.reason === "no-backend-access");
+    // 전부 실패 — 세션 만료(401)로 인한 실패라면 fetch-with-timeout.ts의 전역 핸들러가
+    // 이미 "다시 로그인해주세요" 토스트+리다이렉트를 처리 중이라 여기서 또 안내하지 않는다.
+    if (results.some((r) => !r.ok && r.reason === "session-expired")) return;
+
+    const allNoSession = results.every((r) => !r.ok && r.reason === "no-backend-session");
     toast.error(
-      allNoAccess
+      allNoSession
         ? "이 계정으로 백엔드에 연결된 적이 없어요. 로그아웃 후 다시 로그인하면 해결될 수 있어요."
         : "구독 변경에 실패했어요. 잠시 후 다시 시도해 주세요."
     );

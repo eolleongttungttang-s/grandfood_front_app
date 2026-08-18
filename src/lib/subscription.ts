@@ -1,6 +1,6 @@
 import { API_BASE_URL } from "@/lib/api-config";
-import { resolveBackendWardAccess, resolveCachedBackendWardAccess } from "@/lib/backend-auth";
-import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+import { resolveBackendWardAccessDetailed, resolveCachedBackendWardAccess } from "@/lib/backend-auth";
+import { fetchWithTimeout, isSessionExpiredRedirectInFlight } from "@/lib/fetch-with-timeout";
 import { createLocalStore } from "@/lib/local-store";
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -101,15 +101,24 @@ export type FundingSource = "self" | "guardian";
 // syncSubscriptionToBackend()가 boolean 하나로만 성공/실패를 알려주던 때는 호출부가
 // "왜" 실패했는지 구분할 수 없어서, 두 화면 다 실패해도 그냥 조용히 넘어가거나(보호자
 // 화면 — 아래 SubscriptionView 참고) 실패 이유를 알 수 없는 뭉뚱그린 안내만 보여줬다
-// (이용자 본인 화면). 특히 "no-backend-access"(이 대상자로 백엔드에 로그인한 적이
-// 없어서 resolveBackendWardAccess가 토큰 자체를 못 구함)는 fetch를 시도조차 안 하고
-// 끝나는 경우라 — 네트워크 요청 자체가 하나도 안 나가서 "버튼을 눌러도 아무 반응이
-// 없다"로 보이는 원인이었다. 재로그인하면 해결되는 경우라(registerAccount/
-// registerGuardianBackend 실패 시 "나중에 다시 로그인하면 활성화돼요" 안내와 같은
-// 케이스) 호출부가 그 안내를 정확히 보여줄 수 있어야 한다.
+// (이용자 본인 화면). 이유는 4가지로 갈린다:
+// - "no-backend-session": 이 대상자로 백엔드에 로그인한 적 자체가 없어서
+//   resolveBackendWardAccessDetailed가 세션을 못 찾음(fetch 시도조차 안 함) — 재로그인이
+//   실제로 필요한 경우.
+// - "ward-sync-failed": 세션은 있는데 백엔드 User 자동생성(ensureBackendWardId)이 일시
+//   실패함(fetch 시도조차 안 함) — 재로그인과 무관하고, 다시 시도하면 될 가능성이 높다.
+//   예전엔 이 경우도 위 "세션 없음"과 똑같이 "no-backend-access"로 뭉뚱그려져서, 실제로는
+//   로그인 상태인 사용자에게도 "재로그인하세요"라는 엉뚱한 안내가 떴다(코드 리뷰 지적).
+// - "session-expired": 401을 받았고, fetch-with-timeout.ts의 전역 핸들러가 이미 "세션
+//   만료" 토스트를 띄우고 /login으로 리다이렉트를 시작함 — 호출부는 자기 나름의 실패
+//   토스트를 또 띄우면 안 된다(모순돼 보이고, 어차피 곧 리다이렉트된다).
+// - "rejected"/"network": 그 외 일반적인 실패 — "잠시 후 다시" 안내로 충분하다.
 export type SubscriptionSyncResult =
   | { ok: true }
-  | { ok: false; reason: "no-backend-access" | "network" | "rejected" };
+  | {
+      ok: false;
+      reason: "no-backend-session" | "ward-sync-failed" | "session-expired" | "network" | "rejected";
+    };
 
 // POST /subscriptions — "이 플랜으로 변경" 버튼이 부른다.
 // - 보호자 화면(guardian/subscription-view.tsx): 대상자마다 별도 Subscription 행을 갖는
@@ -125,8 +134,14 @@ export async function syncSubscriptionToBackend(
   planId: string,
   fundingSource: FundingSource
 ): Promise<SubscriptionSyncResult> {
-  const access = await resolveBackendWardAccess(identity);
-  if (!access) return { ok: false, reason: "no-backend-access" };
+  const accessResult = await resolveBackendWardAccessDetailed(identity);
+  if (!accessResult.ok) {
+    return {
+      ok: false,
+      reason: accessResult.reason === "no-session" ? "no-backend-session" : "ward-sync-failed",
+    };
+  }
+  const access = accessResult.access;
 
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
     `${API_BASE_URL}/subscriptions`,
@@ -147,7 +162,11 @@ export async function syncSubscriptionToBackend(
   );
   try {
     const response = await promise;
-    return response.ok ? { ok: true } : { ok: false, reason: "rejected" };
+    if (response.ok) return { ok: true };
+    if (response.status === 401 && isSessionExpiredRedirectInFlight()) {
+      return { ok: false, reason: "session-expired" };
+    }
+    return { ok: false, reason: "rejected" };
   } catch {
     return { ok: false, reason: "network" };
   } finally {

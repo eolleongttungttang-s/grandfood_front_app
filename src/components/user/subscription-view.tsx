@@ -74,14 +74,23 @@ export function SelfSubscriptionView({ ward }: { ward: Ward }) {
     const result = await syncSubscriptionToBackend(identity, planId, "self");
     setSyncingPlanId(null);
     if (!result.ok) {
-      // "no-backend-access"는 fetch를 시도조차 못 한 경우다(이 대상자로 백엔드에 로그인한
-      // 이력이 없어 resolveBackendWardAccess가 토큰을 못 구함) — 가입 시 백엔드가 일시
-      // 장애였을 때 흔히 생기고, 재로그인하면 그 세션이 새로 만들어져 해결된다. 나머지
-      // (network/rejected)는 일반적인 "잠시 후 다시" 안내로 충분하다.
+      // "session-expired"는 fetch-with-timeout.ts의 전역 핸들러가 이미 "다시 로그인해주세요"
+      // 토스트+리다이렉트를 처리 중인 경우다 — 여기서 "잠시 후 다시 시도해 주세요"를 또
+      // 띄우면 방금 뜬 안내와 모순돼 보이고, 어차피 곧 리다이렉트된다.
+      if (result.reason === "session-expired") return;
+      // "no-backend-session"은 fetch를 시도조차 못 한 경우다(이 대상자로 백엔드에 로그인한
+      // 이력이 없어 resolveBackendWardAccessDetailed가 세션을 못 찾음) — 재로그인하면 그
+      // 세션이 새로 만들어져 해결된다. "ward-sync-failed"는 세션은 있는데 백엔드 User
+      // 자동생성이 일시 실패한 경우라 재로그인과 무관하고 다시 시도하면 될 가능성이 높다
+      // (코드 리뷰 지적 — 예전엔 이 둘을 구분 못 해서 재로그인해도 안 바뀌는 상황에도
+      // "재로그인하세요"만 반복해서 보여줬다). 나머지(network/rejected)는 일반적인
+      // "잠시 후 다시" 안내로 충분하다.
       toast.error(
-        result.reason === "no-backend-access"
+        result.reason === "no-backend-session"
           ? "이 계정으로 백엔드에 연결된 적이 없어요. 로그아웃 후 다시 로그인하면 해결될 수 있어요."
-          : "구독 신청에 실패했어요. 잠시 후 다시 시도해 주세요."
+          : result.reason === "ward-sync-failed"
+            ? "서버와 일시적으로 연결하지 못했어요. 잠시 후 다시 시도해 주세요."
+            : "구독 신청에 실패했어요. 잠시 후 다시 시도해 주세요."
       );
       return;
     }
