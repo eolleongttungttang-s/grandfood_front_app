@@ -379,8 +379,9 @@ async function postNewBackendUser(params: {
   address: string;
   conditionFlags?: string[];
 }): Promise<{ userId: string } | { error: string }> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/users`, {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/users`,
+    {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -394,14 +395,23 @@ async function postNewBackendUser(params: {
         plan_type: "base",
         condition_flags: params.conditionFlags ?? [],
       }),
-    });
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
     if (!response.ok) {
       return { error: await parseErrorResponse(response) };
     }
     const data = await response.json();
     return { userId: data.user_id as string };
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return { error: "서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요." };
+    }
     return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  } finally {
+    clearRequestTimeout();
   }
 }
 
@@ -730,6 +740,19 @@ export function hasBackendSessionForWard(mockWardId: string): boolean {
 
 export type ResolvedBackendWardAccess = { accessToken: string; backendWardId: string };
 
+// resolveBackendWardAccess()가 null 하나로만 실패를 알려주면 호출부가 "왜" 실패했는지
+// 구분할 수 없다(subscription.ts 코드 리뷰 지적) — 아래 두 경우는 원인도, 사용자가 해야
+// 할 조치도 완전히 다르다:
+//   - "no-session": 이 대상자로 백엔드에 로그인한 적 자체가 없음(관리하는 보호자도 없고
+//     본인 로그인 이력도 없음) → 재로그인이 실제로 필요한 경우.
+//   - "ward-creation-failed": 세션(로그인)은 있는데 ensureBackendWardId(POST /users)가
+//     일시적으로 실패함(네트워크 오류, 백엔드 일시 장애 등) → 재로그인과 무관하고, 다시
+//     시도하면 될 가능성이 높음. 예전엔 이 경우도 "no-session"과 똑같이 취급돼서 실제로는
+//     로그인 상태인데도 "재로그인하세요"라는 엉뚱한 안내가 떴다.
+export type BackendWardAccessResult =
+  | { ok: true; access: ResolvedBackendWardAccess }
+  | { ok: false; reason: "no-session" | "ward-creation-failed" };
+
 // meal-log-store.ts(사진 업로드)/rag-chat.ts(AI 도우미)가 공유하는 "이 wardId로 백엔드를
 // 부를 토큰 + 실제 UUID 확보" 로직. 두 경로를 순서대로 시도한다:
 //   1) 이 어르신을 관리하는 보호자가 있고, 그 보호자가 실제 로그인한 적 있음
@@ -737,28 +760,41 @@ export type ResolvedBackendWardAccess = { accessToken: string; backendWardId: st
 //   2) 보호자가 없고, 이 어르신 본인이 자가등록(POST /auth/users/register)해 로그인한 적 있음
 //      → 본인 세션 그대로. backendWardId는 이미 회원가입 때 만들어진 자기 자신의 user_id라
 //        추가로 만들 게 없음(어르신 앱 UI 자체가 "어느 대상자"인지 몰라도 되는 자기 자신 화면)
-// 둘 다 없으면(관리하는 보호자도 없고 본인도 로그인 이력이 없으면) null — 호출부가 각자의
-// 안내 문구로 처리한다(예전엔 1번 경로 하나만 있어서, 보호자 없이 직접가입한 이용자는
-// 구조적으로 여기서 항상 막혔다).
+export async function resolveBackendWardAccessDetailed(params: {
+  mockWardId: string;
+  name: string;
+  age: number;
+  address: string;
+}): Promise<BackendWardAccessResult> {
+  const guardianSession = getBackendGuardianSessionForWard(params.mockWardId);
+  if (guardianSession) {
+    const backendWardId = await ensureBackendWardId(params);
+    if (!backendWardId) return { ok: false, reason: "ward-creation-failed" };
+    return { ok: true, access: { accessToken: guardianSession.accessToken, backendWardId } };
+  }
+
+  const userSession = getBackendUserSessionForWard(params.mockWardId);
+  if (userSession) {
+    return {
+      ok: true,
+      access: { accessToken: userSession.accessToken, backendWardId: userSession.userId },
+    };
+  }
+
+  return { ok: false, reason: "no-session" };
+}
+
+// 실패 이유 구분이 필요 없는 기존 호출부(meal-log-store.ts, rag-chat.ts, 이 파일 아래
+// submitSelfHealthProfileBackend/updateBackendWardTtsConsent)를 위한 얇은 래퍼 — 둘 다
+// null로 뭉뚱그린다.
 export async function resolveBackendWardAccess(params: {
   mockWardId: string;
   name: string;
   age: number;
   address: string;
 }): Promise<ResolvedBackendWardAccess | null> {
-  const guardianSession = getBackendGuardianSessionForWard(params.mockWardId);
-  if (guardianSession) {
-    const backendWardId = await ensureBackendWardId(params);
-    if (!backendWardId) return null;
-    return { accessToken: guardianSession.accessToken, backendWardId };
-  }
-
-  const userSession = getBackendUserSessionForWard(params.mockWardId);
-  if (userSession) {
-    return { accessToken: userSession.accessToken, backendWardId: userSession.userId };
-  }
-
-  return null;
+  const result = await resolveBackendWardAccessDetailed(params);
+  return result.ok ? result.access : null;
 }
 
 // notifications.ts의 fetchElderNotifications처럼 "이미 백엔드에 등록돼 있으면만 조회하고,
