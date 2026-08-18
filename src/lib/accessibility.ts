@@ -239,3 +239,75 @@ export function getSpeechRecognition(): (new () => SpeechRecognitionLike) | null
   };
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
+
+export type ListenController = { stop: () => void };
+
+// 음성 인식 한 번을 시작하고, "끝났다"는 신호(onEnd)를 정확히 한 번, 무조건 불러주는 걸
+// 보장하는 게 이 함수의 핵심 역할이다 — 호출부(예: assistant-chat-view.tsx)는 보통
+// onEnd에서 "듣는 중" state를 끄는데, start()가 동기적으로 던지거나(예: 마이크 권한이
+// 방금 취소된 경우) onerror 뒤에 onend가 안 오는 브라우저에서 onEnd가 한 번도 안 불리면
+// 그 state가 영원히 안 풀린다 — 코드 리뷰에서 지적된 문제. finish()를 한 곳에 모아 어느
+// 경로로 끝나든(정상 종료/에러/시작 실패) 딱 한 번만 불리게 한다.
+//
+// 반환하는 컨트롤러의 stop()은 화면이 언마운트될 때 호출부가 꼭 불러야 한다 — 안 그러면
+// 사용자가 마이크를 켠 채 다른 화면으로 이동해도 인식이 계속 켜져 있고, 나중에 도착하는
+// onresult/onend가 이미 떠난 화면의 오래된 클로저를 건드리게 된다(마찬가지로 코드
+// 리뷰 지적). supported:false면 stop()은 그냥 아무 일도 안 하는 no-op이라 호출부가
+// null 체크 없이 항상 unmount cleanup에서 불러도 안전하다.
+export function listenOnce(callbacks: {
+  onResult: (transcript: string) => void;
+  onError: () => void;
+  onEnd: () => void;
+}): { supported: boolean } & ListenController {
+  const Recognition = getSpeechRecognition();
+  if (!Recognition) {
+    return { supported: false, stop: () => {} };
+  }
+
+  const recognition = new Recognition();
+  recognition.lang = "ko-KR";
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  let ended = false;
+  function finish() {
+    if (ended) return;
+    ended = true;
+    callbacks.onEnd();
+  }
+
+  recognition.onresult = (event) => {
+    callbacks.onResult(event.results[0][0].transcript);
+  };
+  recognition.onerror = () => {
+    // onend가 뒤따를 거라고 믿지 않는다 — onerror 뒤에 onend를 안 불러주는 브라우저가
+    // 있어서(코드 리뷰 지적), 여기서 바로 finish()까지 부른다. 진짜로 onend가 나중에
+    // 또 오더라도 ended 플래그가 막아줘서 onEnd가 두 번 불리진 않는다.
+    callbacks.onError();
+    finish();
+  };
+  recognition.onend = finish;
+
+  try {
+    recognition.start();
+  } catch {
+    // 권한이 막 취소됐거나 이미 다른 인식이 돌고 있는 등, start() 자체가 동기적으로 던지는
+    // 경우 — onerror/onend가 아예 안 불릴 상황이라 여기서 직접 처리해야 한다.
+    callbacks.onError();
+    finish();
+    return { supported: true, stop: () => {} };
+  }
+
+  return {
+    supported: true,
+    stop: () => {
+      try {
+        recognition.stop();
+      } catch {
+        // 이미 끝난 인식에 stop()을 부르면 일부 브라우저가 던진다 — finish()는 아래서
+        // 어차피 부르니 무시해도 안전하다.
+      }
+      finish();
+    },
+  };
+}

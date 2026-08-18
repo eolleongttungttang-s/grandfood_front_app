@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Mic, Send } from "lucide-react";
 import { toast } from "sonner";
 
@@ -9,7 +9,7 @@ import { TopBar } from "@/components/app/top-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SpeakableCard } from "@/components/app/speakable-card";
-import { getSpeechRecognition } from "@/lib/accessibility";
+import { listenOnce, type ListenController } from "@/lib/accessibility";
 import {
   addMessage,
   assistantThreadId,
@@ -29,6 +29,17 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
   const [sending, setSending] = useState(false);
   const [listening, setListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const listenControllerRef = useRef<ListenController | null>(null);
+
+  // 화면을 떠날 때(하단 탭으로 다른 화면 이동 등) 마이크가 계속 켜진 채로 남아있으면 안
+  // 된다 — 인식이 계속 돌면서 이미 언마운트된 화면의 오래된 클로저(setText/setListening)를
+  // 나중에 건드리게 된다(코드 리뷰 지적). listenOnce()가 돌려준 컨트롤러의 stop()은
+  // 인식이 아직 없어도(never started) no-op이라 항상 안전하게 부를 수 있다.
+  useEffect(() => {
+    return () => {
+      listenControllerRef.current?.stop();
+    };
+  }, []);
 
   async function send() {
     const trimmed = text.trim();
@@ -60,29 +71,33 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
   }
 
   // 예전 홈 화면 "완식/남김" 음성 명령(home-view.tsx, 잔반 사진 분석으로 대체되며 제거됨)과
-  // 같은 Web Speech API 패턴을 그대로 가져온다. 다만 거긴 단어 하나짜리 명령이라 인식 결과로
-  // 바로 동작(checkMeal)을 실행했지만, 여긴 자유 문장을 묻는 채팅이라 잘못 알아들은 걸 그대로
-  // AI에 보내면 안 된다 — 입력창에 채우기만 하고 전송은 사용자가 확인 후 직접 누르게 한다.
+  // 같은 Web Speech API 패턴이지만, lib/accessibility.ts의 listenOnce()로 옮겨 시작
+  // 실패/언마운트 시 정리까지 한 곳에서 안전하게 처리한다(코드 리뷰 지적 — 이 화면에 직접
+  // 풀어 쓰면 그 정리를 놓치기 쉽다). 거긴 단어 하나짜리 명령이라 인식 결과로 바로 동작
+  // (checkMeal)을 실행했지만, 여긴 자유 문장을 묻는 채팅이라 잘못 알아들은 걸 그대로 AI에
+  // 보내면 안 된다 — 입력창에 채우기만 하고 전송은 사용자가 확인 후 직접 누르게 한다.
   function listenForMessage() {
-    const Recognition = getSpeechRecognition();
-    if (!Recognition) {
+    // listenOnce가 이 아래에서 동기적으로 실패할 수 있다(예: start()가 즉시 던져서
+    // onError→onEnd가 listenOnce() 호출 도중 바로 불림) — 그래서 setListening(true)를
+    // listenOnce() 호출보다 먼저 해둬야, 그 즉시-실패 경로의 onEnd(setListening(false))가
+    // 이걸 덮어써서 최종 상태가 정확히 "false"로 남는다. 순서를 반대로 하면(먼저 호출하고
+    // 나중에 true로 덮어쓰면) 실패했는데도 "듣는 중" 상태에 갇히는 버그가 된다.
+    setListening(true);
+    const controller = listenOnce({
+      onResult: (transcript) => {
+        setText((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript));
+      },
+      onError: () => {
+        toast.error("음성을 잘 듣지 못했어요. 다시 시도해 주세요.");
+      },
+      onEnd: () => setListening(false),
+    });
+    if (!controller.supported) {
+      setListening(false);
       toast.error("이 브라우저에서는 음성 입력을 지원하지 않아요. 직접 입력해 주세요.");
       return;
     }
-    const recognition = new Recognition();
-    recognition.lang = "ko-KR";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    setListening(true);
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setText((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript));
-    };
-    recognition.onerror = () => {
-      toast.error("음성을 잘 듣지 못했어요. 다시 시도해 주세요.");
-    };
-    recognition.onend = () => setListening(false);
-    recognition.start();
+    listenControllerRef.current = controller;
   }
 
   return (
