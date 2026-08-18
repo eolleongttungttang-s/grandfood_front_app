@@ -379,8 +379,9 @@ async function postNewBackendUser(params: {
   address: string;
   conditionFlags?: string[];
 }): Promise<{ userId: string } | { error: string }> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/users`, {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/users`,
+    {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -394,14 +395,23 @@ async function postNewBackendUser(params: {
         plan_type: "base",
         condition_flags: params.conditionFlags ?? [],
       }),
-    });
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
     if (!response.ok) {
       return { error: await parseErrorResponse(response) };
     }
     const data = await response.json();
     return { userId: data.user_id as string };
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return { error: "서버 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요." };
+    }
     return { error: "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요." };
+  } finally {
+    clearRequestTimeout();
   }
 }
 

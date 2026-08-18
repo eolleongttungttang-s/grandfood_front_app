@@ -120,6 +120,32 @@ export type SubscriptionSyncResult =
       reason: "no-backend-session" | "ward-sync-failed" | "session-expired" | "network" | "rejected";
     };
 
+// 위 4가지 실패 사유 → 토스트 문구 매핑. user/subscription-view.tsx와 guardian/
+// subscription-view.tsx 둘 다 이 매핑이 필요한데, 각자 따로 복제해두면 나중에 문구/분류를
+// 하나 고칠 때 한쪽만 고치고 잊어버리기 쉽다(애초에 reason을 4가지로 나눈 이유가 이런
+// 실수를 막기 위해서인데, 매핑 자체가 흩어져 있으면 그 의미가 없어진다) — 그래서 여기
+// 한 곳으로 모은다. "session-expired"는 null을 돌려준다: fetch-with-timeout.ts의 전역
+// 401 핸들러가 이미 "다시 로그인해주세요" 토스트+리다이렉트를 처리 중이라, 호출부가 또
+// 실패 토스트를 띄우면 방금 뜬 안내와 모순돼 보인다 — 호출부는 null이면 아무것도 안
+// 띄우면 된다. "network"/"rejected"는 화면마다 동사(신청/변경)가 달라 의미가 있는
+// 유일한 경우라 fallbackMessage로 호출부가 채운다.
+export function subscriptionSyncFailureMessage(
+  reason: Exclude<SubscriptionSyncResult, { ok: true }>["reason"],
+  fallbackMessage: string
+): string | null {
+  switch (reason) {
+    case "session-expired":
+      return null;
+    case "no-backend-session":
+      return "이 계정으로 백엔드에 연결된 적이 없어요. 로그아웃 후 다시 로그인하면 해결될 수 있어요.";
+    case "ward-sync-failed":
+      return "서버와 일시적으로 연결하지 못했어요. 잠시 후 다시 시도해 주세요.";
+    case "network":
+    case "rejected":
+      return fallbackMessage;
+  }
+}
+
 // POST /subscriptions — "이 플랜으로 변경" 버튼이 부른다.
 // - 보호자 화면(guardian/subscription-view.tsx): 대상자마다 별도 Subscription 행을 갖는
 //   백엔드 모델과 달리 이 화면은 보호자 계정 전체에 플랜 하나만 고르는 UI라, 보호자가

@@ -6,7 +6,14 @@ import { toast } from "sonner";
 
 import { TopBar } from "@/components/app/top-bar";
 import { Button } from "@/components/ui/button";
-import { PLANS, PAYMENT_METHOD, subscriptionStore, formatWon, syncSubscriptionToBackend } from "@/lib/subscription";
+import {
+  PLANS,
+  PAYMENT_METHOD,
+  subscriptionStore,
+  formatWon,
+  syncSubscriptionToBackend,
+  subscriptionSyncFailureMessage,
+} from "@/lib/subscription";
 import { useLocalStore } from "@/lib/use-store";
 import type { Ward } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
@@ -38,9 +45,9 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
     const succeeded = results.filter((r) => r.ok).length;
 
     // 대상자가 아예 없으면(관리하는 어르신을 아직 안 만든 보호자) 백엔드에 반영할 대상이
-    // 없는 게 정상이라 바로 성공 처리한다 — results가 빈 배열이라 succeeded === 0이지만
-    // wards.length도 0이라 "전부 실패"와 구분해야 한다.
-    if (wards.length === 0 || succeeded === wards.length) {
+    // 없는 게 정상이라 바로 성공 처리한다 — results가 빈 배열이라 succeeded도 0이 돼서,
+    // wards.length(마찬가지로 0)와 그대로 같아져 이 조건 하나로 자연스럽게 걸러진다.
+    if (succeeded === wards.length) {
       subscriptionStore.write(planId);
       toast.success(`${plan?.name ?? "선택하신"} 플랜으로 변경했어요.`);
       return;
@@ -59,14 +66,19 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
 
     // 전부 실패 — 세션 만료(401)로 인한 실패라면 fetch-with-timeout.ts의 전역 핸들러가
     // 이미 "다시 로그인해주세요" 토스트+리다이렉트를 처리 중이라 여기서 또 안내하지 않는다.
-    if (results.some((r) => !r.ok && r.reason === "session-expired")) return;
+    const failures = results.filter((r): r is Extract<typeof r, { ok: false }> => !r.ok);
+    if (failures.some((r) => r.reason === "session-expired")) return;
 
-    const allNoSession = results.every((r) => !r.ok && r.reason === "no-backend-session");
-    toast.error(
-      allNoSession
-        ? "이 계정으로 백엔드에 연결된 적이 없어요. 로그아웃 후 다시 로그인하면 해결될 수 있어요."
-        : "구독 변경에 실패했어요. 잠시 후 다시 시도해 주세요."
-    );
+    // 사유 → 문구 매핑은 user/subscription-view.tsx와 공유하는
+    // subscriptionSyncFailureMessage()에 모아뒀다(코드 리뷰 지적 — 두 화면이 각자
+    // 복제해두면 한쪽만 고치고 잊어버리기 쉽다). 대상자가 여럿이라 실패 사유가 섞일 수
+    // 있는데, 전부 같은 사유일 때만 그 사유에 맞는 구체적 안내를 주고(예: 전원
+    // no-backend-session이면 재로그인 안내), 사유가 섞여 있으면 일반 안내로 충분하다.
+    const fallback = "구독 변경에 실패했어요. 잠시 후 다시 시도해 주세요.";
+    const uniqueReasons = new Set(failures.map((r) => r.reason));
+    const uniformReason = uniqueReasons.size === 1 ? failures[0].reason : null;
+    const message = uniformReason ? subscriptionSyncFailureMessage(uniformReason, fallback) : fallback;
+    if (message) toast.error(message);
   }
 
   return (
