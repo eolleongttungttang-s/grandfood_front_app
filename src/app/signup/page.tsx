@@ -22,6 +22,8 @@ import { useSession } from "@/lib/session";
 import { addWard, createSelfWard } from "@/lib/wards";
 import { ttsCallConsentReadAloudText } from "@/components/invite/consent-view";
 
+const RELATIONSHIP_OPTIONS = ["딸", "아들", "며느리", "사위", "배우자", "형제자매", "손자녀"];
+
 export default function SignupPage() {
   const router = useRouter();
   const { login } = useSession();
@@ -31,6 +33,7 @@ export default function SignupPage() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [relationship, setRelationship] = useState("");
+  const [customRelationship, setCustomRelationship] = useState(false);
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState<"여" | "남">("여");
   const [address, setAddress] = useState("");
@@ -52,6 +55,11 @@ export default function SignupPage() {
 
     if (password !== passwordConfirm) {
       setError("비밀번호가 서로 달라요.");
+      return;
+    }
+
+    if (role === "guardian" && !relationship.trim()) {
+      setError("대상자와의 관계를 선택해주세요.");
       return;
     }
 
@@ -188,8 +196,42 @@ export default function SignupPage() {
                     </p>
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="signup-relationship">대상자와의 관계</Label>
-                    <Input id="signup-relationship" value={relationship} onChange={(event) => setRelationship(event.target.value)} placeholder="예: 딸, 아들, 며느리" required />
+                    <Label>대상자와의 관계</Label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {RELATIONSHIP_OPTIONS.map((option) => (
+                        <Button
+                          key={option}
+                          type="button"
+                          variant={!customRelationship && relationship === option ? "default" : "outline"}
+                          onClick={() => {
+                            setCustomRelationship(false);
+                            setRelationship(option);
+                          }}
+                        >
+                          {option}
+                        </Button>
+                      ))}
+                      <Button
+                        type="button"
+                        variant={customRelationship ? "default" : "outline"}
+                        onClick={() => {
+                          setCustomRelationship(true);
+                          setRelationship("");
+                        }}
+                      >
+                        기타
+                      </Button>
+                    </div>
+                    {customRelationship ? (
+                      <Input
+                        id="signup-relationship"
+                        value={relationship}
+                        onChange={(event) => setRelationship(event.target.value)}
+                        placeholder="관계를 입력해주세요"
+                        autoFocus
+                        required
+                      />
+                    ) : null}
                   </div>
                 </>
               ) : (
