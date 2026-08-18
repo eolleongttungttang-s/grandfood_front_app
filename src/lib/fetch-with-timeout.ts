@@ -37,6 +37,14 @@ import { clearSessionForExpiredToken } from "@/lib/session";
 const RELOGIN_REQUIRED_CODES = new Set(["token_expired", "token_invalid"]);
 let sessionExpiredNotified = false;
 
+// 401을 받은 호출부(subscription.ts 등)가 "이 요청 실패, 이미 전역에서 세션 만료
+// 토스트+리다이렉트를 처리했는지"를 확인하는 용도 — 이미 처리 중이면 호출부는 자기
+// 나름의 실패 토스트("잠시 후 다시 시도해 주세요" 등)를 또 띄우면 안 된다. 그 토스트가
+// 방금 뜬 "다시 로그인해주세요"와 모순돼 보이고, 어차피 곧 /login으로 리다이렉트된다.
+export function isSessionExpiredRedirectInFlight(): boolean {
+  return sessionExpiredNotified;
+}
+
 // 여러 401이 동시에 오면 "재로그인이 필요한 code인지" 조사를 순서대로(직렬로) 처리한다 —
 // 처음엔 await 전에 플래그를 선점하고 필요 없으면 되돌리는 방식으로 짰었는데, 그것도
 // 레이스가 있었다(코드 리뷰 지적): A(missing_token, 재로그인 불필요)와 B(token_expired,
