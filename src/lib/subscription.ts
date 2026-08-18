@@ -1,6 +1,6 @@
 import { API_BASE_URL } from "@/lib/api-config";
-import { resolveBackendWardAccessDetailed, resolveCachedBackendWardAccess } from "@/lib/backend-auth";
-import { fetchWithTimeout, isSessionExpiredRedirectInFlight } from "@/lib/fetch-with-timeout";
+import { resolveBackendWardAccess, resolveCachedBackendWardAccess } from "@/lib/backend-auth";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { createLocalStore } from "@/lib/local-store";
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -98,54 +98,6 @@ function toBackendPlanType(planId: string): "base" | "premium" {
 // 실수를 컴파일 타임에 막는다.
 export type FundingSource = "self" | "guardian";
 
-// syncSubscriptionToBackend()가 boolean 하나로만 성공/실패를 알려주던 때는 호출부가
-// "왜" 실패했는지 구분할 수 없어서, 두 화면 다 실패해도 그냥 조용히 넘어가거나(보호자
-// 화면 — 아래 SubscriptionView 참고) 실패 이유를 알 수 없는 뭉뚱그린 안내만 보여줬다
-// (이용자 본인 화면). 이유는 4가지로 갈린다:
-// - "no-backend-session": 이 대상자로 백엔드에 로그인한 적 자체가 없어서
-//   resolveBackendWardAccessDetailed가 세션을 못 찾음(fetch 시도조차 안 함) — 재로그인이
-//   실제로 필요한 경우.
-// - "ward-sync-failed": 세션은 있는데 백엔드 User 자동생성(ensureBackendWardId)이 일시
-//   실패함(fetch 시도조차 안 함) — 재로그인과 무관하고, 다시 시도하면 될 가능성이 높다.
-//   예전엔 이 경우도 위 "세션 없음"과 똑같이 "no-backend-access"로 뭉뚱그려져서, 실제로는
-//   로그인 상태인 사용자에게도 "재로그인하세요"라는 엉뚱한 안내가 떴다(코드 리뷰 지적).
-// - "session-expired": 401을 받았고, fetch-with-timeout.ts의 전역 핸들러가 이미 "세션
-//   만료" 토스트를 띄우고 /login으로 리다이렉트를 시작함 — 호출부는 자기 나름의 실패
-//   토스트를 또 띄우면 안 된다(모순돼 보이고, 어차피 곧 리다이렉트된다).
-// - "rejected"/"network": 그 외 일반적인 실패 — "잠시 후 다시" 안내로 충분하다.
-export type SubscriptionSyncResult =
-  | { ok: true }
-  | {
-      ok: false;
-      reason: "no-backend-session" | "ward-sync-failed" | "session-expired" | "network" | "rejected";
-    };
-
-// 위 4가지 실패 사유 → 토스트 문구 매핑. user/subscription-view.tsx와 guardian/
-// subscription-view.tsx 둘 다 이 매핑이 필요한데, 각자 따로 복제해두면 나중에 문구/분류를
-// 하나 고칠 때 한쪽만 고치고 잊어버리기 쉽다(애초에 reason을 4가지로 나눈 이유가 이런
-// 실수를 막기 위해서인데, 매핑 자체가 흩어져 있으면 그 의미가 없어진다) — 그래서 여기
-// 한 곳으로 모은다. "session-expired"는 null을 돌려준다: fetch-with-timeout.ts의 전역
-// 401 핸들러가 이미 "다시 로그인해주세요" 토스트+리다이렉트를 처리 중이라, 호출부가 또
-// 실패 토스트를 띄우면 방금 뜬 안내와 모순돼 보인다 — 호출부는 null이면 아무것도 안
-// 띄우면 된다. "network"/"rejected"는 화면마다 동사(신청/변경)가 달라 의미가 있는
-// 유일한 경우라 fallbackMessage로 호출부가 채운다.
-export function subscriptionSyncFailureMessage(
-  reason: Exclude<SubscriptionSyncResult, { ok: true }>["reason"],
-  fallbackMessage: string
-): string | null {
-  switch (reason) {
-    case "session-expired":
-      return null;
-    case "no-backend-session":
-      return "이 계정으로 백엔드에 연결된 적이 없어요. 로그아웃 후 다시 로그인하면 해결될 수 있어요.";
-    case "ward-sync-failed":
-      return "서버와 일시적으로 연결하지 못했어요. 잠시 후 다시 시도해 주세요.";
-    case "network":
-    case "rejected":
-      return fallbackMessage;
-  }
-}
-
 // POST /subscriptions — "이 플랜으로 변경" 버튼이 부른다.
 // - 보호자 화면(guardian/subscription-view.tsx): 대상자마다 별도 Subscription 행을 갖는
 //   백엔드 모델과 달리 이 화면은 보호자 계정 전체에 플랜 하나만 고르는 UI라, 보호자가
@@ -159,15 +111,9 @@ export async function syncSubscriptionToBackend(
   identity: { mockWardId: string; name: string; age: number; address: string },
   planId: string,
   fundingSource: FundingSource
-): Promise<SubscriptionSyncResult> {
-  const accessResult = await resolveBackendWardAccessDetailed(identity);
-  if (!accessResult.ok) {
-    return {
-      ok: false,
-      reason: accessResult.reason === "no-session" ? "no-backend-session" : "ward-sync-failed",
-    };
-  }
-  const access = accessResult.access;
+): Promise<boolean> {
+  const access = await resolveBackendWardAccess(identity);
+  if (!access) return false;
 
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
     `${API_BASE_URL}/subscriptions`,
@@ -188,13 +134,9 @@ export async function syncSubscriptionToBackend(
   );
   try {
     const response = await promise;
-    if (response.ok) return { ok: true };
-    if (response.status === 401 && isSessionExpiredRedirectInFlight()) {
-      return { ok: false, reason: "session-expired" };
-    }
-    return { ok: false, reason: "rejected" };
+    return response.ok;
   } catch {
-    return { ok: false, reason: "network" };
+    return false;
   } finally {
     clearRequestTimeout();
   }
