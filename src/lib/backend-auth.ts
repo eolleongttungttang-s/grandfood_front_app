@@ -36,14 +36,18 @@ const CONDITION_LABEL_TO_BACKEND_FLAG: Record<(typeof CONDITION_POOL)[number], s
   관절염: "arthritis",
 };
 
-// 로컬 요금제(subscription.ts PLANS: "basic"/"standard"/"premium")를 백엔드 PlanType
+// 로컬 요금제(subscription.ts PLANS: "basic"/"standard")를 백엔드 PlanType
 // ("base"/"premium" 2종, domains/account/schemas.py Literal)으로 좁힌다. 이 매핑 없이
 // "basic"을 그대로 보내면 UserOnboardingRequest가 422(Unprocessable Content)로 거부한다 —
 // register_elder_from_invite가 그래서 계속 실패해 USERS 행이 안 만들어지던 원인이었다.
 // (참고: /auth/users/register 쪽 스키마는 plan_type이 느슨한 str이라 "basic"도 그냥 통과되고,
 // 이 문제는 초대(QR) 경로에서만 드러난다.)
+//
+// 이 경로(QR 초대 온보딩)로 들어오는 planType은 실제로는 항상 "basic"이라 지금은 매핑 결과가
+// 갈릴 일이 없지만, subscription.ts의 동명 함수와 같은 기준(standard=premium)으로 맞춰둔다 —
+// 각자 다른 기준으로 따로 두면 나중에 한쪽만 고치고 잊어버리기 쉽다.
 function toBackendPlanType(planType: string): "base" | "premium" {
-  return planType === "premium" ? "premium" : "base";
+  return planType === "standard" ? "premium" : "base";
 }
 
 // invite/survey/page.tsx도 register-elder-from-invite 호출 시 같은 매핑이 필요해서 export한다.

@@ -57,7 +57,15 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wardIdsKey]);
 
-  const selectedWard = wards.find((w) => w.id === selectedWardId) ?? null;
+  // 처음 이 화면에 왔을 때 대상자가 0명이라 selectedWardId가 ""로 초기화된 채였다가,
+  // 보호자 백그라운드 동기화(guardian-ward-sync.tsx)로 대상자가 뒤늦게 생기면 useState
+  // 초기값은 재계산되지 않아 계속 ""로 남아 아무 대상자도 선택 안 된 채로 있는 문제가
+  // 있었다 — selectedWardId가 현재 wards 목록에 없으면(이 경우 포함, 또는 선택했던
+  // 대상자가 목록에서 빠진 경우) 첫 번째 대상자로 렌더 중에 바로 폴백한다. 이펙트로
+  // setSelectedWardId를 다시 불러 상태를 동기화하는 대신 파생값으로 처리해서 불필요한
+  // 리렌더 사이클을 만들지 않는다.
+  const selectedWard =
+    wards.find((w) => w.id === selectedWardId) ?? wards[0] ?? null;
   const selectedWardChecked = selectedWard !== null && selectedWard.id in wardPlans;
   const selectedWardPlan = selectedWard ? (wardPlans[selectedWard.id] ?? null) : null;
 
@@ -108,7 +116,7 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
             <ButtonSelectGroup
               label="어느 대상자의 플랜을 바꿀까요?"
               options={wards.map((w) => ({ value: w.id, label: w.name }))}
-              value={selectedWardId}
+              value={selectedWard?.id ?? ""}
               onChange={setSelectedWardId}
               columns={wards.length > 2 ? 3 : 2}
             />
