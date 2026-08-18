@@ -84,7 +84,7 @@ export function DietView({
             아직 배정된 식단이 없어요. 아래에서 AI 반찬 추천을 먼저 받아보세요 — 받고 나면 이
             화면에 매일 식단과 잔반 분석, 식사 기록이 순서대로 나타나요.
           </p>
-          <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" />
+          <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" surveyHref="/user/survey?returnTo=%2Fuser%2Fdiet" />
         </div>
       </div>
     );
@@ -125,7 +125,7 @@ export function DietView({
           )}
         </SpeakableCard>
 
-        <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" />
+        <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" surveyHref="/user/survey?returnTo=%2Fuser%2Fdiet" />
 
         {/* "오늘 메뉴 구성" 카드는 뺐다 — 홈 화면의 "오늘의 추천 반찬 조합"과 내용이 완전히
             겹쳤다(2026-08-14 피드백). 반찬 목록 자체는 바로 위 AI 반찬 추천 달력(오늘 날짜

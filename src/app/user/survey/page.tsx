@@ -29,6 +29,17 @@ function UserSurveyPageContent() {
   // 동의 직후 항상 /invite/survey를 거치는 것과 똑같이, 혼자 가입해도 첫 화면부터 생활 정보를
   // 물어보게 하기 위함. 마이 화면의 "생활 정보 수정" 재방문과는 제목/완료 후 이동 위치만 다르다.
   const isFirstTime = searchParams.get("first") === "1";
+  // 마이 화면의 "생활 정보 다시 입력하기"가 아니라 다른 화면(예: 식단 화면의 "나의 하루
+  // 목표" 빈 상태 안내)에서 여기로 들어온 경우, 완료 후 그 화면으로 돌아가고 싶어한다 —
+  // 예전엔 재방문이면 무조건 /user/profile로 보내서, 식단을 보려고 들어왔는데 마이
+  // 페이지로 떨어지는 게 어색했다(2026-08-18 피드백). ?returnTo가 있으면 그걸 우선한다 —
+  // "/"로 시작하고 "//"로 시작하지 않는 내부 경로만 허용한다("//evil.com"은 프로토콜
+  // 상대 URL이라 브라우저가 외부 도메인으로 취급한다, 오픈 리다이렉트 방지).
+  const returnToParam = searchParams.get("returnTo");
+  const returnTo =
+    returnToParam && returnToParam.startsWith("/") && !returnToParam.startsWith("//")
+      ? returnToParam
+      : null;
   const { account } = useSession();
   const wardId = account?.selfWardId;
   const ward = wardId ? getWard(wardId) : undefined;
@@ -39,7 +50,7 @@ function UserSurveyPageContent() {
 
   const existing = getCareProfile(wardId);
   const existingHealth = healthProfiles[wardId];
-  const afterCompleteHref = isFirstTime ? "/user/home" : "/user/profile";
+  const afterCompleteHref = returnTo || (isFirstTime ? "/user/home" : "/user/profile");
 
   // invite/survey/page.tsx와 같은 이유(개별 필드 단위로, 값이 하나도 없으면 0이 아니라
   // undefined 그대로 유지)로 병합해서 저장한다 — 다만 여기는 재방문(마이 화면)이라 실제

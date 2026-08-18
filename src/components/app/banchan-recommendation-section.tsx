@@ -21,6 +21,7 @@ export function BanchanRecommendationSection({
   identity,
   state,
   subscribeHref,
+  surveyHref,
 }: {
   identity: WardIdentity;
   state: MonthlyBanchanRecommendationState;
@@ -28,6 +29,9 @@ export function BanchanRecommendationSection({
    *  버튼이 이동할 경로 — 이용자 본인 화면(diet-view.tsx)은 "/user/subscription", 보호자
    *  화면(ward-detail-view.tsx)은 "/guardian/subscription"으로 서로 다르다. */
   subscribeHref: string;
+  /** BanchanRecommendationCalendar로 그대로 전달 — "나의 하루 목표"가 생활정보 미입력으로
+   *  안 보일 때 뜨는 "생활 정보 입력하기" 버튼의 이동 경로. */
+  surveyHref?: string;
 }) {
   const { month, monthly, loading, requesting, polling, error, hasActiveSubscription, request } = state;
   // health/service.py의 get_active_subscription이 활성 구독을 요구하기 때문에, 구독이 없는
@@ -74,7 +78,12 @@ export function BanchanRecommendationSection({
           아직 이번 달 AI 반찬 추천을 요청하지 않았어요. 위 버튼을 눌러 받아보세요.
         </p>
       ) : (
-        <BanchanRecommendationCalendar identity={identity} monthly={monthly} polling={polling} />
+        <BanchanRecommendationCalendar
+          identity={identity}
+          monthly={monthly}
+          polling={polling}
+          surveyHref={surveyHref}
+        />
       )}
     </div>
   );

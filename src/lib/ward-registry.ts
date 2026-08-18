@@ -65,13 +65,41 @@ function writeRegisteredWards(wards: Ward[]) {
 
 // 정적 목업 3명 + 실제 초대로 새로 등록된 ward를 합쳐서 돌려준다 (auth.ts의
 // ACCOUNTS/getAccounts()와 동일한 패턴 — 빌드 타임 generateStaticParams는
-// WARDS만 보고, 런타임 조회는 이 merge된 목록을 쓴다).
+// WARDS만 보고, 런타임 조회는 이 merge된 목록을 쓴다). registeredWards에 정적
+// WARDS와 같은 id가 있으면(updateWard가 정적 목업을 수정할 때 만드는 override
+// 엔트리) 그게 우선하도록 뒤에 둔다 — getWard()가 Array.find로 첫 매치를
+// 돌려주므로, 여기 순서가 곧 "누가 이긴다"를 결정한다.
 export function getWards(): Ward[] {
-  return [...WARDS, ...readRegisteredWards()];
+  const registered = readRegisteredWards();
+  const overriddenIds = new Set(registered.map((w) => w.id));
+  return [...WARDS.filter((w) => !overriddenIds.has(w.id)), ...registered];
 }
 
 export function addWard(ward: Ward): void {
   writeRegisteredWards([...readRegisteredWards(), ward]);
+}
+
+// 프로필 화면의 "기본 정보 수정하기"가 쓴다 — 정적 WARDS 목업(001/006/008)을 수정하려는
+// 경우엔 원본 배열을 못 건드리니, registeredWards에 같은 id로 override 엔트리를 새로
+// 만들어 그걸로 대체한다(위 getWards() 주석 참고). 이미 registeredWards에 있는(자가등록)
+// ward라면 그 자리를 그대로 갱신한다.
+//
+// 로컬 전용 업데이트다 — 백엔드 PATCH /users/{id}는 아직 tts_call_consent만 받고
+// address/birth_date는 안 받는다(backend account/router.py 주석 참고), 그래서 여기서
+// 고친 값은 이 브라우저에만 남고 서버엔 반영되지 않는다.
+export function updateWard(id: string, patch: Partial<Omit<Ward, "id">>): void {
+  const registered = readRegisteredWards();
+  const existingIndex = registered.findIndex((w) => w.id === id);
+  if (existingIndex !== -1) {
+    const next = [...registered];
+    next[existingIndex] = { ...next[existingIndex], ...patch };
+    writeRegisteredWards(next);
+    return;
+  }
+
+  const base = WARDS.find((w) => w.id === id);
+  if (!base) return;
+  writeRegisteredWards([...registered, { ...base, ...patch }]);
 }
 
 export const WARDS: Ward[] = [

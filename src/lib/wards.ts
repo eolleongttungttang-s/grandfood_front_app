@@ -20,13 +20,14 @@ import {
   getWard,
   getWards,
   addWard,
+  updateWard,
   newWardDefaults,
   type Ward,
   type WardStatus,
   type MealTone,
 } from "@/lib/ward-registry";
 
-export { WARDS, getWard, getWards, addWard, newWardDefaults };
+export { WARDS, getWard, getWards, addWard, updateWard, newWardDefaults };
 export type { Ward, WardStatus, MealTone };
 
 export function calculateAge(birthDate: string): number {

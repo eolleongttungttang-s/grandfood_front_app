@@ -244,13 +244,20 @@ async function parseErrorMessage(response: Response): Promise<string> {
 
 // POST /health/users/{user_id}/banchan-recommendations/monthly — 그 달에 속한 모든 주의 추천
 // 생성을 백그라운드로 큐에 올린다(202 Accepted, 동기로 items까지 채워서 돌려주지 않는다).
-// 이미 done이거나 generating 중인 주는 건드리지 않고, not_started/failed인 주만 새로 큐에
-// 올라간다 — 그래서 폴링 중에 이 함수를 반복 호출해도 안전하고 추가 비용이 없다. 실제 결과는
+// generating 중인 주는 진행 중인 백그라운드 작업과 경합하지 않도록 항상 건드리지 않고,
+// not_started/failed인 주는 항상 새로 큐에 올라간다. done인 주는 force=false(기본값)면
+// 그대로 두지만(그래서 폴링 중에 이 함수를 반복 호출해도 안전하고 추가 비용이 없다),
+// force=true면 강제로 다시 생성한다 — 이 함수의 유일한 호출부(use-monthly-banchan-
+// recommendation.ts의 request())가 "AI 추천받기"/"다시 추천받기" 버튼 클릭에만 반응하므로
+// 항상 force=true로 부른다: 그래야 건강 프로필을 새로 채운 뒤 "다시 추천받기"를 눌렀을 때
+// 이미 done인 주도 새 목표치/반찬으로 다시 계산된다(예전엔 done인 주가 그대로 건너뛰어져서
+// 버튼을 눌러도 아무것도 안 바뀌었다 — grandfood_backend #60). 실제 결과는
 // fetchMonthlyBanchanRecommendation으로 generation_status가 모두 done/failed가 될 때까지
 // 폴링해서 가져와야 한다.
 export async function requestMonthlyBanchanRecommendation(
   identity: WardIdentity,
-  month: string = getMonthString()
+  month: string = getMonthString(),
+  force: boolean = true
 ): Promise<MonthlyBanchanRecommendation> {
   const access = await resolveAccessOrThrow(identity);
 
@@ -262,7 +269,7 @@ export async function requestMonthlyBanchanRecommendation(
         "Content-Type": "application/json",
         Authorization: `Bearer ${access.accessToken}`,
       },
-      body: JSON.stringify({ month }),
+      body: JSON.stringify({ month, force }),
     },
     REQUEST_TIMEOUT_MS
   );
