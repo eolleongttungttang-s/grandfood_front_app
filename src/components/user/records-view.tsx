@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pill } from "lucide-react";
 
 import { MealTone, Ward, WardDetail } from "@/lib/wards";
@@ -71,7 +71,15 @@ export function RecordsView({
   const mealHistory = backendMealTones ?? detail.mealHistory;
   // deriveMealTones가 만드는 톤 배열과 정확히 같은 순서(과거→오늘)로 날짜를 매겨, 그리드
   // 칸 인덱스 i를 탭했을 때 그 칸이 어느 날짜인지 알 수 있게 한다.
-  const dateKeys = recentDateKeys(RECENT_DAYS);
+  //
+  // recentDateKeys(RECENT_DAYS)를 렌더마다 새로 부르면 "지금" 기준으로 매번 다시 계산되는데,
+  // backendMealTones/rawDietHistory는 위 useEffect가 도는 시점(대상자 정보가 바뀔 때)에만
+  // 갱신된다 — 자정을 넘겨 화면을 켜둔 채로 있으면 날짜 배열만 하루 밀려서 실제 데이터가
+  // 가리키는 날짜와 어긋난다(코드 리뷰 지적: 그리드 칸 색상·라벨이 서로 다른 날을 가리키게
+  // 됨). 위 useEffect와 정확히 같은 의존성 배열로 묶어서, 데이터가 갱신될 때만 날짜 배열도
+  // 같이 갱신되게 한다.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- ward.*는 계산에 쓰이는 값이 아니라, 위 fetch useEffect와 같은 시점에만 재계산되도록 하는 동기화 키로 일부러 넣음
+  const dateKeys = useMemo(() => recentDateKeys(RECENT_DAYS), [ward.id, ward.name, ward.age, ward.address]);
   // 기본으로 "오늘"(그리드 맨 끝 칸)을 펼쳐 보여준다 — 진입하자마자 가장 궁금할 날짜를
   // 바로 보여준다.
   const [selectedDate, setSelectedDate] = useState<string | null>(() => dateKeys[dateKeys.length - 1] ?? null);

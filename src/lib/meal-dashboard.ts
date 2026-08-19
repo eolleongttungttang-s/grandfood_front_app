@@ -262,9 +262,10 @@ export async function fetchElderDietHistory(
 
 export async function fetchGuardianIntakeSummary(
   identity: WardIdentity,
-  days: number
+  days: number,
+  expectedGuardianLoginId?: string
 ): Promise<IntakeSummary | null> {
-  const access = resolveGuardianOnlyAccess(identity);
+  const access = resolveGuardianOnlyAccess(identity, expectedGuardianLoginId);
   if (!access) return null;
   const data = await getJson<{
     period_days: number;
@@ -281,9 +282,10 @@ export async function fetchGuardianIntakeSummary(
 
 export async function fetchGuardianNutritionGaps(
   identity: WardIdentity,
-  days: number
+  days: number,
+  expectedGuardianLoginId?: string
 ): Promise<NutritionGapItem[] | null> {
-  const access = resolveGuardianOnlyAccess(identity);
+  const access = resolveGuardianOnlyAccess(identity, expectedGuardianLoginId);
   if (!access) return null;
   const data = await getJson<{
     items: {
@@ -324,8 +326,11 @@ function parseHealthReport(data: {
 
 // 검수 확정된 리포트가 아직 없으면 백엔드가 404를 준다(draft는 노출 안 함) — 에러가 아니라
 // "아직 없음"이라 조용히 null로 돌려준다(banchan-recommendation.ts의 같은 관례).
-export async function fetchGuardianHealthReport(identity: WardIdentity): Promise<HealthReportSummary | null> {
-  const access = resolveGuardianOnlyAccess(identity);
+export async function fetchGuardianHealthReport(
+  identity: WardIdentity,
+  expectedGuardianLoginId?: string
+): Promise<HealthReportSummary | null> {
+  const access = resolveGuardianOnlyAccess(identity, expectedGuardianLoginId);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseHealthReport>[0]>(
     `${API_BASE_URL}/app/guardian/${access.backendWardId}/health-report`,
@@ -350,8 +355,11 @@ function parseMealStatus(data: { completed_count: number; total_expected: number
   return { completedCount: data.completed_count, totalExpected: data.total_expected };
 }
 
-export async function fetchGuardianMealStatus(identity: WardIdentity): Promise<MealStatusSummary | null> {
-  const access = resolveGuardianOnlyAccess(identity);
+export async function fetchGuardianMealStatus(
+  identity: WardIdentity,
+  expectedGuardianLoginId?: string
+): Promise<MealStatusSummary | null> {
+  const access = resolveGuardianOnlyAccess(identity, expectedGuardianLoginId);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseMealStatus>[0]>(
     `${API_BASE_URL}/app/guardian/${access.backendWardId}/meal-status`,

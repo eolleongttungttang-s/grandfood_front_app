@@ -30,5 +30,5 @@ export function GuardianWardReportPageClient() {
   }
 
   const detail = getWardDetail(ward);
-  return <ReportView ward={ward} detail={detail} />;
+  return <ReportView ward={ward} detail={detail} viewerGuardianLoginId={account.loginId} />;
 }

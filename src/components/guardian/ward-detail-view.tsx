@@ -107,7 +107,14 @@ export function WardDetailView({
   // 번 나갔다), ward-meal-dashboard.ts가 이미 같은 응답을 mealDashboard.rawItems로 같이
   // 파싱해서 주므로 그걸 그대로 쓴다.
   const rawDietHistory = mealDashboard?.status === "ready" ? mealDashboard.rawItems : null;
-  const recordDateKeys = recentKstDateKeys(HISTORY_DAYS);
+  // recentKstDateKeys(HISTORY_DAYS)를 렌더마다 새로 부르면 "지금"(KST) 기준으로 매번
+  // 다시 계산되는데, mealHistory/rawDietHistory는 mealDashboard prop이 새로 올 때만
+  // 바뀐다(마운트 시 한 번 fetch, 폴링 없음) — 자정을 넘겨 화면을 켜둔 채로 있으면 날짜
+  // 배열만 하루 밀려서 mealHistory[i]/rawDietHistory가 가리키는 실제 날짜와 어긋난다
+  // (코드 리뷰 지적: 그리드 칸 색상·라벨이 서로 다른 날을 가리키게 됨). mealDashboard와
+  // 같은 시점에만 재계산되도록 묶어서, 데이터가 갱신될 때만 날짜 배열도 같이 갱신되게 한다.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mealDashboard는 계산에 쓰이는 값이 아니라, mealHistory와 같은 시점에만 재계산되도록 하는 동기화 키로 일부러 넣음
+  const recordDateKeys = useMemo(() => recentKstDateKeys(HISTORY_DAYS), [mealDashboard]);
   const [selectedRecordDate, setSelectedRecordDate] = useState<string | null>(
     () => recordDateKeys[recordDateKeys.length - 1] ?? null
   );
@@ -156,15 +163,18 @@ export function WardDetailView({
   // 안에 이어붙인다(records-view.tsx는 두 카드로 나뉘어 있지만, 여긴 보호자가 한 화면에서
   // 완식 여부와 영양 달성률을 같이 훑어보게 하나로 합친다).
   const NUTRITION_TREND_DAYS = 7;
-  const nutritionTrend = useMemo(() => {
-    const today = todayDateString();
-    const result: { date: string; pct: number | null }[] = [];
-    for (let i = NUTRITION_TREND_DAYS - 1; i >= 0; i--) {
-      const date = addDaysToDateString(today, -i);
-      result.push({ date, pct: computeAchievementPct(computeNutritionSnapshotForDate(banchanRecommendation.monthly, date)) });
-    }
-    return result;
-  }, [banchanRecommendation.monthly]);
+  // useMemo로 banchanRecommendation.monthly에만 묶어뒀었는데, 그 안에서 부르는
+  // todayDateString()은 "지금"(wall clock) 기준이라 monthly가 안 바뀌는 한(주간 생성
+  // 폴링이 끝난 뒤엔 안 바뀜) 자정이 지나도 다시 계산되지 않았다(코드 리뷰 지적: 그래프
+  // 날짜 범위와 "오늘" 표시가 어제 기준에 멈춰 있었음). computeNutritionSnapshotForDate는
+  // 이미 메모리에 있는 monthly.weeks를 훑는 순수 조회라 매 렌더마다 다시 계산해도 비용이
+  // 거의 없다 — 메모이제이션을 빼서 항상 실제 "오늘"을 반영하게 한다.
+  const today = todayDateString();
+  const nutritionTrend: { date: string; pct: number | null }[] = [];
+  for (let i = NUTRITION_TREND_DAYS - 1; i >= 0; i--) {
+    const date = addDaysToDateString(today, -i);
+    nutritionTrend.push({ date, pct: computeAchievementPct(computeNutritionSnapshotForDate(banchanRecommendation.monthly, date)) });
+  }
   const hasNutritionTrend = nutritionTrend.some((d) => d.pct != null);
 
   const [requestOpen, setRequestOpen] = useState(false);
