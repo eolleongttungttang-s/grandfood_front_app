@@ -11,19 +11,31 @@
 import { API_BASE_URL } from "@/lib/api-config";
 import { resolveCachedBackendWardAccess } from "@/lib/backend-auth";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+import { parseDietHistory, type DietHistoryEntry } from "@/lib/meal-dashboard";
 import type { MealTone } from "@/lib/ward-registry";
 
 const REQUEST_TIMEOUT_MS = 15_000;
-const HISTORY_DAYS = 14;
+// ward-detail-view.tsx가 mealDashboard.mealHistory[i]와 정확히 같은 길이/순서로 정렬해야
+// 하는 날짜 목록(recentKstDateKeys)을 만들 때도 이 값을 그대로 가져다 쓴다(코드 리뷰 지적) —
+// 따로 상수를 두면 한쪽만 바뀌었을 때 두 배열 길이가 어긋나도 컴파일러가 못 잡는다.
+export const HISTORY_DAYS = 14;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
+// meal-dashboard.ts의 parseDietHistory가 기대하는 입력과 완전히 같은 필드를 쓴다(같은
+// GET .../diet-history 응답이라 스키마가 동일함, 아래 fetchWardMealDashboard 참고) — 이
+// 파일은 그중 meal_date/completed/recorded/quick_check_status만 buildMealHistory(하루 톤)
+// 계산에 쓰고, meal_id/meal_type/dishes는 parseDietHistory에 그대로 넘겨 rawItems(끼니별
+// 상세)를 만드는 데만 쓴다.
 type BackendDietHistoryItem = {
+  meal_id: string;
   meal_date: string; // "YYYY-MM-DD"
+  meal_type: string;
   completed: boolean;
   /** 사진 기반 완료든 원탭 자가 보고든, 이 끼니에 뭐라도 기록이 남았으면 true
    *  (grandfood_backend 9f01c26). */
   recorded: boolean;
   quick_check_status: string | null;
+  dishes: { banchan_id: string; banchan_name: string | null; leftover_pct: number }[];
 };
 
 type BackendDietHistoryResponse = {
@@ -37,7 +49,16 @@ type BackendIntakeSummaryResponse = {
 export type WardMealDashboard =
   | { status: "not-linked" }
   | { status: "error"; message: string }
-  | { status: "ready"; leftoverPercent: number | null; mealHistory: MealTone[] };
+  | {
+      status: "ready";
+      leftoverPercent: number | null;
+      mealHistory: MealTone[];
+      /** 그리드 칸(mealHistory[i])을 탭했을 때 그날 상세(끼니별 반찬·잔반율)를 보여주는 데
+       *  쓴다(2026-08-19) — mealHistory와 같은 diet-history 응답을 다시 파싱한 것이라
+       *  ward-detail-view.tsx가 이 데이터를 위해 fetchGuardianDietHistory로 같은 엔드포인트를
+       *  한 번 더 부를 필요가 없다(코드 리뷰 지적: 예전엔 요청이 두 번 나갔다). */
+      rawItems: DietHistoryEntry[];
+    };
 
 async function parseJson<T>(promise: Promise<Response>): Promise<T> {
   const response = await promise;
@@ -64,6 +85,24 @@ function toDateKey(d: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// 오늘(KST 고정)로부터 최근 days일의 날짜 키를 과거→오늘 순으로 돌려준다. buildMealHistory의
+// mealHistory[i] 톤 배열과 반드시 같은 순서/기준(KST)이어야 한다 — ward-detail-view.tsx가
+// "14일 그리드 칸을 탭하면 그 날짜의 상세(끼니별 반찬·잔반율)를 보여준다"(2026-08-19)를
+// 위해 그리드 칸 인덱스 i가 정확히 어느 날짜인지 알아야 해서 뺐다. meal-dashboard.ts의
+// recentDateKeys(어르신 본인 화면 전용, device-local 기준)와 일부러 분리했다 — 보호자는
+// 비-KST 타임존에서 접속할 수 있어 여기만 KST로 고정해야 하는데, 하나로 합치면 그 차이가
+// 안 보이게 된다.
+export function recentKstDateKeys(days: number): string[] {
+  const keys: string[] = [];
+  const today = nowInKST();
+  for (let offset = days - 1; offset >= 0; offset--) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - offset);
+    keys.push(toDateKey(d));
+  }
+  return keys;
+}
+
 // diet-history는 끼니 단위 레코드만 주기 때문에 하루 단위 톤으로 다시 묶는다.
 // completed(식사 후 사진까지 올라옴) 끼니가 하루 중 하나라도 있으면 "완식", 그렇지 않고
 // 원탭 자가 보고(quick_check_status)가 있으면 완식 체크가 하나라도 있으면 "완식", 남김만
@@ -78,11 +117,7 @@ function buildMealHistory(items: BackendDietHistoryItem[]): MealTone[] {
   }
 
   const history: MealTone[] = [];
-  const today = nowInKST();
-  for (let offset = HISTORY_DAYS - 1; offset >= 0; offset--) {
-    const d = new Date(today);
-    d.setUTCDate(d.getUTCDate() - offset);
-    const key = toDateKey(d);
+  for (const key of recentKstDateKeys(HISTORY_DAYS)) {
     // i.recorded ?? i.completed — 응답 타입이 recorded를 필수로 선언하지만, 배포 시점이
     // 백엔드(9f01c26)보다 앞서거나 캐시된 옛 응답이 섞이면 런타임엔 그 필드가 없을 수
     // 있다(타입은 거짓말을 할 수 있음, 코드 리뷰 지적) — completed로 대체하면 최소한
@@ -150,6 +185,7 @@ export async function fetchWardMealDashboard(
       status: "ready",
       leftoverPercent: intakeSummary.average_leftover_pct,
       mealHistory: buildMealHistory(dietHistory.items),
+      rawItems: parseDietHistory(dietHistory),
     };
   } catch (err) {
     abortBoth();

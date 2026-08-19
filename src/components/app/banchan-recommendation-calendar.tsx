@@ -19,6 +19,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ExpandToggle } from "@/components/app/expand-toggle";
+import { formatMonthDayLabel, WEEKDAY_LABELS } from "@/lib/date-format";
 import { healthProfileStore } from "@/lib/health-profile";
 import { useLocalStore } from "@/lib/use-store";
 import {
@@ -53,8 +54,6 @@ function worstSuitability(items: BanchanRecommendationItem[]): BanchanSuitabilit
   );
 }
 
-const WEEKDAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
-
 type DayCell = {
   date: string; // YYYY-MM-DD
   dayOfMonth: number;
@@ -86,12 +85,45 @@ function buildDayCells(monthly: MonthlyBanchanRecommendation): DayCell[] {
 
 // 아래 반찬 카드(item.name text-lg, 영양성분 text-base)와 나란히 보이는데 여긴 text-xs라
 // 훨씬 작아 보인다는 피드백(2026-08-18) — 라벨/숫자 모두 반찬 카드와 같은 크기로 맞춘다.
-function TargetStat({ label, value }: { label: string; value: string }) {
+//
+// 4개 숫자가 전부 같은 회색 글자로만 나열돼 있어 한눈에 구분이 안 되고 영양성분이 안
+// 두드러진다는 피드백(2026-08-19) — 영양소마다 옅은 배경 색조를 줘서 칸을 눈으로 바로
+// 구분할 수 있게 한다. 처음엔 색과 함께 아이콘(불꽃/고기 등)도 같이 썼는데, 어르신
+// 사용자에게는 아이콘 기호보다 글자로 된 라벨이 훨씬 명확하다는 피드백(2026-08-19
+// 추가)을 받아 아이콘은 빼고 색 배경 + 글자 라벨 조합만 남겼다. 색은 이 파일이 이미
+// "주의/피하기" 의미로 쓰고 있는 risk-* 토큰(SUITABILITY_CLASS 등, 파일 상단 주석
+// 참고)은 절대 재사용하지 않는다 — 여긴 "얼마나 위험한지"가 아니라 "무슨 영양소인지"
+// 구분이라 같은 색을 쓰면 의미가 섞여 보인다. 대신 이 앱 warm 팔레트의
+// primary/accent/chart-2/chart-3만 쓴다. 반찬 카드의 영양성분 칩(NutrientFact)도 같은
+// 표를 그대로 재사용해서 같은 영양소는 화면 전체에서 항상 같은 색으로 보이게 한다.
+type NutrientKey = "calorie" | "protein" | "sodium" | "carbs";
+
+const NUTRIENT_META: Record<NutrientKey, { label: string; tileClass: string }> = {
+  calorie: { label: "열량", tileClass: "bg-primary/10" },
+  protein: { label: "단백질", tileClass: "bg-accent/10" },
+  sodium: { label: "나트륨", tileClass: "bg-chart-3/10" },
+  carbs: { label: "탄수화물", tileClass: "bg-chart-2/10" },
+};
+
+function TargetStat({ nutrient, value }: { nutrient: NutrientKey; value: string }) {
+  const { label, tileClass } = NUTRIENT_META[nutrient];
   return (
-    <div className="flex flex-col">
+    <div className={`flex flex-col gap-1 rounded-lg p-3 ${tileClass}`}>
       <span className="text-sm font-medium text-foreground/70">{label}</span>
       <span className="text-xl font-extrabold text-foreground">{value}</span>
     </div>
+  );
+}
+
+// 반찬 카드 하나의 영양성분(100g당) 한 항목 — TargetStat과 같은 색 표(NUTRIENT_META)를
+// 재사용해서 위 "나의 하루 목표" 칸과 같은 영양소는 항상 같은 색으로 보이게 한다. label을
+// 칩 안에 그대로 적어서(예: "단백질 2g") 색만으로 구분하지 않고 글자로도 바로 읽힌다.
+function NutrientFact({ nutrient, value }: { nutrient: NutrientKey; value: string }) {
+  const { label, tileClass } = NUTRIENT_META[nutrient];
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-sm font-semibold text-foreground ${tileClass}`}>
+      {label} {value}
+    </span>
   );
 }
 
@@ -116,13 +148,6 @@ function pickDefaultDate(days: DayCell[]): string | null {
 function formatMonthLabel(month: string): string {
   const [y, m] = month.split("-");
   return `${y}년 ${Number(m)}월`;
-}
-
-function formatDayLabel(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  // getUTCDay()는 일=0..토=6 순서라, WEEKDAY_LABELS(월=0..일=6) 인덱스로 7만큼 회전시킨다.
-  const weekday = WEEKDAY_LABELS[(new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7];
-  return `${m}월 ${d}일 (${weekday})`;
 }
 
 export function BanchanRecommendationCalendar({
@@ -425,7 +450,7 @@ export function BanchanRecommendationCalendar({
               }`}
             >
               <span className="text-[11px]">{prevDate === todayStr ? "오늘" : "전날"}</span>
-              <span className="text-xs font-semibold">{prevDate && formatDayLabel(prevDate)}</span>
+              <span className="text-xs font-semibold">{prevDate && formatMonthDayLabel(prevDate)}</span>
             </button>
             <div className="flex shrink-0 flex-col items-center px-2">
               {selected.date === todayStr && <span className="text-[11px] text-primary">오늘</span>}
@@ -434,7 +459,7 @@ export function BanchanRecommendationCalendar({
                   selected.date === todayStr ? "text-primary" : "text-foreground"
                 }`}
               >
-                {formatDayLabel(selected.date)}
+                {formatMonthDayLabel(selected.date)}
               </span>
             </div>
             <button
@@ -451,7 +476,7 @@ export function BanchanRecommendationCalendar({
               }`}
             >
               <span className="text-[11px]">{nextDate === todayStr ? "오늘" : "다음날"}</span>
-              <span className="text-xs font-semibold">{nextDate && formatDayLabel(nextDate)}</span>
+              <span className="text-xs font-semibold">{nextDate && formatMonthDayLabel(nextDate)}</span>
             </button>
           </div>
 
@@ -476,22 +501,25 @@ export function BanchanRecommendationCalendar({
                 // 고정 하루 목표다(BMR/TDEE + KDRI 계산, 주 단위 변동 로직 없음 — 2026-08-13
                 // 피드백, "왜 매주 목표가 안 바뀌냐"). 라벨을 "나의 하루 목표"로 바꿔서 매주
                 // 달라지는 값이라는 오해를 없앤다.
-                <div className="rounded-lg bg-muted/60 p-3">
+                <div className="rounded-lg border border-border/60 bg-card p-3">
                   <span className="mb-2 block text-base font-bold text-foreground">
                     나의 하루 목표
                   </span>
-                  <div className="grid grid-cols-2 gap-y-3">
+                  {/* 칸마다 색이 다른 배경(NUTRIENT_META.tileClass)을 갖게 되면서, 바깥
+                      상자까지 bg-muted였을 땐 옅은 회갈색이 겹쳐 칸 색이 탁하게 죽어 보였다
+                      — 바깥은 카드 배경 + 얇은 테두리로 바꿔 4칸의 색이 그대로 보이게 한다. */}
+                  <div className="grid grid-cols-2 gap-2">
                     {recommendation.targetCalorieKcal != null && (
-                      <TargetStat label="열량" value={`${Math.round(recommendation.targetCalorieKcal)}kcal`} />
+                      <TargetStat nutrient="calorie" value={`${Math.round(recommendation.targetCalorieKcal)}kcal`} />
                     )}
                     {recommendation.targetProteinG != null && (
-                      <TargetStat label="단백질" value={`${Math.round(recommendation.targetProteinG)}g`} />
+                      <TargetStat nutrient="protein" value={`${Math.round(recommendation.targetProteinG)}g`} />
                     )}
                     {recommendation.targetSodiumMg != null && (
-                      <TargetStat label="나트륨" value={`${Math.round(recommendation.targetSodiumMg)}mg`} />
+                      <TargetStat nutrient="sodium" value={`${Math.round(recommendation.targetSodiumMg)}mg`} />
                     )}
                     {recommendation.targetCarbsG != null && (
-                      <TargetStat label="탄수화물" value={`${Math.round(recommendation.targetCarbsG)}g`} />
+                      <TargetStat nutrient="carbs" value={`${Math.round(recommendation.targetCarbsG)}g`} />
                     )}
                   </div>
                 </div>
@@ -511,7 +539,7 @@ export function BanchanRecommendationCalendar({
                 // 따로 구분한다. 안 그러면 방금 입력하고 돌아와도 "입력하면 볼 수 있어요"라는
                 // 이미 한 행동을 또 하라는 문구가 그대로 남고, "다시 추천받기"를 눌러야
                 // 반영된다는 것도 알 방법이 없다(사용자 피드백).
-                <div className="flex flex-col items-start gap-2 rounded-lg bg-muted/60 p-3">
+                <div className="flex flex-col items-start gap-2 rounded-lg border border-border/60 bg-card p-3">
                   <span className="text-base font-bold text-foreground">나의 하루 목표</span>
                   {hasEnteredHealthMetricsLocally ? (
                     <p className="text-sm text-foreground">
@@ -535,23 +563,40 @@ export function BanchanRecommendationCalendar({
                   카드(today-menu.ts가 이 항목들의 reason을 그대로 모아 보여줌)와 같은 문장이
                   한 화면에 두 번 나온다. 여기서는 반찬 하나를 식별하는 데 필요한 최소 정보
                   (분류 · 100g당 영양성분)만 보여주고, "왜 이 조합인지"는 그 카드 하나에 맡긴다. */}
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-2">
                 {[...selected.items]
                   .sort((a, b) => a.slotIndex - b.slotIndex)
                   .map((item) => (
-                    <div key={item.banchanId} className="flex flex-col gap-1.5 rounded-lg bg-muted/60 p-3">
+                    <div key={item.banchanId} className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-lg font-bold text-foreground">{item.name}</span>
                         <Badge className={SUITABILITY_CLASS[item.suitability]}>
                           {SUITABILITY_LABEL[item.suitability]}
                         </Badge>
                       </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-base text-foreground/80">
-                        <span>{item.category}</span>
-                        {item.caloriePer100g != null && <span>{item.caloriePer100g}kcal/100g</span>}
-                        {item.proteinPer100g != null && <span>단백질 {item.proteinPer100g}g</span>}
-                        {item.sodiumPer100g != null && <span>나트륨 {item.sodiumPer100g}mg</span>}
-                        {item.carbsPer100g != null && <span>탄수 {item.carbsPer100g}g</span>}
+                      <span className="w-fit rounded-full bg-muted px-2.5 py-0.5 text-sm font-medium text-muted-foreground">
+                        {item.category}
+                      </span>
+                      {/* 영양성분은 이 반찬 카드에서 가장 강조해야 할 정보라 요청받아(2026-08-19),
+                          카테고리와 한 줄에 뒤섞여 있던 걸 분리하고 NUTRIENT_META 색 칩으로
+                          바꾼다 — 숫자만 늘어놓기보다 "무슨 영양소인지"가 색+글자 라벨로 먼저
+                          눈에 들어오게 한다(라벨은 NutrientFact가 붙여준다). 100g당 기준이라는
+                          정보는 그대로 유지한다(kcal 칩에만 "/100g"을 남겨 단위 기준을 잃지
+                          않게 한다 — 나머지 g/mg 칩은 바로 위 kcal 칩의 "/100g"으로 기준이
+                          이미 전달된다). */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {item.caloriePer100g != null && (
+                          <NutrientFact nutrient="calorie" value={`${item.caloriePer100g}kcal/100g`} />
+                        )}
+                        {item.proteinPer100g != null && (
+                          <NutrientFact nutrient="protein" value={`${item.proteinPer100g}g`} />
+                        )}
+                        {item.sodiumPer100g != null && (
+                          <NutrientFact nutrient="sodium" value={`${item.sodiumPer100g}mg`} />
+                        )}
+                        {item.carbsPer100g != null && (
+                          <NutrientFact nutrient="carbs" value={`${item.carbsPer100g}g`} />
+                        )}
                       </div>
                     </div>
                   ))}

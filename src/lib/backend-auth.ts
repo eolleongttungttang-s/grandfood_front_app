@@ -120,8 +120,10 @@ async function parseErrorResponse(response: Response): Promise<string> {
 }
 
 // 이 목업 wardId를 관리하는 로컬 보호자 계정의 이메일(=loginId)을 찾는다.
-// auth.ts의 Account.wardIds(보호자가 돌보는 대상자 id 목록)를 그대로 활용한다.
-function findGuardianLoginIdForWard(mockWardId: string): string | null {
+// auth.ts의 Account.wardIds(보호자가 돌보는 대상자 id 목록)를 그대로 활용한다. meal-dashboard.ts의
+// resolveGuardianOnlyAccess가 resolveCachedBackendWardAccess(바로 아래)와 같은 "캐시된 세션이
+// 지금 로그인한 보호자와 다르면 거부" 안전망을 만들 때 재사용할 수 있게 export한다.
+export function findGuardianLoginIdForWard(mockWardId: string): string | null {
   const guardian = getAccounts().find(
     (account) => account.role === "guardian" && account.wardIds?.includes(mockWardId)
   );

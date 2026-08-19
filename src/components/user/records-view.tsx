@@ -1,17 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pill } from "lucide-react";
 
 import { MealTone, Ward, WardDetail } from "@/lib/wards";
-import { deriveMealTones, fetchElderDietHistory } from "@/lib/meal-dashboard";
+import {
+  deriveMealTones,
+  dietHistoryForDate,
+  DietHistoryEntry,
+  fetchElderDietHistory,
+  recentDateKeys,
+} from "@/lib/meal-dashboard";
+import { formatMonthDayLabel } from "@/lib/date-format";
 import { computeTodayNutritionSnapshot, getRecommendationForDate, todayDateString } from "@/lib/banchan-recommendation";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { deriveHealthInsight } from "@/lib/health-insights";
 import { getRecipeRecommendations, type RecipeRecommendation } from "@/lib/recipe-recommendations";
 import { TopBar } from "@/components/app/top-bar";
 import { MealToneSummary } from "@/components/app/meal-tone-summary";
+import { DietDayDetail } from "@/components/app/diet-day-detail";
 import { NutrientMeter } from "@/components/app/nutrient-meter";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -27,6 +35,8 @@ const MEAL_TONE_CLASS: Record<string, string> = {
   미응답: "bg-risk-high-foreground",
 };
 
+const RECENT_DAYS = 14;
+
 export function RecordsView({
   ward,
   detail,
@@ -37,21 +47,51 @@ export function RecordsView({
   // 실제 백엔드 식단 이력(GET /app/elder/{id}/diet-history)이 있으면 목업 대신 그걸 보여준다 —
   // 여긴 어르신 본인 화면이라 elder-app 엔드포인트(보호자/본인 JWT 둘 다 됨)를 쓴다. 실패하면
   // (아직 실제 기록 없음 등) 조용히 기존 목업 그리드를 그대로 쓴다.
+  //
+  // 예전엔 이 응답(items, 끼니별 dishes까지 담고 있음)을 deriveMealTones로 하루 톤 하나로
+  // 뭉뚱그린 뒤 원본을 버렸다 — 그리드 칸이 완식/소량/미응답 색만 보여줄 뿐 탭해도 아무 반응이
+  // 없었다. 날짜 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를 보여달라는 요청(2026-08-19)을
+  // 받아 원본 items도 rawDietHistory에 같이 남겨둔다.
   const [backendMealTones, setBackendMealTones] = useState<MealTone[] | null>(null);
+  const [rawDietHistory, setRawDietHistory] = useState<DietHistoryEntry[] | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetchElderDietHistory(
       { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
-      14
+      RECENT_DAYS
     ).then((items) => {
       if (cancelled || !items) return;
-      setBackendMealTones(deriveMealTones(items, 14));
+      setBackendMealTones(deriveMealTones(items, RECENT_DAYS));
+      setRawDietHistory(items);
     });
     return () => {
       cancelled = true;
     };
   }, [ward.id, ward.name, ward.age, ward.address]);
   const mealHistory = backendMealTones ?? detail.mealHistory;
+  // deriveMealTones가 만드는 톤 배열과 정확히 같은 순서(과거→오늘)로 날짜를 매겨, 그리드
+  // 칸 인덱스 i를 탭했을 때 그 칸이 어느 날짜인지 알 수 있게 한다.
+  //
+  // recentDateKeys(RECENT_DAYS)를 렌더마다 새로 부르면 "지금" 기준으로 매번 다시 계산되는데,
+  // backendMealTones/rawDietHistory는 위 useEffect가 도는 시점(대상자 정보가 바뀔 때)에만
+  // 갱신된다 — 자정을 넘겨 화면을 켜둔 채로 있으면 날짜 배열만 하루 밀려서 실제 데이터가
+  // 가리키는 날짜와 어긋난다(코드 리뷰 지적: 그리드 칸 색상·라벨이 서로 다른 날을 가리키게
+  // 됨). 위 useEffect와 정확히 같은 의존성 배열로 묶어서, 데이터가 갱신될 때만 날짜 배열도
+  // 같이 갱신되게 한다.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- ward.*는 계산에 쓰이는 값이 아니라, 위 fetch useEffect와 같은 시점에만 재계산되도록 하는 동기화 키로 일부러 넣음
+  const dateKeys = useMemo(() => recentDateKeys(RECENT_DAYS), [ward.id, ward.name, ward.age, ward.address]);
+  // 기본으로 "오늘"(그리드 맨 끝 칸)을 펼쳐 보여준다 — 진입하자마자 가장 궁금할 날짜를
+  // 바로 보여준다.
+  const [selectedDate, setSelectedDate] = useState<string | null>(() => dateKeys[dateKeys.length - 1] ?? null);
+  // dateKeys는 렌더마다 "오늘" 기준으로 새로 계산되지만 selectedDate는 sticky한 state라,
+  // 자정을 넘겨 화면을 켜둔 채 리렌더가 한 번이라도 일어나면 예전에 고른 날짜가 새 14일
+  // 창 밖으로 밀려날 수 있다(코드 리뷰 지적) — 그럴 땐 그 칸이 사라진 것처럼 상세가 조용히
+  // 안 보이는 대신, 다시 "오늘"(맨 끝 칸)을 고른 것으로 취급한다.
+  const effectiveSelectedDate =
+    selectedDate && dateKeys.includes(selectedDate) ? selectedDate : (dateKeys[dateKeys.length - 1] ?? null);
+  const selectedDayEntries =
+    effectiveSelectedDate && rawDietHistory ? dietHistoryForDate(rawDietHistory, effectiveSelectedDate) : [];
+  const selectedDayTone = effectiveSelectedDate ? mealHistory[dateKeys.indexOf(effectiveSelectedDate)] : undefined;
 
   const completeCount = mealHistory.filter((m) => m === "완식").length;
   const smallCount = mealHistory.filter((m) => m === "소량").length;
@@ -128,15 +168,35 @@ export function RecordsView({
             smallCount={smallCount}
             noResponseCount={noResponseCount}
           />
+          {/* 칸이 title 툴팁(마우스 오버)만으로 하루 상태를 알려줘서 터치 기기에선 사실상
+              정보가 안 보였다 — 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를 아래에 펼쳐
+              보여주도록 바꿨다(2026-08-19 피드백). */}
           <div className="grid grid-cols-7 gap-1.5">
-            {mealHistory.map((tone, i) => (
-              <div
-                key={i}
-                className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]}`}
-                title={tone}
-              />
-            ))}
+            {mealHistory.map((tone, i) => {
+              const date = dateKeys[i];
+              const isSelected = date === effectiveSelectedDate;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  aria-label={`${formatMonthDayLabel(date)} ${tone}`}
+                  onClick={() => setSelectedDate(date)}
+                  className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]} ${
+                    isSelected ? "ring-2 ring-inset ring-foreground" : ""
+                  }`}
+                />
+              );
+            })}
           </div>
+
+          {effectiveSelectedDate && selectedDayTone && (
+            <DietDayDetail
+              date={effectiveSelectedDate}
+              tone={selectedDayTone}
+              toneDotClass={MEAL_TONE_CLASS[selectedDayTone]}
+              entries={rawDietHistory === null ? null : selectedDayEntries}
+            />
+          )}
         </div>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">

@@ -41,7 +41,19 @@ function findNutrientAverage(items: NutritionGapItem[], keywords: string[]): num
   return match ? Math.round(match.averageAmount) : null;
 }
 
-export function ReportView({ ward, detail }: { ward: Ward; detail: WardDetail }) {
+export function ReportView({
+  ward,
+  detail,
+  viewerGuardianLoginId,
+}: {
+  ward: Ward;
+  detail: WardDetail;
+  /** 지금 로그인한 보호자 계정 — 아래 fetchGuardian* 호출들에 그대로 넘겨서, 이 브라우저에
+   *  캐시된 다른 보호자 세션의 데이터가 섞여 나오지 않도록 한다(코드 리뷰 지적: 이 화면의
+   *  세 호출 모두 이 확인 없이 캐시된 아무 보호자 세션이나 썼다 — ward-detail-view.tsx가
+   *  같은 클래스의 문제를 고칠 때 이 화면은 빠뜨렸었다). */
+  viewerGuardianLoginId?: string;
+}) {
   const [period, setPeriod] = useState<ReportPeriod>("주간");
   const mockReport = getNutritionReport(ward, detail, period);
   const days = period === "주간" ? 7 : 30;
@@ -57,21 +69,21 @@ export function ReportView({ ward, detail }: { ward: Ward; detail: WardDetail })
     let cancelled = false;
     const identity = { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address };
 
-    fetchGuardianDietHistory(identity, days).then((items) => {
+    fetchGuardianDietHistory(identity, days, viewerGuardianLoginId).then((items) => {
       if (cancelled || !items || items.length === 0) return;
       const completedCount = items.filter((i) => i.completed).length;
       setBackendCompleteRate(Math.round((completedCount / items.length) * 100));
     });
-    fetchGuardianNutritionGaps(identity, days).then((items) => {
+    fetchGuardianNutritionGaps(identity, days, viewerGuardianLoginId).then((items) => {
       if (!cancelled && items) setBackendGaps(items);
     });
-    fetchGuardianHealthReport(identity).then((result) => {
+    fetchGuardianHealthReport(identity, viewerGuardianLoginId).then((result) => {
       if (!cancelled) setBackendHealthReport(result);
     });
     return () => {
       cancelled = true;
     };
-  }, [ward.id, ward.name, ward.age, ward.address, days]);
+  }, [ward.id, ward.name, ward.age, ward.address, days, viewerGuardianLoginId]);
 
   const avgSodiumMg = backendGaps ? (findNutrientAverage(backendGaps, ["sodium", "나트륨"]) ?? mockReport.avgSodiumMg) : mockReport.avgSodiumMg;
   const avgProteinG = backendGaps ? (findNutrientAverage(backendGaps, ["protein", "단백질"]) ?? mockReport.avgProteinG) : mockReport.avgProteinG;

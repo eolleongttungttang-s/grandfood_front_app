@@ -14,6 +14,7 @@
 
 import { API_BASE_URL } from "@/lib/api-config";
 import {
+  findGuardianLoginIdForWard,
   getBackendGuardianSessionForWard,
   getCachedBackendWardId,
   resolveCachedBackendWardAccess,
@@ -91,9 +92,18 @@ async function getJson<T>(
 // report-view.tsx 등이 화면 진입 시 자동으로 부르는 순수 조회라, PR #8에서 고쳤던 것과 같은
 // 부수효과(화면 진입만으로 더미 phone/생년월일의 실제 백엔드 User가 생성되는 것)를 다시
 // 만들면 안 된다 — "AI 추천받기"처럼 실제로 대상자를 생성해도 되는 명시적 액션이 아니다.
+// expectedGuardianLoginId(옵션): backend-auth.ts의 resolveCachedBackendWardAccess와 같은
+// 안전망 — 이 브라우저에 보호자 A/B 세션이 동시에 캐시돼 있어도, 지금 로그인한 계정과
+// 캐시된 세션의 실제 관리자가 다르면 조회를 거부한다(코드 리뷰 지적: fetchGuardianDietHistory가
+// 이 확인 없이 캐시된 아무 보호자 세션이나 썼다 — ward-meal-dashboard.ts의
+// fetchWardMealDashboard는 이미 이 확인을 하고 있어 안전 수준이 달랐다).
 function resolveGuardianOnlyAccess(
-  identity: WardIdentity
+  identity: WardIdentity,
+  expectedGuardianLoginId?: string
 ): { accessToken: string; backendWardId: string } | null {
+  if (expectedGuardianLoginId && findGuardianLoginIdForWard(identity.mockWardId) !== expectedGuardianLoginId) {
+    return null;
+  }
   const session = getBackendGuardianSessionForWard(identity.mockWardId);
   if (!session) return null;
   const backendWardId = getCachedBackendWardId(identity.mockWardId);
@@ -101,7 +111,12 @@ function resolveGuardianOnlyAccess(
   return { accessToken: session.accessToken, backendWardId };
 }
 
-function parseDietHistory(data: {
+// ward-meal-dashboard.ts(보호자 대상자 상세)가 "오늘 잔반율"/"최근 14일 섭취 기록" 두 카드용으로
+// 이미 같은 GET /app/guardian/{id}/diet-history를 부르고 있어서, 그 원본 응답을 여기서도 그대로
+// 파싱할 수 있게 export한다(코드 리뷰 지적) — 예전엔 ward-detail-view.tsx가 같은 끼니 기록을
+// fetchGuardianDietHistory로 한 번 더 따로 불러왔다(같은 wardId, 같은 days 파라미터로 요청이
+// 두 번 나감). 응답 스키마가 완전히 같아서(파일 상단 주석 참고) 파싱 함수 하나로 양쪽 다 쓴다.
+export function parseDietHistory(data: {
   items: {
     meal_id: string;
     meal_date: string;
@@ -133,6 +148,31 @@ function parseDietHistory(data: {
   }));
 }
 
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+// 오늘로부터 최근 days일의 날짜 키를 과거→오늘 순으로 돌려준다("YYYY-MM-DD"). deriveMealTones가
+// 만드는 톤 배열(tones[i])과 순서를 맞추는 데 쓰던 계산이었는데, records-view.tsx가 "14일 잔반
+// 그리드의 칸을 탭하면 그 날짜의 상세 기록을 보여준다"(2026-08-19 피드백)를 만들면서 그리드
+// 칸 인덱스 i가 정확히 어느 날짜인지 알아야 해서 deriveMealTones 밖으로 뽑아 공유한다 —
+// 따로 두면 두 계산이 미묘하게 어긋날 수 있다.
+//
+// new Date()는 기기/브라우저 로컬 시간 기준이다 — ward-meal-dashboard.ts(보호자 화면)가 항상
+// KST로 고정하는 것과 의도적으로 다르다: 이 함수는 어르신 본인 화면(records-view.tsx) 전용이라
+// 어르신이 한국에 물리적으로 있다고 가정할 수 있는 반면, 보호자는 해외 출장 등 비-KST
+// 타임존에서 접속할 수 있어 그 화면만 따로 고정해뒀다(코드 리뷰 지적 — 파일마다 기준이 다르게
+// "보이지만" 실은 각자 맞는 가정을 쓴 것).
+export function recentDateKeys(days: number): string[] {
+  const keys: string[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    keys.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+  }
+  return keys;
+}
+
 // diet-history(끼니 단위)를 "최근 N일, 하루 하나의 완식/소량/미응답 톤" 그리드로 뭉뚱그린다 —
 // ward-detail-view.tsx/records-view.tsx의 기존 mealHistory 그리드(ward-registry.ts MealTone)와
 // 같은 모양을 유지하기 위함. 하루 안에 끼니가 하나도 없으면(아직 기록 없음) "미응답", 그날
@@ -160,25 +200,9 @@ export function deriveMealTones(items: DietHistoryEntry[], days: number): MealTo
     byDate.set(item.mealDate, list);
   }
 
-  function pad(n: number): string {
-    return String(n).padStart(2, "0");
-  }
-
-  // new Date()는 기기/브라우저 로컬 시간 기준이다 — ward-meal-dashboard.ts(보호자 화면)가
-  // 항상 KST로 고정하는 것과 의도적으로 다르다: 이 함수는 어르신 본인 화면(records-view.tsx)
-  // 전용이라 어르신이 한국에 물리적으로 있다고 가정할 수 있는 반면, 보호자는 해외 출장 등
-  // 비-KST 타임존에서 접속할 수 있어 그 화면만 따로 고정해뒀다(코드 리뷰 지적 — 파일마다
-  // 기준이 다르게 "보이지만" 실은 각자 맞는 가정을 쓴 것).
-  const tones: MealTone[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return recentDateKeys(days).map((key) => {
     const recordedItems = (byDate.get(key) ?? []).filter((m) => m.recorded);
-    if (recordedItems.length === 0) {
-      tones.push("미응답");
-      continue;
-    }
+    if (recordedItems.length === 0) return "미응답";
     // 참고(코드 리뷰 지적, 이 PR 이전부터 있던 차이라 동작은 그대로 둠): 보호자 화면
     // (ward-meal-dashboard.ts의 buildMealHistory)은 완료된 끼니가 있으면 잔반율과 무관하게
     // 무조건 "완식"으로 본다 — diet-history가 원래 dishes(반찬별 잔반율)를 안 줘서 시작된
@@ -190,22 +214,28 @@ export function deriveMealTones(items: DietHistoryEntry[], days: number): MealTo
       const dishes = completedItems.flatMap((m) => m.dishes);
       const avgLeftover =
         dishes.length > 0 ? dishes.reduce((sum, d2) => sum + d2.leftoverPct, 0) / dishes.length : 0;
-      tones.push(avgLeftover >= 50 ? "소량" : "완식");
-      continue;
+      return avgLeftover >= 50 ? "소량" : "완식";
     }
     const quickChecks = recordedItems
       .map((m) => m.quickCheckStatus)
       .filter((s): s is "완식" | "남김" => s !== null);
-    tones.push(quickChecks.includes("완식") ? "완식" : "소량");
-  }
-  return tones;
+    return quickChecks.includes("완식") ? "완식" : "소량";
+  });
+}
+
+// records-view.tsx/ward-detail-view.tsx의 14일 그리드에서 날짜 칸 하나를 탭했을 때 그날
+// 상세(끼니별 기록/반찬별 잔반율)를 보여주는 데 쓴다(2026-08-19 피드백) — deriveMealTones가
+// 하루를 톤 하나로 뭉뚱그리며 버리는 dishes/mealType 등 원본 정보를 다시 꺼내 쓰는 용도다.
+export function dietHistoryForDate(items: DietHistoryEntry[], date: string): DietHistoryEntry[] {
+  return items.filter((item) => item.mealDate === date);
 }
 
 export async function fetchGuardianDietHistory(
   identity: WardIdentity,
-  days: number
+  days: number,
+  expectedGuardianLoginId?: string
 ): Promise<DietHistoryEntry[] | null> {
-  const access = resolveGuardianOnlyAccess(identity);
+  const access = resolveGuardianOnlyAccess(identity, expectedGuardianLoginId);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseDietHistory>[0]>(
     `${API_BASE_URL}/app/guardian/${access.backendWardId}/diet-history?days=${days}`,
@@ -232,9 +262,10 @@ export async function fetchElderDietHistory(
 
 export async function fetchGuardianIntakeSummary(
   identity: WardIdentity,
-  days: number
+  days: number,
+  expectedGuardianLoginId?: string
 ): Promise<IntakeSummary | null> {
-  const access = resolveGuardianOnlyAccess(identity);
+  const access = resolveGuardianOnlyAccess(identity, expectedGuardianLoginId);
   if (!access) return null;
   const data = await getJson<{
     period_days: number;
@@ -251,9 +282,10 @@ export async function fetchGuardianIntakeSummary(
 
 export async function fetchGuardianNutritionGaps(
   identity: WardIdentity,
-  days: number
+  days: number,
+  expectedGuardianLoginId?: string
 ): Promise<NutritionGapItem[] | null> {
-  const access = resolveGuardianOnlyAccess(identity);
+  const access = resolveGuardianOnlyAccess(identity, expectedGuardianLoginId);
   if (!access) return null;
   const data = await getJson<{
     items: {
@@ -294,8 +326,11 @@ function parseHealthReport(data: {
 
 // 검수 확정된 리포트가 아직 없으면 백엔드가 404를 준다(draft는 노출 안 함) — 에러가 아니라
 // "아직 없음"이라 조용히 null로 돌려준다(banchan-recommendation.ts의 같은 관례).
-export async function fetchGuardianHealthReport(identity: WardIdentity): Promise<HealthReportSummary | null> {
-  const access = resolveGuardianOnlyAccess(identity);
+export async function fetchGuardianHealthReport(
+  identity: WardIdentity,
+  expectedGuardianLoginId?: string
+): Promise<HealthReportSummary | null> {
+  const access = resolveGuardianOnlyAccess(identity, expectedGuardianLoginId);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseHealthReport>[0]>(
     `${API_BASE_URL}/app/guardian/${access.backendWardId}/health-report`,
@@ -320,8 +355,11 @@ function parseMealStatus(data: { completed_count: number; total_expected: number
   return { completedCount: data.completed_count, totalExpected: data.total_expected };
 }
 
-export async function fetchGuardianMealStatus(identity: WardIdentity): Promise<MealStatusSummary | null> {
-  const access = resolveGuardianOnlyAccess(identity);
+export async function fetchGuardianMealStatus(
+  identity: WardIdentity,
+  expectedGuardianLoginId?: string
+): Promise<MealStatusSummary | null> {
+  const access = resolveGuardianOnlyAccess(identity, expectedGuardianLoginId);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseMealStatus>[0]>(
     `${API_BASE_URL}/app/guardian/${access.backendWardId}/meal-status`,

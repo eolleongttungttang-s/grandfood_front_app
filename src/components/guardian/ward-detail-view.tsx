@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ChevronLeft,
   ClipboardEdit,
@@ -20,7 +20,8 @@ import {
 import { toast } from "sonner";
 
 import { Ward, WardDetail, WardStatus } from "@/lib/wards";
-import { WardMealDashboard } from "@/lib/ward-meal-dashboard";
+import { HISTORY_DAYS, WardMealDashboard, recentKstDateKeys } from "@/lib/ward-meal-dashboard";
+import { dietHistoryForDate } from "@/lib/meal-dashboard";
 import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
@@ -43,8 +44,16 @@ import { BanchanRecommendationSection } from "@/components/app/banchan-recommend
 import { BottomTabBar } from "@/components/app/bottom-tab-bar";
 import { ExpandToggle } from "@/components/app/expand-toggle";
 import { MealToneSummary } from "@/components/app/meal-tone-summary";
+import { DietDayDetail } from "@/components/app/diet-day-detail";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
+import {
+  addDaysToDateString,
+  computeAchievementPct,
+  computeNutritionSnapshotForDate,
+  todayDateString,
+} from "@/lib/banchan-recommendation";
+import { formatMonthDayLabel, weekdayLabel } from "@/lib/date-format";
 import { requestWellnessCall } from "@/lib/wellness-calls";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
@@ -111,6 +120,40 @@ export function WardDetailView({
   const completeCount = mealHistory?.filter((m) => m === "완식").length ?? 0;
   const smallCount = mealHistory?.filter((m) => m === "소량").length ?? 0;
   const noResponseCount = mealHistory?.filter((m) => m === "미응답").length ?? 0;
+  // 그리드 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를 보여준다(2026-08-19, records-view.tsx와
+  // 동일) — 예전엔 이 원본(dishes/mealType 포함)을 fetchGuardianDietHistory로 같은
+  // /app/guardian/{id}/diet-history를 한 번 더 불러서 얻었는데(코드 리뷰 지적: 요청이 두
+  // 번 나갔다), ward-meal-dashboard.ts가 이미 같은 응답을 mealDashboard.rawItems로 같이
+  // 파싱해서 주므로 그걸 그대로 쓴다.
+  const rawDietHistory = mealDashboard?.status === "ready" ? mealDashboard.rawItems : null;
+  // recentKstDateKeys(HISTORY_DAYS)를 렌더마다 새로 부르면 "지금"(KST) 기준으로 매번
+  // 다시 계산되는데, mealHistory/rawDietHistory는 mealDashboard prop이 새로 올 때만
+  // 바뀐다(마운트 시 한 번 fetch, 폴링 없음) — 자정을 넘겨 화면을 켜둔 채로 있으면 날짜
+  // 배열만 하루 밀려서 mealHistory[i]/rawDietHistory가 가리키는 실제 날짜와 어긋난다
+  // (코드 리뷰 지적: 그리드 칸 색상·라벨이 서로 다른 날을 가리키게 됨). mealDashboard와
+  // 같은 시점에만 재계산되도록 묶어서, 데이터가 갱신될 때만 날짜 배열도 같이 갱신되게 한다.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mealDashboard는 계산에 쓰이는 값이 아니라, mealHistory와 같은 시점에만 재계산되도록 하는 동기화 키로 일부러 넣음
+  const recordDateKeys = useMemo(() => recentKstDateKeys(HISTORY_DAYS), [mealDashboard]);
+  const [selectedRecordDate, setSelectedRecordDate] = useState<string | null>(
+    () => recordDateKeys[recordDateKeys.length - 1] ?? null
+  );
+  // recordDateKeys는 렌더마다 "오늘"(KST) 기준으로 새로 계산되지만 selectedRecordDate는
+  // sticky한 state라, 자정을 넘겨 화면을 켜둔 채 리렌더가 한 번이라도 일어나면 예전에
+  // 고른 날짜가 새 14일 창 밖으로 밀려날 수 있다(코드 리뷰 지적, records-view.tsx와 동일
+  // 문제) — 그럴 땐 상세가 조용히 안 보이는 대신 다시 "오늘"(맨 끝 칸)을 고른 것으로
+  // 취급한다.
+  const effectiveSelectedRecordDate =
+    selectedRecordDate && recordDateKeys.includes(selectedRecordDate)
+      ? selectedRecordDate
+      : (recordDateKeys[recordDateKeys.length - 1] ?? null);
+  const selectedRecordEntries =
+    effectiveSelectedRecordDate && rawDietHistory
+      ? dietHistoryForDate(rawDietHistory, effectiveSelectedRecordDate)
+      : [];
+  const selectedRecordTone =
+    effectiveSelectedRecordDate && mealHistory
+      ? mealHistory[recordDateKeys.indexOf(effectiveSelectedRecordDate)]
+      : undefined;
   const dislikedIds = wardDislikes(useLocalStore(dislikesStore), ward.id);
   // "기록" 탭 안 JSX에서만 쓰이지만, Hook은 조건부 렌더 안에서 부르면 안 되므로(Rules of
   // Hooks) 다른 탭을 볼 때도 항상 여기서 구독한다.
@@ -135,6 +178,26 @@ export function WardDetailView({
   // 이모지가 남는다 — diet-view.tsx/home-view.tsx와 동일하게 그때도 기본 이모지를 쓴다.
   const menuEmoji =
     todayMenu.isReal || todayMenu.isGenerating ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
+
+  // "최근 7일 달성률" — 보호자 전용(2026-08-19 결정, 어르신 본인 화면은 그대로 둠). 이미
+  // 위에서 조회한 banchanRecommendation.monthly를 그대로 재사용해서 최근 7일 각각의 "실제/
+  // 목표" 평균 달성률을 구한다. "최근 14일 섭취 기록" 카드와 겹박스가 되지 않도록 같은 카드
+  // 안에 이어붙인다(records-view.tsx는 두 카드로 나뉘어 있지만, 여긴 보호자가 한 화면에서
+  // 완식 여부와 영양 달성률을 같이 훑어보게 하나로 합친다).
+  const NUTRITION_TREND_DAYS = 7;
+  // useMemo로 banchanRecommendation.monthly에만 묶어뒀었는데, 그 안에서 부르는
+  // todayDateString()은 "지금"(wall clock) 기준이라 monthly가 안 바뀌는 한(주간 생성
+  // 폴링이 끝난 뒤엔 안 바뀜) 자정이 지나도 다시 계산되지 않았다(코드 리뷰 지적: 그래프
+  // 날짜 범위와 "오늘" 표시가 어제 기준에 멈춰 있었음). computeNutritionSnapshotForDate는
+  // 이미 메모리에 있는 monthly.weeks를 훑는 순수 조회라 매 렌더마다 다시 계산해도 비용이
+  // 거의 없다 — 메모이제이션을 빼서 항상 실제 "오늘"을 반영하게 한다.
+  const today = todayDateString();
+  const nutritionTrend: { date: string; pct: number | null }[] = [];
+  for (let i = NUTRITION_TREND_DAYS - 1; i >= 0; i--) {
+    const date = addDaysToDateString(today, -i);
+    nutritionTrend.push({ date, pct: computeAchievementPct(computeNutritionSnapshotForDate(banchanRecommendation.monthly, date)) });
+  }
+  const hasNutritionTrend = nutritionTrend.some((d) => d.pct != null);
 
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   // diet-view.tsx의 같은 카드와 동일하게 기본은 접어둔다(2026-08-14 방침 — 필요한 사람만 더 눌러보게).
@@ -554,34 +617,90 @@ export function WardDetailView({
 
       {activeTab === "records" && (
         <>
-        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
-          {mealHistory && (
-            <MealToneSummary
-              completeCount={completeCount}
-              smallCount={smallCount}
-              noResponseCount={noResponseCount}
-            />
-          )}
-          {mealDashboard === null ? (
-            <p className="text-sm text-muted-foreground">불러오는 중이에요...</p>
-          ) : mealDashboard.status === "not-linked" ? (
-            <p className="text-sm text-muted-foreground">
-              아직 실제 백엔드에 연동된 식사 기록이 없어요.
-            </p>
-          ) : mealDashboard.status === "error" ? (
-            <p className="text-sm text-destructive">{mealDashboard.message}</p>
-          ) : (
-            <div className="grid grid-cols-7 gap-1.5">
-              {mealHistory!.map((tone, i) => (
-                <div
-                  key={i}
-                  className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]}`}
-                  title={tone}
-                />
-              ))}
+        <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          {/* 완식 여부(최근 14일)와 영양 목표 달성률(최근 7일)을 보호자가 한 화면에서 같이
+              훑어보게 하나의 카드로 합쳤다(2026-08-19 결정, 어르신 본인 화면(records-view.tsx)
+              은 두 카드로 분리된 채 그대로 둠 — 어르신 화면은 단순함을 우선한다). */}
+          {hasNutritionTrend && (
+            <div className="flex flex-col gap-3">
+              <h2 className="text-sm font-bold text-foreground">최근 {NUTRITION_TREND_DAYS}일 달성률</h2>
+              <div className="flex items-end gap-1.5">
+                {nutritionTrend.map(({ date, pct }) => {
+                  const isToday = date === todayDateString();
+                  return (
+                    <div key={date} className="flex flex-1 flex-col items-center gap-1">
+                      <span className="text-xs font-semibold text-foreground">
+                        {pct != null ? `${pct}%` : "－"}
+                      </span>
+                      <div className="flex h-14 w-full items-end justify-center rounded bg-muted">
+                        {pct != null && (
+                          <div
+                            className={`w-3/5 rounded-t ${isToday ? "bg-primary" : "bg-primary/60"}`}
+                            style={{ height: `${Math.max(pct, 6)}%` }}
+                          />
+                        )}
+                      </div>
+                      <span className={`text-[11px] ${isToday ? "font-bold text-primary" : "text-muted-foreground"}`}>
+                        {isToday ? "오늘" : weekdayLabel(date)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
+
+          <div className={`flex flex-col gap-3 ${hasNutritionTrend ? "border-t border-border pt-4" : ""}`}>
+            <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
+            {mealHistory && (
+              <MealToneSummary
+                completeCount={completeCount}
+                smallCount={smallCount}
+                noResponseCount={noResponseCount}
+              />
+            )}
+            {mealDashboard === null ? (
+              <p className="text-sm text-muted-foreground">불러오는 중이에요...</p>
+            ) : mealDashboard.status === "not-linked" ? (
+              <p className="text-sm text-muted-foreground">
+                아직 실제 백엔드에 연동된 식사 기록이 없어요.
+              </p>
+            ) : mealDashboard.status === "error" ? (
+              <p className="text-sm text-destructive">{mealDashboard.message}</p>
+            ) : (
+              <>
+                {/* 칸이 title 툴팁(마우스 오버)만으로 하루 상태를 알려줘서 터치 기기에선
+                    사실상 정보가 안 보였다 — 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를
+                    아래에 펼쳐 보여주도록 바꿨다(2026-08-19, records-view.tsx와 동일). */}
+                <div className="grid grid-cols-7 gap-1.5">
+                  {mealHistory!.map((tone, i) => {
+                    const date = recordDateKeys[i];
+                    const isSelected = date === effectiveSelectedRecordDate;
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        aria-label={`${formatMonthDayLabel(date)} ${tone}`}
+                        onClick={() => setSelectedRecordDate(date)}
+                        className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]} ${
+                          isSelected ? "ring-2 ring-inset ring-foreground" : ""
+                        }`}
+                      />
+                    );
+                  })}
+                </div>
+
+                {effectiveSelectedRecordDate && selectedRecordTone && (
+                  <DietDayDetail
+                    date={effectiveSelectedRecordDate}
+                    tone={selectedRecordTone}
+                    toneDotClass={MEAL_TONE_CLASS[selectedRecordTone]}
+                    entries={rawDietHistory === null ? null : selectedRecordEntries}
+                  />
+                )}
+              </>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">

@@ -349,26 +349,58 @@ export type TodayNutritionSnapshot = {
 };
 
 // records-view.tsx("오늘 영양성분 분석")와 health-insights.ts(레시피 추천용 결핍 판단)가
-// 똑같이 "오늘 AI가 배정한 반찬의 영양가 합 vs 그 사람의 BMR/TDEE 목표치"를 구해야 해서
+// 똑같이 "그날 AI가 배정한 반찬의 영양가 합 vs 그 사람의 BMR/TDEE 목표치"를 구해야 해서
 // 하나로 뺐다(2026-08-18) — 따로 두면 한쪽만 계산식을 고치고 잊어버리기 쉽다. 예전엔
 // health-insights.ts가 WardDetail.recommendedCombo(옛 목업 결합, 고정 임계값)로 결핍을
 // 판단해서, 이 화면의 실제 목표치 기반 분석과 서로 다른 기준으로 어긋나 있었다.
-export function computeTodayNutritionSnapshot(
-  monthly: MonthlyBanchanRecommendation | null
+//
+// 원래 "오늘"(todayDateString()) 하나만 고정으로 계산했는데, ward-detail-view.tsx의 보호자
+// "최근 7일 달성률" 막대 그래프(2026-08-19 추가)가 과거 여러 날짜에 대해 같은 계산을
+// 반복해야 해서 날짜를 매개변수로 뺐다. computeTodayNutritionSnapshot은 그 특수 케이스
+// (dateStr = 오늘)로 남겨 기존 호출부(records-view.tsx, health-insights.ts)는 그대로 둔다.
+export function computeNutritionSnapshotForDate(
+  monthly: MonthlyBanchanRecommendation | null,
+  dateStr: string
 ): TodayNutritionSnapshot {
-  const today = getRecommendationForDate(monthly, todayDateString());
-  const items = today?.items ?? [];
+  const target = getRecommendationForDate(monthly, dateStr);
+  const items = target?.items ?? [];
   return {
-    hasData: today?.status === "done" && items.length > 0,
+    hasData: target?.status === "done" && items.length > 0,
     kcal: items.reduce((sum, i) => sum + (i.caloriePer100g ?? 0), 0),
     proteinG: items.reduce((sum, i) => sum + (i.proteinPer100g ?? 0), 0),
     sodiumMg: items.reduce((sum, i) => sum + (i.sodiumPer100g ?? 0), 0),
     carbsG: items.reduce((sum, i) => sum + (i.carbsPer100g ?? 0), 0),
-    targetCalorieKcal: today?.targetCalorieKcal ?? null,
-    targetProteinG: today?.targetProteinG ?? null,
-    targetSodiumMg: today?.targetSodiumMg ?? null,
-    targetCarbsG: today?.targetCarbsG ?? null,
+    targetCalorieKcal: target?.targetCalorieKcal ?? null,
+    targetProteinG: target?.targetProteinG ?? null,
+    targetSodiumMg: target?.targetSodiumMg ?? null,
+    targetCarbsG: target?.targetCarbsG ?? null,
   };
+}
+
+export function computeTodayNutritionSnapshot(
+  monthly: MonthlyBanchanRecommendation | null
+): TodayNutritionSnapshot {
+  return computeNutritionSnapshotForDate(monthly, todayDateString());
+}
+
+// "최근 N일 달성률" 막대(ward-detail-view.tsx, 보호자 전용)용 — 그날 배정된 4개 영양소 중
+// 목표치가 있는 것만 골라 "실제/목표" 비율을 각각 100%로 캡한 뒤 평균낸다. 4개 영양소를
+// 하나의 숫자로 뭉뚱그리는 이유는, 막대 하나에 4개 값을 다 못 넣으니 "그날 전체적으로
+// 얼마나 목표에 가까웠는지" 한 눈에 보이는 요약이 더 유용하기 때문이다. hasData가 false거나
+// 목표치가 하나도 없으면(건강 프로필 미입력 등) null — 막대를 안 그리는 신호로 쓴다.
+export function computeAchievementPct(snapshot: TodayNutritionSnapshot): number | null {
+  if (!snapshot.hasData) return null;
+  const pairs: Array<[number, number | null]> = [
+    [snapshot.kcal, snapshot.targetCalorieKcal],
+    [snapshot.proteinG, snapshot.targetProteinG],
+    [snapshot.sodiumMg, snapshot.targetSodiumMg],
+    [snapshot.carbsG, snapshot.targetCarbsG],
+  ];
+  const ratios = pairs
+    .filter((pair): pair is [number, number] => pair[1] != null && pair[1] > 0)
+    .map(([value, target]) => Math.min((value / target) * 100, 100));
+  if (ratios.length === 0) return null;
+  return Math.round(ratios.reduce((sum, r) => sum + r, 0) / ratios.length);
 }
 
 export function hasEverReceivedBanchanRecommendation(wardId: string): boolean {
