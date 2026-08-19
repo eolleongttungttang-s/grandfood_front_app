@@ -124,13 +124,13 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
           </div>
 
           {PLANS.map((plan) => {
-            const isCurrent = selectedWardChecked && selectedWardPlan?.planId === plan.id;
+            const isCurrent = !plan.comingSoon && selectedWardChecked && selectedWardPlan?.planId === plan.id;
             return (
               <div
                 key={plan.id}
                 className={`flex flex-col gap-2 rounded-2xl border bg-card p-5 shadow-sm ${
                   isCurrent ? "border-primary" : "border-border"
-                }`}
+                } ${plan.comingSoon ? "opacity-70" : ""}`}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-base font-extrabold text-foreground">{plan.name}</span>
@@ -138,6 +138,11 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
                     <span className="flex items-center gap-1 text-xs font-semibold text-primary">
                       <Check className="h-3.5 w-3.5" />
                       {selectedWard?.name}님 이용중
+                    </span>
+                  )}
+                  {plan.comingSoon && (
+                    <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+                      출시 예정
                     </span>
                   )}
                 </div>
@@ -153,7 +158,7 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
                     <li key={f}>· {f}</li>
                   ))}
                 </ul>
-                {!isCurrent && (
+                {!isCurrent && !plan.comingSoon && (
                   <Button
                     size="sm"
                     className="w-fit"
