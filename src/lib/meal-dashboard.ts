@@ -111,7 +111,12 @@ function resolveGuardianOnlyAccess(
   return { accessToken: session.accessToken, backendWardId };
 }
 
-function parseDietHistory(data: {
+// ward-meal-dashboard.ts(보호자 대상자 상세)가 "오늘 잔반율"/"최근 14일 섭취 기록" 두 카드용으로
+// 이미 같은 GET /app/guardian/{id}/diet-history를 부르고 있어서, 그 원본 응답을 여기서도 그대로
+// 파싱할 수 있게 export한다(코드 리뷰 지적) — 예전엔 ward-detail-view.tsx가 같은 끼니 기록을
+// fetchGuardianDietHistory로 한 번 더 따로 불러왔다(같은 wardId, 같은 days 파라미터로 요청이
+// 두 번 나감). 응답 스키마가 완전히 같아서(파일 상단 주석 참고) 파싱 함수 하나로 양쪽 다 쓴다.
+export function parseDietHistory(data: {
   items: {
     meal_id: string;
     meal_date: string;

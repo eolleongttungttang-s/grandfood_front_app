@@ -11,6 +11,7 @@
 import { API_BASE_URL } from "@/lib/api-config";
 import { resolveCachedBackendWardAccess } from "@/lib/backend-auth";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+import { parseDietHistory, type DietHistoryEntry } from "@/lib/meal-dashboard";
 import type { MealTone } from "@/lib/ward-registry";
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -20,13 +21,21 @@ const REQUEST_TIMEOUT_MS = 15_000;
 export const HISTORY_DAYS = 14;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
+// meal-dashboard.ts의 parseDietHistory가 기대하는 입력과 완전히 같은 필드를 쓴다(같은
+// GET .../diet-history 응답이라 스키마가 동일함, 아래 fetchWardMealDashboard 참고) — 이
+// 파일은 그중 meal_date/completed/recorded/quick_check_status만 buildMealHistory(하루 톤)
+// 계산에 쓰고, meal_id/meal_type/dishes는 parseDietHistory에 그대로 넘겨 rawItems(끼니별
+// 상세)를 만드는 데만 쓴다.
 type BackendDietHistoryItem = {
+  meal_id: string;
   meal_date: string; // "YYYY-MM-DD"
+  meal_type: string;
   completed: boolean;
   /** 사진 기반 완료든 원탭 자가 보고든, 이 끼니에 뭐라도 기록이 남았으면 true
    *  (grandfood_backend 9f01c26). */
   recorded: boolean;
   quick_check_status: string | null;
+  dishes: { banchan_id: string; banchan_name: string | null; leftover_pct: number }[];
 };
 
 type BackendDietHistoryResponse = {
@@ -40,7 +49,16 @@ type BackendIntakeSummaryResponse = {
 export type WardMealDashboard =
   | { status: "not-linked" }
   | { status: "error"; message: string }
-  | { status: "ready"; leftoverPercent: number | null; mealHistory: MealTone[] };
+  | {
+      status: "ready";
+      leftoverPercent: number | null;
+      mealHistory: MealTone[];
+      /** 그리드 칸(mealHistory[i])을 탭했을 때 그날 상세(끼니별 반찬·잔반율)를 보여주는 데
+       *  쓴다(2026-08-19) — mealHistory와 같은 diet-history 응답을 다시 파싱한 것이라
+       *  ward-detail-view.tsx가 이 데이터를 위해 fetchGuardianDietHistory로 같은 엔드포인트를
+       *  한 번 더 부를 필요가 없다(코드 리뷰 지적: 예전엔 요청이 두 번 나갔다). */
+      rawItems: DietHistoryEntry[];
+    };
 
 async function parseJson<T>(promise: Promise<Response>): Promise<T> {
   const response = await promise;
@@ -167,6 +185,7 @@ export async function fetchWardMealDashboard(
       status: "ready",
       leftoverPercent: intakeSummary.average_leftover_pct,
       mealHistory: buildMealHistory(dietHistory.items),
+      rawItems: parseDietHistory(dietHistory),
     };
   } catch (err) {
     abortBoth();

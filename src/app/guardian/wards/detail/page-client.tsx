@@ -67,7 +67,6 @@ export function GuardianWardDetailPageClient() {
       detail={detail}
       guardianName={account.name}
       mealDashboard={mealDashboard}
-      viewerGuardianLoginId={account.loginId}
     />
   );
 }

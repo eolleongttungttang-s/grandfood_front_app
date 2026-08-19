@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ChevronLeft,
   ClipboardEdit,
@@ -18,7 +18,7 @@ import { toast } from "sonner";
 
 import { Ward, WardDetail, WardStatus } from "@/lib/wards";
 import { HISTORY_DAYS, WardMealDashboard, recentKstDateKeys } from "@/lib/ward-meal-dashboard";
-import { dietHistoryForDate, DietHistoryEntry, fetchGuardianDietHistory } from "@/lib/meal-dashboard";
+import { dietHistoryForDate } from "@/lib/meal-dashboard";
 import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
@@ -39,6 +39,7 @@ import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { MealToneSummary } from "@/components/app/meal-tone-summary";
+import { DietDayDetail } from "@/components/app/diet-day-detail";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
 import {
@@ -70,12 +71,6 @@ const MEAL_TONE_CLASS: Record<string, string> = {
   미응답: "bg-risk-high-foreground",
 };
 
-// diet-history의 meal_type은 백엔드가 영어로 내려준다(grandfood_backend
-// src/domains/health/schemas.py — "breakfast"/"lunch"/"dinner"). records-view.tsx와 같은
-// 표시용 매핑.
-const MEAL_TYPE_LABEL: Record<string, string> = { breakfast: "아침", lunch: "점심", dinner: "저녁" };
-const MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner"];
-
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between border-b border-border py-2.5 text-sm last:border-0">
@@ -90,7 +85,6 @@ export function WardDetailView({
   detail,
   guardianName,
   mealDashboard,
-  viewerGuardianLoginId,
 }: {
   ward: Ward;
   detail: WardDetail;
@@ -98,11 +92,6 @@ export function WardDetailView({
   /** null = 아직 실제 백엔드 조회 응답 전(로딩 중). "오늘 잔반율"/"최근 14일 섭취 기록" 두 카드만
    *  이 값으로 채운다 — 나머지(추천 반찬/건강 프로필 등)는 여전히 detail의 목업값을 쓴다. */
   mealDashboard: WardMealDashboard | null;
-  /** page-client.tsx가 fetchWardMealDashboard에 넘기는 것과 같은 값 — 아래 fetchGuardianDietHistory
-   *  호출도 "캐시된 세션이 지금 로그인한 보호자와 다르면 거부"하는 같은 안전망을 타도록 넘긴다
-   *  (코드 리뷰 지적: 이 필드 없이 부르면 이 브라우저에 캐시된 다른 보호자 세션의 데이터가 섞여
-   *  나올 수 있었다). */
-  viewerGuardianLoginId?: string;
 }) {
   // "오늘"을 포함한 14일 전체의 원탭 자가 보고 반영은 ward-meal-dashboard.ts의
   // fetchWardMealDashboard가 diet-history 응답의 quick_check_status로 이미 처리해서
@@ -112,26 +101,12 @@ export function WardDetailView({
   const completeCount = mealHistory?.filter((m) => m === "완식").length ?? 0;
   const smallCount = mealHistory?.filter((m) => m === "소량").length ?? 0;
   const noResponseCount = mealHistory?.filter((m) => m === "미응답").length ?? 0;
-  // mealDashboard(fetchWardMealDashboard)는 하루 톤(완식/소량/미응답)만 주고 끼니별
-  // dishes/mealType 원본은 버린다 — "그리드 칸을 탭하면 그날 상세를 보여달라"(2026-08-19
-  // 요청, records-view.tsx와 동일)를 위해 dishes까지 포함된 원본을 별도로 한 번 더
-  // 가져온다(fetchGuardianDietHistory, meal-dashboard.ts — /app/guardian/{id}/diet-history를
-  // 같은 스키마로 다시 파싱). recentKstDateKeys를 그대로 써서 mealHistory[i]와 정확히
-  // 같은 날짜 기준(KST 고정)으로 맞춘다.
-  const [rawDietHistory, setRawDietHistory] = useState<DietHistoryEntry[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetchGuardianDietHistory(
-      { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
-      HISTORY_DAYS,
-      viewerGuardianLoginId
-    ).then((items) => {
-      if (!cancelled && items) setRawDietHistory(items);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [ward.id, ward.name, ward.age, ward.address, viewerGuardianLoginId]);
+  // 그리드 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를 보여준다(2026-08-19, records-view.tsx와
+  // 동일) — 예전엔 이 원본(dishes/mealType 포함)을 fetchGuardianDietHistory로 같은
+  // /app/guardian/{id}/diet-history를 한 번 더 불러서 얻었는데(코드 리뷰 지적: 요청이 두
+  // 번 나갔다), ward-meal-dashboard.ts가 이미 같은 응답을 mealDashboard.rawItems로 같이
+  // 파싱해서 주므로 그걸 그대로 쓴다.
+  const rawDietHistory = mealDashboard?.status === "ready" ? mealDashboard.rawItems : null;
   const recordDateKeys = recentKstDateKeys(HISTORY_DAYS);
   const [selectedRecordDate, setSelectedRecordDate] = useState<string | null>(
     () => recordDateKeys[recordDateKeys.length - 1] ?? null
@@ -620,55 +595,12 @@ export function WardDetailView({
                 </div>
 
                 {effectiveSelectedRecordDate && selectedRecordTone && (
-                  <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-foreground">
-                        {formatMonthDayLabel(effectiveSelectedRecordDate)}
-                      </span>
-                      <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-                        <span className={`h-2 w-2 rounded-full ${MEAL_TONE_CLASS[selectedRecordTone]}`} />
-                        {selectedRecordTone}
-                      </span>
-                    </div>
-                    {rawDietHistory === null ? (
-                      <p className="text-sm text-muted-foreground">이 날의 상세 기록은 지금 확인할 수 없어요.</p>
-                    ) : selectedRecordEntries.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">이 날은 남겨진 끼니 기록이 없어요.</p>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        {[...selectedRecordEntries]
-                          .sort((a, b) => MEAL_TYPE_ORDER.indexOf(a.mealType) - MEAL_TYPE_ORDER.indexOf(b.mealType))
-                          .map((entry) => (
-                            <div key={entry.mealId} className="flex flex-col gap-1 rounded-lg bg-muted/60 p-2.5">
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm font-semibold text-foreground">
-                                  {MEAL_TYPE_LABEL[entry.mealType] ?? entry.mealType}
-                                </span>
-                                <span className="text-xs text-muted-foreground">
-                                  {entry.completed
-                                    ? "사진 분석 완료"
-                                    : entry.quickCheckStatus
-                                      ? `자가 체크 · ${entry.quickCheckStatus}`
-                                      : "기록 없음"}
-                                </span>
-                              </div>
-                              {entry.dishes.length > 0 && (
-                                <div className="flex flex-col gap-0.5">
-                                  {entry.dishes.map((dish, di) => (
-                                    <div key={di} className="flex justify-between text-sm">
-                                      <span className="text-foreground">{dish.banchanName ?? "반찬"}</span>
-                                      <span className="text-muted-foreground">
-                                        {Math.round(dish.leftoverPct)}% 남음
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                      </div>
-                    )}
-                  </div>
+                  <DietDayDetail
+                    date={effectiveSelectedRecordDate}
+                    tone={selectedRecordTone}
+                    toneDotClass={MEAL_TONE_CLASS[selectedRecordTone]}
+                    entries={rawDietHistory === null ? null : selectedRecordEntries}
+                  />
                 )}
               </>
             )}

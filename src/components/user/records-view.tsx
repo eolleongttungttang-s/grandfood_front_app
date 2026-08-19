@@ -19,6 +19,7 @@ import { deriveHealthInsight } from "@/lib/health-insights";
 import { getRecipeRecommendations, type RecipeRecommendation } from "@/lib/recipe-recommendations";
 import { TopBar } from "@/components/app/top-bar";
 import { MealToneSummary } from "@/components/app/meal-tone-summary";
+import { DietDayDetail } from "@/components/app/diet-day-detail";
 import { NutrientMeter } from "@/components/app/nutrient-meter";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -33,12 +34,6 @@ const MEAL_TONE_CLASS: Record<string, string> = {
   소량: "bg-risk-caution-foreground",
   미응답: "bg-risk-high-foreground",
 };
-
-// diet-history의 meal_type은 백엔드가 영어로 내려준다(grandfood_backend
-// src/domains/health/schemas.py — "breakfast"/"lunch"/"dinner"). meal-log-store.ts의
-// MealSlot("아침"/"점심"/"저녁")과 같은 개념이라 표시용으로만 매핑한다.
-const MEAL_TYPE_LABEL: Record<string, string> = { breakfast: "아침", lunch: "점심", dinner: "저녁" };
-const MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner"];
 
 const RECENT_DAYS = 14;
 
@@ -187,51 +182,12 @@ export function RecordsView({
           </div>
 
           {effectiveSelectedDate && selectedDayTone && (
-            <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-foreground">{formatMonthDayLabel(effectiveSelectedDate)}</span>
-                <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-                  <span className={`h-2 w-2 rounded-full ${MEAL_TONE_CLASS[selectedDayTone]}`} />
-                  {selectedDayTone}
-                </span>
-              </div>
-              {rawDietHistory === null ? (
-                <p className="text-sm text-muted-foreground">이 날의 상세 기록은 지금 확인할 수 없어요.</p>
-              ) : selectedDayEntries.length === 0 ? (
-                <p className="text-sm text-muted-foreground">이 날은 남겨진 끼니 기록이 없어요.</p>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {[...selectedDayEntries]
-                    .sort((a, b) => MEAL_TYPE_ORDER.indexOf(a.mealType) - MEAL_TYPE_ORDER.indexOf(b.mealType))
-                    .map((entry) => (
-                      <div key={entry.mealId} className="flex flex-col gap-1 rounded-lg bg-muted/60 p-2.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-semibold text-foreground">
-                            {MEAL_TYPE_LABEL[entry.mealType] ?? entry.mealType}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {entry.completed
-                              ? "사진 분석 완료"
-                              : entry.quickCheckStatus
-                                ? `자가 체크 · ${entry.quickCheckStatus}`
-                                : "기록 없음"}
-                          </span>
-                        </div>
-                        {entry.dishes.length > 0 && (
-                          <div className="flex flex-col gap-0.5">
-                            {entry.dishes.map((dish, di) => (
-                              <div key={di} className="flex justify-between text-sm">
-                                <span className="text-foreground">{dish.banchanName ?? "반찬"}</span>
-                                <span className="text-muted-foreground">{Math.round(dish.leftoverPct)}% 남음</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
+            <DietDayDetail
+              date={effectiveSelectedDate}
+              tone={selectedDayTone}
+              toneDotClass={MEAL_TONE_CLASS[selectedDayTone]}
+              entries={rawDietHistory === null ? null : selectedDayEntries}
+            />
           )}
         </div>
 
