@@ -276,9 +276,9 @@ export function HomeView({
                 return (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2"
+                    className="flex flex-wrap items-center justify-between gap-x-1.5 gap-y-2 rounded-lg bg-muted/60 px-2 py-2"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <span
                         className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
                       >
