@@ -133,6 +133,31 @@ function parseDietHistory(data: {
   }));
 }
 
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+// 오늘로부터 최근 days일의 날짜 키를 과거→오늘 순으로 돌려준다("YYYY-MM-DD"). deriveMealTones가
+// 만드는 톤 배열(tones[i])과 순서를 맞추는 데 쓰던 계산이었는데, records-view.tsx가 "14일 잔반
+// 그리드의 칸을 탭하면 그 날짜의 상세 기록을 보여준다"(2026-08-19 피드백)를 만들면서 그리드
+// 칸 인덱스 i가 정확히 어느 날짜인지 알아야 해서 deriveMealTones 밖으로 뽑아 공유한다 —
+// 따로 두면 두 계산이 미묘하게 어긋날 수 있다.
+//
+// new Date()는 기기/브라우저 로컬 시간 기준이다 — ward-meal-dashboard.ts(보호자 화면)가 항상
+// KST로 고정하는 것과 의도적으로 다르다: 이 함수는 어르신 본인 화면(records-view.tsx) 전용이라
+// 어르신이 한국에 물리적으로 있다고 가정할 수 있는 반면, 보호자는 해외 출장 등 비-KST
+// 타임존에서 접속할 수 있어 그 화면만 따로 고정해뒀다(코드 리뷰 지적 — 파일마다 기준이 다르게
+// "보이지만" 실은 각자 맞는 가정을 쓴 것).
+export function recentDateKeys(days: number): string[] {
+  const keys: string[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    keys.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+  }
+  return keys;
+}
+
 // diet-history(끼니 단위)를 "최근 N일, 하루 하나의 완식/소량/미응답 톤" 그리드로 뭉뚱그린다 —
 // ward-detail-view.tsx/records-view.tsx의 기존 mealHistory 그리드(ward-registry.ts MealTone)와
 // 같은 모양을 유지하기 위함. 하루 안에 끼니가 하나도 없으면(아직 기록 없음) "미응답", 그날
@@ -160,25 +185,9 @@ export function deriveMealTones(items: DietHistoryEntry[], days: number): MealTo
     byDate.set(item.mealDate, list);
   }
 
-  function pad(n: number): string {
-    return String(n).padStart(2, "0");
-  }
-
-  // new Date()는 기기/브라우저 로컬 시간 기준이다 — ward-meal-dashboard.ts(보호자 화면)가
-  // 항상 KST로 고정하는 것과 의도적으로 다르다: 이 함수는 어르신 본인 화면(records-view.tsx)
-  // 전용이라 어르신이 한국에 물리적으로 있다고 가정할 수 있는 반면, 보호자는 해외 출장 등
-  // 비-KST 타임존에서 접속할 수 있어 그 화면만 따로 고정해뒀다(코드 리뷰 지적 — 파일마다
-  // 기준이 다르게 "보이지만" 실은 각자 맞는 가정을 쓴 것).
-  const tones: MealTone[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return recentDateKeys(days).map((key) => {
     const recordedItems = (byDate.get(key) ?? []).filter((m) => m.recorded);
-    if (recordedItems.length === 0) {
-      tones.push("미응답");
-      continue;
-    }
+    if (recordedItems.length === 0) return "미응답";
     // 참고(코드 리뷰 지적, 이 PR 이전부터 있던 차이라 동작은 그대로 둠): 보호자 화면
     // (ward-meal-dashboard.ts의 buildMealHistory)은 완료된 끼니가 있으면 잔반율과 무관하게
     // 무조건 "완식"으로 본다 — diet-history가 원래 dishes(반찬별 잔반율)를 안 줘서 시작된
@@ -190,15 +199,20 @@ export function deriveMealTones(items: DietHistoryEntry[], days: number): MealTo
       const dishes = completedItems.flatMap((m) => m.dishes);
       const avgLeftover =
         dishes.length > 0 ? dishes.reduce((sum, d2) => sum + d2.leftoverPct, 0) / dishes.length : 0;
-      tones.push(avgLeftover >= 50 ? "소량" : "완식");
-      continue;
+      return avgLeftover >= 50 ? "소량" : "완식";
     }
     const quickChecks = recordedItems
       .map((m) => m.quickCheckStatus)
       .filter((s): s is "완식" | "남김" => s !== null);
-    tones.push(quickChecks.includes("완식") ? "완식" : "소량");
-  }
-  return tones;
+    return quickChecks.includes("완식") ? "완식" : "소량";
+  });
+}
+
+// records-view.tsx/ward-detail-view.tsx의 14일 그리드에서 날짜 칸 하나를 탭했을 때 그날
+// 상세(끼니별 기록/반찬별 잔반율)를 보여주는 데 쓴다(2026-08-19 피드백) — deriveMealTones가
+// 하루를 톤 하나로 뭉뚱그리며 버리는 dishes/mealType 등 원본 정보를 다시 꺼내 쓰는 용도다.
+export function dietHistoryForDate(items: DietHistoryEntry[], date: string): DietHistoryEntry[] {
+  return items.filter((item) => item.mealDate === date);
 }
 
 export async function fetchGuardianDietHistory(

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft,
   ClipboardEdit,
@@ -17,7 +17,8 @@ import {
 import { toast } from "sonner";
 
 import { Ward, WardDetail, WardStatus } from "@/lib/wards";
-import { WardMealDashboard } from "@/lib/ward-meal-dashboard";
+import { WardMealDashboard, recentKstDateKeys } from "@/lib/ward-meal-dashboard";
+import { dietHistoryForDate, DietHistoryEntry, fetchGuardianDietHistory } from "@/lib/meal-dashboard";
 import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
@@ -46,7 +47,7 @@ import {
   computeNutritionSnapshotForDate,
   todayDateString,
 } from "@/lib/banchan-recommendation";
-import { weekdayLabel } from "@/lib/date-format";
+import { formatMonthDayLabel, weekdayLabel } from "@/lib/date-format";
 import { requestWellnessCall } from "@/lib/wellness-calls";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
@@ -68,6 +69,13 @@ const MEAL_TONE_CLASS: Record<string, string> = {
   소량: "bg-risk-caution-foreground",
   미응답: "bg-risk-high-foreground",
 };
+
+// diet-history의 meal_type은 백엔드가 영어로 내려준다(grandfood_backend
+// src/domains/health/schemas.py — "breakfast"/"lunch"/"dinner"). records-view.tsx와 같은
+// 표시용 매핑.
+const MEAL_TYPE_LABEL: Record<string, string> = { breakfast: "아침", lunch: "점심", dinner: "저녁" };
+const MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner"];
+const RECORDS_DAYS = 14;
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -99,6 +107,33 @@ export function WardDetailView({
   const completeCount = mealHistory?.filter((m) => m === "완식").length ?? 0;
   const smallCount = mealHistory?.filter((m) => m === "소량").length ?? 0;
   const noResponseCount = mealHistory?.filter((m) => m === "미응답").length ?? 0;
+  // mealDashboard(fetchWardMealDashboard)는 하루 톤(완식/소량/미응답)만 주고 끼니별
+  // dishes/mealType 원본은 버린다 — "그리드 칸을 탭하면 그날 상세를 보여달라"(2026-08-19
+  // 요청, records-view.tsx와 동일)를 위해 dishes까지 포함된 원본을 별도로 한 번 더
+  // 가져온다(fetchGuardianDietHistory, meal-dashboard.ts — /app/guardian/{id}/diet-history를
+  // 같은 스키마로 다시 파싱). recentKstDateKeys를 그대로 써서 mealHistory[i]와 정확히
+  // 같은 날짜 기준(KST 고정)으로 맞춘다.
+  const [rawDietHistory, setRawDietHistory] = useState<DietHistoryEntry[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchGuardianDietHistory(
+      { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
+      RECORDS_DAYS
+    ).then((items) => {
+      if (!cancelled && items) setRawDietHistory(items);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ward.id, ward.name, ward.age, ward.address]);
+  const recordDateKeys = recentKstDateKeys(RECORDS_DAYS);
+  const [selectedRecordDate, setSelectedRecordDate] = useState<string | null>(
+    () => recordDateKeys[recordDateKeys.length - 1] ?? null
+  );
+  const selectedRecordEntries =
+    selectedRecordDate && rawDietHistory ? dietHistoryForDate(rawDietHistory, selectedRecordDate) : [];
+  const selectedRecordTone =
+    selectedRecordDate && mealHistory ? mealHistory[recordDateKeys.indexOf(selectedRecordDate)] : undefined;
   const dislikedIds = wardDislikes(useLocalStore(dislikesStore), ward.id);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
@@ -543,15 +578,80 @@ export function WardDetailView({
             ) : mealDashboard.status === "error" ? (
               <p className="text-sm text-destructive">{mealDashboard.message}</p>
             ) : (
-              <div className="grid grid-cols-7 gap-1.5">
-                {mealHistory!.map((tone, i) => (
-                  <div
-                    key={i}
-                    className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]}`}
-                    title={tone}
-                  />
-                ))}
-              </div>
+              <>
+                {/* 칸이 title 툴팁(마우스 오버)만으로 하루 상태를 알려줘서 터치 기기에선
+                    사실상 정보가 안 보였다 — 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를
+                    아래에 펼쳐 보여주도록 바꿨다(2026-08-19, records-view.tsx와 동일). */}
+                <div className="grid grid-cols-7 gap-1.5">
+                  {mealHistory!.map((tone, i) => {
+                    const date = recordDateKeys[i];
+                    const isSelected = date === selectedRecordDate;
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        aria-label={`${formatMonthDayLabel(date)} ${tone}`}
+                        onClick={() => setSelectedRecordDate(date)}
+                        className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]} ${
+                          isSelected ? "ring-2 ring-inset ring-foreground" : ""
+                        }`}
+                      />
+                    );
+                  })}
+                </div>
+
+                {selectedRecordDate && selectedRecordTone && (
+                  <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-foreground">
+                        {formatMonthDayLabel(selectedRecordDate)}
+                      </span>
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                        <span className={`h-2 w-2 rounded-full ${MEAL_TONE_CLASS[selectedRecordTone]}`} />
+                        {selectedRecordTone}
+                      </span>
+                    </div>
+                    {rawDietHistory === null ? (
+                      <p className="text-sm text-muted-foreground">이 날의 상세 기록은 지금 확인할 수 없어요.</p>
+                    ) : selectedRecordEntries.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">이 날은 남겨진 끼니 기록이 없어요.</p>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {[...selectedRecordEntries]
+                          .sort((a, b) => MEAL_TYPE_ORDER.indexOf(a.mealType) - MEAL_TYPE_ORDER.indexOf(b.mealType))
+                          .map((entry) => (
+                            <div key={entry.mealId} className="flex flex-col gap-1 rounded-lg bg-muted/60 p-2.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-semibold text-foreground">
+                                  {MEAL_TYPE_LABEL[entry.mealType] ?? entry.mealType}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {entry.completed
+                                    ? "사진 분석 완료"
+                                    : entry.quickCheckStatus
+                                      ? `자가 체크 · ${entry.quickCheckStatus}`
+                                      : "기록 없음"}
+                                </span>
+                              </div>
+                              {entry.dishes.length > 0 && (
+                                <div className="flex flex-col gap-0.5">
+                                  {entry.dishes.map((dish, di) => (
+                                    <div key={di} className="flex justify-between text-sm">
+                                      <span className="text-foreground">{dish.banchanName ?? "반찬"}</span>
+                                      <span className="text-muted-foreground">
+                                        {Math.round(dish.leftoverPct)}% 남음
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

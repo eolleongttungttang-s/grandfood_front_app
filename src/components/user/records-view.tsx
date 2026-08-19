@@ -5,7 +5,14 @@ import { useEffect, useState } from "react";
 import { Pill } from "lucide-react";
 
 import { MealTone, Ward, WardDetail } from "@/lib/wards";
-import { deriveMealTones, fetchElderDietHistory } from "@/lib/meal-dashboard";
+import {
+  deriveMealTones,
+  dietHistoryForDate,
+  DietHistoryEntry,
+  fetchElderDietHistory,
+  recentDateKeys,
+} from "@/lib/meal-dashboard";
+import { formatMonthDayLabel } from "@/lib/date-format";
 import { computeTodayNutritionSnapshot, getRecommendationForDate, todayDateString } from "@/lib/banchan-recommendation";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { deriveHealthInsight } from "@/lib/health-insights";
@@ -27,6 +34,14 @@ const MEAL_TONE_CLASS: Record<string, string> = {
   미응답: "bg-risk-high-foreground",
 };
 
+// diet-history의 meal_type은 백엔드가 영어로 내려준다(grandfood_backend
+// src/domains/health/schemas.py — "breakfast"/"lunch"/"dinner"). meal-log-store.ts의
+// MealSlot("아침"/"점심"/"저녁")과 같은 개념이라 표시용으로만 매핑한다.
+const MEAL_TYPE_LABEL: Record<string, string> = { breakfast: "아침", lunch: "점심", dinner: "저녁" };
+const MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner"];
+
+const RECENT_DAYS = 14;
+
 export function RecordsView({
   ward,
   detail,
@@ -37,21 +52,36 @@ export function RecordsView({
   // 실제 백엔드 식단 이력(GET /app/elder/{id}/diet-history)이 있으면 목업 대신 그걸 보여준다 —
   // 여긴 어르신 본인 화면이라 elder-app 엔드포인트(보호자/본인 JWT 둘 다 됨)를 쓴다. 실패하면
   // (아직 실제 기록 없음 등) 조용히 기존 목업 그리드를 그대로 쓴다.
+  //
+  // 예전엔 이 응답(items, 끼니별 dishes까지 담고 있음)을 deriveMealTones로 하루 톤 하나로
+  // 뭉뚱그린 뒤 원본을 버렸다 — 그리드 칸이 완식/소량/미응답 색만 보여줄 뿐 탭해도 아무 반응이
+  // 없었다. 날짜 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를 보여달라는 요청(2026-08-19)을
+  // 받아 원본 items도 rawDietHistory에 같이 남겨둔다.
   const [backendMealTones, setBackendMealTones] = useState<MealTone[] | null>(null);
+  const [rawDietHistory, setRawDietHistory] = useState<DietHistoryEntry[] | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetchElderDietHistory(
       { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
-      14
+      RECENT_DAYS
     ).then((items) => {
       if (cancelled || !items) return;
-      setBackendMealTones(deriveMealTones(items, 14));
+      setBackendMealTones(deriveMealTones(items, RECENT_DAYS));
+      setRawDietHistory(items);
     });
     return () => {
       cancelled = true;
     };
   }, [ward.id, ward.name, ward.age, ward.address]);
   const mealHistory = backendMealTones ?? detail.mealHistory;
+  // deriveMealTones가 만드는 톤 배열과 정확히 같은 순서(과거→오늘)로 날짜를 매겨, 그리드
+  // 칸 인덱스 i를 탭했을 때 그 칸이 어느 날짜인지 알 수 있게 한다.
+  const dateKeys = recentDateKeys(RECENT_DAYS);
+  // 기본으로 "오늘"(그리드 맨 끝 칸)을 펼쳐 보여준다 — 진입하자마자 가장 궁금할 날짜를
+  // 바로 보여준다.
+  const [selectedDate, setSelectedDate] = useState<string | null>(() => dateKeys[dateKeys.length - 1] ?? null);
+  const selectedDayEntries = selectedDate && rawDietHistory ? dietHistoryForDate(rawDietHistory, selectedDate) : [];
+  const selectedDayTone = selectedDate ? mealHistory[dateKeys.indexOf(selectedDate)] : undefined;
 
   const completeCount = mealHistory.filter((m) => m === "완식").length;
   const smallCount = mealHistory.filter((m) => m === "소량").length;
@@ -128,15 +158,74 @@ export function RecordsView({
             smallCount={smallCount}
             noResponseCount={noResponseCount}
           />
+          {/* 칸이 title 툴팁(마우스 오버)만으로 하루 상태를 알려줘서 터치 기기에선 사실상
+              정보가 안 보였다 — 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를 아래에 펼쳐
+              보여주도록 바꿨다(2026-08-19 피드백). */}
           <div className="grid grid-cols-7 gap-1.5">
-            {mealHistory.map((tone, i) => (
-              <div
-                key={i}
-                className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]}`}
-                title={tone}
-              />
-            ))}
+            {mealHistory.map((tone, i) => {
+              const date = dateKeys[i];
+              const isSelected = date === selectedDate;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  aria-label={`${formatMonthDayLabel(date)} ${tone}`}
+                  onClick={() => setSelectedDate(date)}
+                  className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]} ${
+                    isSelected ? "ring-2 ring-inset ring-foreground" : ""
+                  }`}
+                />
+              );
+            })}
           </div>
+
+          {selectedDate && selectedDayTone && (
+            <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-bold text-foreground">{formatMonthDayLabel(selectedDate)}</span>
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                  <span className={`h-2 w-2 rounded-full ${MEAL_TONE_CLASS[selectedDayTone]}`} />
+                  {selectedDayTone}
+                </span>
+              </div>
+              {rawDietHistory === null ? (
+                <p className="text-sm text-muted-foreground">이 날의 상세 기록은 지금 확인할 수 없어요.</p>
+              ) : selectedDayEntries.length === 0 ? (
+                <p className="text-sm text-muted-foreground">이 날은 남겨진 끼니 기록이 없어요.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {[...selectedDayEntries]
+                    .sort((a, b) => MEAL_TYPE_ORDER.indexOf(a.mealType) - MEAL_TYPE_ORDER.indexOf(b.mealType))
+                    .map((entry) => (
+                      <div key={entry.mealId} className="flex flex-col gap-1 rounded-lg bg-muted/60 p-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-foreground">
+                            {MEAL_TYPE_LABEL[entry.mealType] ?? entry.mealType}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {entry.completed
+                              ? "사진 분석 완료"
+                              : entry.quickCheckStatus
+                                ? `자가 체크 · ${entry.quickCheckStatus}`
+                                : "기록 없음"}
+                          </span>
+                        </div>
+                        {entry.dishes.length > 0 && (
+                          <div className="flex flex-col gap-0.5">
+                            {entry.dishes.map((dish, di) => (
+                              <div key={di} className="flex justify-between text-sm">
+                                <span className="text-foreground">{dish.banchanName ?? "반찬"}</span>
+                                <span className="text-muted-foreground">{Math.round(dish.leftoverPct)}% 남음</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">

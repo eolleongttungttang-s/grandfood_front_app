@@ -64,6 +64,24 @@ function toDateKey(d: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// 오늘(KST 고정)로부터 최근 days일의 날짜 키를 과거→오늘 순으로 돌려준다. buildMealHistory의
+// mealHistory[i] 톤 배열과 반드시 같은 순서/기준(KST)이어야 한다 — ward-detail-view.tsx가
+// "14일 그리드 칸을 탭하면 그 날짜의 상세(끼니별 반찬·잔반율)를 보여준다"(2026-08-19)를
+// 위해 그리드 칸 인덱스 i가 정확히 어느 날짜인지 알아야 해서 뺐다. meal-dashboard.ts의
+// recentDateKeys(어르신 본인 화면 전용, device-local 기준)와 일부러 분리했다 — 보호자는
+// 비-KST 타임존에서 접속할 수 있어 여기만 KST로 고정해야 하는데, 하나로 합치면 그 차이가
+// 안 보이게 된다.
+export function recentKstDateKeys(days: number): string[] {
+  const keys: string[] = [];
+  const today = nowInKST();
+  for (let offset = days - 1; offset >= 0; offset--) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - offset);
+    keys.push(toDateKey(d));
+  }
+  return keys;
+}
+
 // diet-history는 끼니 단위 레코드만 주기 때문에 하루 단위 톤으로 다시 묶는다.
 // completed(식사 후 사진까지 올라옴) 끼니가 하루 중 하나라도 있으면 "완식", 그렇지 않고
 // 원탭 자가 보고(quick_check_status)가 있으면 완식 체크가 하나라도 있으면 "완식", 남김만
@@ -78,11 +96,7 @@ function buildMealHistory(items: BackendDietHistoryItem[]): MealTone[] {
   }
 
   const history: MealTone[] = [];
-  const today = nowInKST();
-  for (let offset = HISTORY_DAYS - 1; offset >= 0; offset--) {
-    const d = new Date(today);
-    d.setUTCDate(d.getUTCDate() - offset);
-    const key = toDateKey(d);
+  for (const key of recentKstDateKeys(HISTORY_DAYS)) {
     // i.recorded ?? i.completed — 응답 타입이 recorded를 필수로 선언하지만, 배포 시점이
     // 백엔드(9f01c26)보다 앞서거나 캐시된 옛 응답이 섞이면 런타임엔 그 필드가 없을 수
     // 있다(타입은 거짓말을 할 수 있음, 코드 리뷰 지적) — completed로 대체하면 최소한
