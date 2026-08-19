@@ -19,6 +19,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ExpandToggle } from "@/components/app/expand-toggle";
+import { formatMonthDayLabel, WEEKDAY_LABELS } from "@/lib/date-format";
 import { healthProfileStore } from "@/lib/health-profile";
 import { useLocalStore } from "@/lib/use-store";
 import {
@@ -52,8 +53,6 @@ function worstSuitability(items: BanchanRecommendationItem[]): BanchanSuitabilit
     items[0].suitability
   );
 }
-
-const WEEKDAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
 
 type DayCell = {
   date: string; // YYYY-MM-DD
@@ -149,13 +148,6 @@ function pickDefaultDate(days: DayCell[]): string | null {
 function formatMonthLabel(month: string): string {
   const [y, m] = month.split("-");
   return `${y}년 ${Number(m)}월`;
-}
-
-function formatDayLabel(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  // getUTCDay()는 일=0..토=6 순서라, WEEKDAY_LABELS(월=0..일=6) 인덱스로 7만큼 회전시킨다.
-  const weekday = WEEKDAY_LABELS[(new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7];
-  return `${m}월 ${d}일 (${weekday})`;
 }
 
 export function BanchanRecommendationCalendar({
@@ -458,7 +450,7 @@ export function BanchanRecommendationCalendar({
               }`}
             >
               <span className="text-[11px]">{prevDate === todayStr ? "오늘" : "전날"}</span>
-              <span className="text-xs font-semibold">{prevDate && formatDayLabel(prevDate)}</span>
+              <span className="text-xs font-semibold">{prevDate && formatMonthDayLabel(prevDate)}</span>
             </button>
             <div className="flex shrink-0 flex-col items-center px-2">
               {selected.date === todayStr && <span className="text-[11px] text-primary">오늘</span>}
@@ -467,7 +459,7 @@ export function BanchanRecommendationCalendar({
                   selected.date === todayStr ? "text-primary" : "text-foreground"
                 }`}
               >
-                {formatDayLabel(selected.date)}
+                {formatMonthDayLabel(selected.date)}
               </span>
             </div>
             <button
@@ -484,7 +476,7 @@ export function BanchanRecommendationCalendar({
               }`}
             >
               <span className="text-[11px]">{nextDate === todayStr ? "오늘" : "다음날"}</span>
-              <span className="text-xs font-semibold">{nextDate && formatDayLabel(nextDate)}</span>
+              <span className="text-xs font-semibold">{nextDate && formatMonthDayLabel(nextDate)}</span>
             </button>
           </div>
 

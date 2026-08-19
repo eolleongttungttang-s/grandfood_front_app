@@ -5,13 +5,15 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Camera,
   ChevronRight,
+  PartyPopper,
   Sparkles,
   Truck,
 } from "lucide-react";
 
-import { Ward, WardDetail } from "@/lib/wards";
+import { MealTone, Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
+import { deriveMealTones, fetchElderDietHistory } from "@/lib/meal-dashboard";
 import { NotificationItem, fetchElderNotifications, notificationBadgeClass } from "@/lib/notifications";
 import { SUITABILITY_CLASS, SUITABILITY_LABEL } from "@/lib/banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
@@ -82,6 +84,30 @@ export function HomeView({
       cancelled = true;
     };
   }, [ward.id]);
+
+  // 완식 스트릭 격려 문구 — "최근 7일 중 5일 완식하셨어요" (2026-08-19 피드백). records-view.tsx의
+  // "최근 14일 섭취 기록"과 같은 방식(fetchElderDietHistory + deriveMealTones)으로 최근
+  // STREAK_DAYS일의 톤을 구해 그중 "완식"만 센다 — 로컬 mealLogStore(잔반 사진 업로드 기록)
+  // 대신 이 경로를 쓰는 이유: mealLogStore의 leftoverRatePercent/compartments는 아직 Vision
+  // 분석이 안 붙어 백엔드가 항상 0/[]로 고정 응답한다(meal-log-store.ts 주석 참고) — 그걸로
+  // "완식"을 세면 사진만 올리면 항상 완식으로 잡혀 의미가 없다. diet-history는 quick_check_status
+  // (원탭 자가 보고)까지 반영해 더 신뢰할 수 있다. 실패하면(백엔드 접근 불가 등) 조용히
+  // 문구를 안 보여준다 — 다른 조회들과 같은 관례.
+  const STREAK_DAYS = 7;
+  const [recentTones, setRecentTones] = useState<MealTone[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchElderDietHistory({ mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address }, STREAK_DAYS).then(
+      (items) => {
+        if (cancelled || !items) return;
+        setRecentTones(deriveMealTones(items, STREAK_DAYS));
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [ward.id, ward.name, ward.age, ward.address]);
+  const completeStreakCount = recentTones?.filter((t) => t === "완식").length ?? null;
 
   // 오늘 실제 AI 추천이 있으면 그걸, 없으면 목업으로 자연스럽게 폴백한다 — diet-view.tsx와
   // 같은 이유(2026-08-13 피드백, "오늘의 추천 반찬 조합" 카드와 AI 반찬 추천 달력이 서로
@@ -236,6 +262,20 @@ export function HomeView({
           오늘 점심 배송 예정 · <span className="font-semibold">{detail.deliveryEta}</span>
         </SpeakableCard>
 
+        {/* 완식 스트릭 격려 배너 — 0일이면(아직 기록이 없거나 최근에 잘 못 드신 경우) 굳이
+            "0일 완식하셨어요"처럼 무의미하거나 오히려 낙담시키는 문구를 보여줄 이유가 없어,
+            1일 이상일 때만 보여준다(다른 조건부 카드들과 같은 관례 — notifications 등). */}
+        {completeStreakCount != null && completeStreakCount > 0 && (
+          <SpeakableCard
+            id="home-complete-streak"
+            text={`최근 ${STREAK_DAYS}일 중 ${completeStreakCount}일 완식하셨어요. 잘하고 계세요!`}
+            className="flex items-center gap-2 rounded-xl bg-muted px-4 py-2.5 text-sm text-foreground"
+          >
+            <PartyPopper className="h-4 w-4 shrink-0 text-accent" />
+            최근 {STREAK_DAYS}일 중 <span className="font-semibold">{completeStreakCount}일</span> 완식하셨어요!
+          </SpeakableCard>
+        )}
+
         {/* 배송 알림 바로 아래에 둔다 — 배송예정/영양팁 둘 다 "오늘의 짧은 공지"라 시각적으로
             묶이는 게 자연스럽다. 각자 별도 SpeakableCard라 text가 안 합쳐지므로, TTS는
             눌렀을 때 이 카드 내용만 읽는다(배송 정보와 안 섞임). */}
@@ -278,7 +318,7 @@ export function HomeView({
                     key={item.id}
                     className="flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span
                         className={`text-sm ${disliked ? "text-muted-foreground line-through" : "text-foreground"}`}
                       >
@@ -287,6 +327,15 @@ export function HomeView({
                       {item.suitability && (
                         <Badge className={SUITABILITY_CLASS[item.suitability]}>
                           {SUITABILITY_LABEL[item.suitability]}
+                        </Badge>
+                      )}
+                      {/* 취소선만으로는 "예전에 기피 표시한 반찬이 오늘 또 나왔다"가 잘
+                          안 보인다는 피드백(2026-08-19) — 글자 배지로 한 번 더 확실히
+                          알려준다. 건강 관련 판정(SUITABILITY_CLASS)이 아니라 개인 취향
+                          표시라 그 색과는 구분되게 outline 배지를 쓴다. */}
+                      {disliked && (
+                        <Badge variant="outline" className="shrink-0 text-muted-foreground">
+                          기피 표시됨
                         </Badge>
                       )}
                     </div>
