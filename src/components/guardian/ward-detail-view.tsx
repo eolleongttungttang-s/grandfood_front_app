@@ -40,6 +40,7 @@ import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
+import { BottomTabBar } from "@/components/app/bottom-tab-bar";
 import { ExpandToggle } from "@/components/app/expand-toggle";
 import { MealToneSummary } from "@/components/app/meal-tone-summary";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
@@ -68,9 +69,11 @@ const MEAL_TONE_CLASS: Record<string, string> = {
 
 // 대상자 상세 화면 하단 탭 — 11개 카드가 한 화면에 쌓여 스크롤이 너무 길다는 피드백
 // (2026-08-19)으로 개요/건강/기록 3개로 나눴다. guardian/layout.tsx가 이 라우트
-// (/guardian/wards/detail)에서만 전역 하단 탭(BottomTabBar, 홈/마이)을 숨기고, 그 자리에
-// 이 로컬 탭을 대신 그린다 — 전역 탭은 라우트 이동용이라 URL이 바뀌는데, 이 3개는 한
-// 페이지 안에서 보여줄 카드 그룹만 바꾸는 것이라 URL 기반 Link 대신 로컬 state로 전환한다.
+// (/guardian/wards/detail)에서만 전역 하단 탭(홈/마이)을 숨기고, 그 자리에 이 3개짜리
+// 탭을 같은 BottomTabBar 컴포넌트로 대신 그린다 — 전역 탭은 라우트 이동(href)이고 이건
+// 한 페이지 안에서 카드 그룹만 바꾸는 것(onClick)이라 종류는 다르지만, 마크업/스타일은
+// BottomTabBar가 둘 다 받도록 되어 있어 그대로 재사용한다(코드 리뷰 지적 — 예전엔 여기서
+// nav 마크업을 직접 복제해서, BottomTabBar를 고치면 이쪽은 안 따라오는 문제가 있었다).
 const DETAIL_TABS = [
   { id: "overview", label: "개요", icon: LayoutGrid },
   { id: "health", label: "건강", icon: HeartPulse },
@@ -502,42 +505,7 @@ export function WardDetailView({
             </p>
           )}
         </div>
-        </>
-      )}
 
-      {activeTab === "records" && (
-        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
-          {mealHistory && (
-            <MealToneSummary
-              completeCount={completeCount}
-              smallCount={smallCount}
-              noResponseCount={noResponseCount}
-            />
-          )}
-          {mealDashboard === null ? (
-            <p className="text-sm text-muted-foreground">불러오는 중이에요...</p>
-          ) : mealDashboard.status === "not-linked" ? (
-            <p className="text-sm text-muted-foreground">
-              아직 실제 백엔드에 연동된 식사 기록이 없어요.
-            </p>
-          ) : mealDashboard.status === "error" ? (
-            <p className="text-sm text-destructive">{mealDashboard.message}</p>
-          ) : (
-            <div className="grid grid-cols-7 gap-1.5">
-              {mealHistory!.map((tone, i) => (
-                <div
-                  key={i}
-                  className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]}`}
-                  title={tone}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === "health" && (
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-baseline justify-between pb-1">
             <h2 className="text-sm font-bold text-foreground">건강 프로필</h2>
@@ -581,10 +549,41 @@ export function WardDetailView({
             건강 프로필 수정하기
           </Button>
         </div>
+        </>
       )}
 
       {activeTab === "records" && (
         <>
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
+          {mealHistory && (
+            <MealToneSummary
+              completeCount={completeCount}
+              smallCount={smallCount}
+              noResponseCount={noResponseCount}
+            />
+          )}
+          {mealDashboard === null ? (
+            <p className="text-sm text-muted-foreground">불러오는 중이에요...</p>
+          ) : mealDashboard.status === "not-linked" ? (
+            <p className="text-sm text-muted-foreground">
+              아직 실제 백엔드에 연동된 식사 기록이 없어요.
+            </p>
+          ) : mealDashboard.status === "error" ? (
+            <p className="text-sm text-destructive">{mealDashboard.message}</p>
+          ) : (
+            <div className="grid grid-cols-7 gap-1.5">
+              {mealHistory!.map((tone, i) => (
+                <div
+                  key={i}
+                  className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]}`}
+                  title={tone}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <h2 className="pb-1 text-sm font-bold text-foreground">배송 일정 · 이력</h2>
           {deliveries.map((d) => (
@@ -623,33 +622,23 @@ export function WardDetailView({
       )}
       </div>
 
-      <nav className="sticky bottom-0 z-10 flex shrink-0 items-stretch border-t border-border bg-card px-1 pb-[env(safe-area-inset-bottom)]">
-        {DETAIL_TABS.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => {
-                setActiveTab(tab.id);
-                // 이 앱은 화면 전체(문서)가 스크롤되는 구조라(app shell이 min-h-screen이라
-                // 내부 스크롤 영역이 따로 없음) 이 탭바 자체는 뷰포트에 고정되지 않는다 —
-                // 눌렀을 때 맨 아래(탭바 위치)에 그대로 있으면 방금 바뀐(더 짧을 수 있는)
-                // 탭 내용이 화면 밖에 있는 채로 보인다. 탭을 누르면 맨 위로 되돌려서 새
-                // 탭 내용을 바로 보여준다.
-                window.scrollTo({ top: 0, behavior: "instant" });
-              }}
-              className={`flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors ${
-                isActive ? "text-primary" : "text-muted-foreground"
-              }`}
-            >
-              <Icon className="h-5 w-5" />
-              {tab.label}
-            </button>
-          );
-        })}
-      </nav>
+      <BottomTabBar
+        items={DETAIL_TABS.map((tab) => ({
+          label: tab.label,
+          icon: tab.icon,
+          active: activeTab === tab.id,
+          onClick: () => {
+            setActiveTab(tab.id);
+            // 실제로는 main(guardian/layout.tsx)이 아니라 window/document가 스크롤
+            // 컨테이너다 — main은 flex-1 + overflow-y-auto지만 상위 AccessibilityFrame이
+            // min-h-screen(고정 height가 아니라 최소값)이라 절대 clip되지 않고 콘텐츠
+            // 크기만큼 그대로 자라기 때문(코드 리뷰 지적으로 재확인, main.scrollTop을
+            // 직접 바꿔봐도 반응 없음을 확인함). 탭을 누르면 맨 위로 되돌려서 새 탭
+            // 내용(더 짧을 수 있음)을 바로 보여준다.
+            window.scrollTo({ top: 0, behavior: "instant" });
+          },
+        }))}
+      />
     </div>
   );
 }
