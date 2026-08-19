@@ -5,7 +5,10 @@ import { useMemo, useState } from "react";
 import {
   ChevronLeft,
   ClipboardEdit,
+  ClipboardList,
   FileText,
+  HeartPulse,
+  LayoutGrid,
   MessageCircle,
   PhoneCall,
   Send,
@@ -38,6 +41,8 @@ import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { dislikesStore, wardDislikes } from "@/lib/dislikes-store";
 import { requestDietChange } from "@/lib/diet-requests-store";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
+import { BottomTabBar } from "@/components/app/bottom-tab-bar";
+import { ExpandToggle } from "@/components/app/expand-toggle";
 import { MealToneSummary } from "@/components/app/meal-tone-summary";
 import { DietDayDetail } from "@/components/app/diet-day-detail";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
@@ -70,6 +75,20 @@ const MEAL_TONE_CLASS: Record<string, string> = {
   소량: "bg-risk-caution-foreground",
   미응답: "bg-risk-high-foreground",
 };
+
+// 대상자 상세 화면 하단 탭 — 11개 카드가 한 화면에 쌓여 스크롤이 너무 길다는 피드백
+// (2026-08-19)으로 개요/건강/기록 3개로 나눴다. guardian/layout.tsx가 이 라우트
+// (/guardian/wards/detail)에서만 전역 하단 탭(홈/마이)을 숨기고, 그 자리에 이 3개짜리
+// 탭을 같은 BottomTabBar 컴포넌트로 대신 그린다 — 전역 탭은 라우트 이동(href)이고 이건
+// 한 페이지 안에서 카드 그룹만 바꾸는 것(onClick)이라 종류는 다르지만, 마크업/스타일은
+// BottomTabBar가 둘 다 받도록 되어 있어 그대로 재사용한다(코드 리뷰 지적 — 예전엔 여기서
+// nav 마크업을 직접 복제해서, BottomTabBar를 고치면 이쪽은 안 따라오는 문제가 있었다).
+const DETAIL_TABS = [
+  { id: "overview", label: "개요", icon: LayoutGrid },
+  { id: "health", label: "건강", icon: HeartPulse },
+  { id: "records", label: "기록", icon: ClipboardList },
+] as const;
+type DetailTab = (typeof DETAIL_TABS)[number]["id"];
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -136,6 +155,9 @@ export function WardDetailView({
       ? mealHistory[recordDateKeys.indexOf(effectiveSelectedRecordDate)]
       : undefined;
   const dislikedIds = wardDislikes(useLocalStore(dislikesStore), ward.id);
+  // "기록" 탭 안 JSX에서만 쓰이지만, Hook은 조건부 렌더 안에서 부르면 안 되므로(Rules of
+  // Hooks) 다른 탭을 볼 때도 항상 여기서 구독한다.
+  const deliveries = wardDeliveries(useLocalStore(deliveryStore), ward.id);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   useLocalStore(careProfileStore);
@@ -176,6 +198,10 @@ export function WardDetailView({
     nutritionTrend.push({ date, pct: computeAchievementPct(computeNutritionSnapshotForDate(banchanRecommendation.monthly, date)) });
   }
   const hasNutritionTrend = nutritionTrend.some((d) => d.pct != null);
+
+  const [activeTab, setActiveTab] = useState<DetailTab>("overview");
+  // diet-view.tsx의 같은 카드와 동일하게 기본은 접어둔다(2026-08-14 방침 — 필요한 사람만 더 눌러보게).
+  const [reasonsExpanded, setReasonsExpanded] = useState(false);
 
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestNote, setRequestNote] = useState("");
@@ -224,7 +250,7 @@ export function WardDetailView({
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-4 pb-6">
+    <div className="flex flex-1 flex-col">
       <div className="flex items-center justify-between bg-sidebar px-5 py-3 text-sidebar-foreground">
         <div className="flex items-center gap-3">
           <GrandFoodMark className="h-6 w-6 shrink-0 rounded-md" />
@@ -239,7 +265,9 @@ export function WardDetailView({
         <Badge className={STATUS_BADGE_CLASS[ward.status]}>{ward.status}</Badge>
       </div>
 
-      <div className="flex flex-col gap-4 px-5">
+      <div className="flex flex-col gap-4 px-5 pb-4 pt-4">
+      {activeTab === "overview" && (
+        <>
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-center gap-3">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-muted text-lg font-extrabold text-muted-foreground">
@@ -418,24 +446,34 @@ export function WardDetailView({
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
-          {todayMenu.isGenerating ? (
-            <p className="text-sm text-muted-foreground">{TODAY_MENU_GENERATING_MESSAGE}</p>
-          ) : todayMenu.reasons.length === 0 ? (
-            <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
-          ) : null}
-          {todayMenu.reasons.map((reason, i) => (
-            <div
-              key={i}
-              className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-bold text-background">
-                {i + 1}
-              </span>
-              {reason}
-            </div>
-          ))}
+          <ExpandToggle
+            expanded={reasonsExpanded}
+            onToggle={() => setReasonsExpanded((v) => !v)}
+          />
+          {reasonsExpanded &&
+            (todayMenu.isGenerating ? (
+              <p className="text-sm text-muted-foreground">{TODAY_MENU_GENERATING_MESSAGE}</p>
+            ) : todayMenu.reasons.length === 0 ? (
+              <p className="text-sm text-muted-foreground">아직 근거가 없어요.</p>
+            ) : (
+              todayMenu.reasons.map((reason, i) => (
+                <div
+                  key={i}
+                  className="flex gap-2 rounded-lg bg-muted/60 p-2.5 text-sm text-foreground"
+                >
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-bold text-background">
+                    {i + 1}
+                  </span>
+                  {reason}
+                </div>
+              ))
+            ))}
         </div>
+        </>
+      )}
 
+      {activeTab === "health" && (
+        <>
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">질환 · 알레르기 · 복약</span>
           <div className="flex flex-col gap-1.5">
@@ -531,6 +569,54 @@ export function WardDetailView({
           )}
         </div>
 
+        <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-baseline justify-between pb-1">
+            <h2 className="text-sm font-bold text-foreground">건강 프로필</h2>
+            <span className="text-xs text-muted-foreground">
+              {detail.healthProfile.source === "mydata_linked" ? "마이데이터 연동" : "자가 입력"}
+            </span>
+          </div>
+          <DetailRow label="혈압 위쪽 숫자 (수축기)">
+            {detail.healthProfile.systolicBP != null
+              ? `${detail.healthProfile.systolicBP} mmHg`
+              : "미입력"}
+          </DetailRow>
+          <DetailRow label="혈압 아래쪽 숫자 (이완기)">
+            {detail.healthProfile.diastolicBP != null
+              ? `${detail.healthProfile.diastolicBP} mmHg`
+              : "미입력"}
+          </DetailRow>
+          <DetailRow label="공복혈당">
+            {detail.healthProfile.fastingGlucose != null
+              ? `${detail.healthProfile.fastingGlucose} mg/dL`
+              : "미입력"}
+          </DetailRow>
+          <DetailRow label="키">
+            {detail.healthProfile.heightCm != null ? `${detail.healthProfile.heightCm} cm` : "미입력"}
+          </DetailRow>
+          <DetailRow label="체중">
+            {detail.healthProfile.weightKg != null ? `${detail.healthProfile.weightKg} kg` : "미입력"}
+          </DetailRow>
+          <DetailRow label="활동 수준">
+            {detail.healthProfile.activityLevel
+              ? ACTIVITY_LEVEL_LABEL[detail.healthProfile.activityLevel]
+              : "미입력"}
+          </DetailRow>
+          <Button
+            variant="outline"
+            className="mt-3 w-full justify-center"
+            nativeButton={false}
+            render={<Link href={`/guardian/wards/detail/survey?id=${ward.id}`} />}
+          >
+            <ClipboardEdit />
+            건강 프로필 수정하기
+          </Button>
+        </div>
+        </>
+      )}
+
+      {activeTab === "records" && (
+        <>
         <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm">
           {/* 완식 여부(최근 14일)와 영양 목표 달성률(최근 7일)을 보호자가 한 화면에서 같이
               훑어보게 하나의 카드로 합쳤다(2026-08-19 결정, 어르신 본인 화면(records-view.tsx)
@@ -618,52 +704,8 @@ export function WardDetailView({
         </div>
 
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <div className="flex items-baseline justify-between pb-1">
-            <h2 className="text-sm font-bold text-foreground">건강 프로필</h2>
-            <span className="text-xs text-muted-foreground">
-              {detail.healthProfile.source === "mydata_linked" ? "마이데이터 연동" : "자가 입력"}
-            </span>
-          </div>
-          <DetailRow label="혈압 위쪽 숫자 (수축기)">
-            {detail.healthProfile.systolicBP != null
-              ? `${detail.healthProfile.systolicBP} mmHg`
-              : "미입력"}
-          </DetailRow>
-          <DetailRow label="혈압 아래쪽 숫자 (이완기)">
-            {detail.healthProfile.diastolicBP != null
-              ? `${detail.healthProfile.diastolicBP} mmHg`
-              : "미입력"}
-          </DetailRow>
-          <DetailRow label="공복혈당">
-            {detail.healthProfile.fastingGlucose != null
-              ? `${detail.healthProfile.fastingGlucose} mg/dL`
-              : "미입력"}
-          </DetailRow>
-          <DetailRow label="키">
-            {detail.healthProfile.heightCm != null ? `${detail.healthProfile.heightCm} cm` : "미입력"}
-          </DetailRow>
-          <DetailRow label="체중">
-            {detail.healthProfile.weightKg != null ? `${detail.healthProfile.weightKg} kg` : "미입력"}
-          </DetailRow>
-          <DetailRow label="활동 수준">
-            {detail.healthProfile.activityLevel
-              ? ACTIVITY_LEVEL_LABEL[detail.healthProfile.activityLevel]
-              : "미입력"}
-          </DetailRow>
-          <Button
-            variant="outline"
-            className="mt-3 w-full justify-center"
-            nativeButton={false}
-            render={<Link href={`/guardian/wards/detail/survey?id=${ward.id}`} />}
-          >
-            <ClipboardEdit />
-            건강 프로필 수정하기
-          </Button>
-        </div>
-
-        <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <h2 className="pb-1 text-sm font-bold text-foreground">배송 일정 · 이력</h2>
-          {wardDeliveries(useLocalStore(deliveryStore), ward.id).map((d) => (
+          {deliveries.map((d) => (
             <div
               key={d.id}
               className="flex items-center justify-between border-b border-border py-2 text-sm last:border-0"
@@ -695,7 +737,27 @@ export function WardDetailView({
             <span className="text-sm">영양사 상담 이력</span>
           </Button>
         </div>
+        </>
+      )}
       </div>
+
+      <BottomTabBar
+        items={DETAIL_TABS.map((tab) => ({
+          label: tab.label,
+          icon: tab.icon,
+          active: activeTab === tab.id,
+          onClick: () => {
+            setActiveTab(tab.id);
+            // 실제로는 main(guardian/layout.tsx)이 아니라 window/document가 스크롤
+            // 컨테이너다 — main은 flex-1 + overflow-y-auto지만 상위 AccessibilityFrame이
+            // min-h-screen(고정 height가 아니라 최소값)이라 절대 clip되지 않고 콘텐츠
+            // 크기만큼 그대로 자라기 때문(코드 리뷰 지적으로 재확인, main.scrollTop을
+            // 직접 바꿔봐도 반응 없음을 확인함). 탭을 누르면 맨 위로 되돌려서 새 탭
+            // 내용(더 짧을 수 있음)을 바로 보여준다.
+            window.scrollTo({ top: 0, behavior: "instant" });
+          },
+        }))}
+      />
     </div>
   );
 }

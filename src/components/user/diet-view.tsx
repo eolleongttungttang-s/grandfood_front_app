@@ -6,13 +6,21 @@ import { Stethoscope } from "lucide-react";
 
 import { Ward, WardDetail } from "@/lib/wards";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
+import { getCurrentMealSlot, MealSlot } from "@/lib/meal-log-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 import { SpeakableCard } from "@/components/app/speakable-card";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
+import { ButtonSelectGroup } from "@/components/app/button-select-group";
 import { ExpandToggle } from "@/components/app/expand-toggle";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
+
+const MEAL_SLOT_OPTIONS: { value: MealSlot; label: string }[] = [
+  { value: "아침", label: "아침" },
+  { value: "점심", label: "점심" },
+  { value: "저녁", label: "저녁" },
+];
 
 export function DietView({
   ward,
@@ -39,13 +47,26 @@ export function DietView({
   // 피드백, "카드 내용이 안 맞는다")를 여기서 고친다.
   const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly);
 
+  // "왜 이 조합인가요"/"질환·알레르기·복약" 둘 다 기본은 접어두고, 필요할 때만 펼쳐서
+  // 본다 — 화면 자체가 설명이 되어야 한다는 방침(2026-08-14 피드백)이라, 한 화면에 정보를
+  // 다 펼쳐놓기보다 필요한 사람만 더 눌러보게 한다.
+  const [reasonsExpanded, setReasonsExpanded] = useState(false);
+  const [conditionsExpanded, setConditionsExpanded] = useState(false);
+  // UI 스텁(2026-08-19) — 스탠다드 플랜이 아침·점심·저녁을 다 배송하게 되면서 끼니를
+  // 골라볼 수 있어야 한다는 요청. 제목("오늘의 O 추천")은 고른 끼니에 맞춰 바로 바뀌지만,
+  // 그 아래 실제 반찬 목록/영양성분은 아직 안 바뀐다 — 백엔드의 AI 반찬 추천이
+  // B2C(delivery_number 기반) 대상자에겐 끼니 구분 없이 하루 전체를 한 조합으로 묶어
+  // 내려준다(health/models.py — meal_type은 시설 대상자 전용, B2C는 항상 NULL). 실제로
+  // 끼니별 다른 반찬을 보여주려면 백엔드가 B2C 경로에도 meal_type을 채워 내려줘야 한다.
+  const [mealSlot, setMealSlot] = useState<MealSlot>(getCurrentMealSlot());
+
   // 카드별 TTS(SpeakableCard)가 읽어줄 문장 — 화면에 보이는 값 그대로를 문장으로 풀어 쓴다.
   // isGenerating일 땐 totalSodiumMg 등이 전부 0/items가 빈 배열이라, 그대로 문장을 지으면
   // "나트륨 0mg..." 같은 잘못된 값이나 빈 목록 문장이 화면 문구와 다르게 읽힌다 — 시각 카드와
   // 똑같이 생성 중 안내로 맞춘다.
   const recommendedComboSpeech = todayMenu.isGenerating
     ? TODAY_MENU_GENERATING_MESSAGE
-    : `오늘의 추천 반찬 조합이에요. 나트륨 ${todayMenu.totalSodiumMg}mg, ` +
+    : `오늘의 ${mealSlot} 추천 반찬 조합이에요. 나트륨 ${todayMenu.totalSodiumMg}mg, ` +
       `단백질 ${todayMenu.totalProteinG}g, 열량 ${todayMenu.totalKcal}kcal입니다.`;
   const reasonsSpeech = todayMenu.isGenerating
     ? TODAY_MENU_GENERATING_MESSAGE
@@ -54,12 +75,6 @@ export function DietView({
     `진단 질환은 ${detail.conditions.join(", ") || "없음"}입니다. ` +
     `알레르기는 ${detail.allergies[0] === "없음" ? "없음" : detail.allergies.join(", ")}입니다. ` +
     `복약은 ${detail.medications.map((m) => m.name).join(", ")}입니다.`;
-
-  // "왜 이 조합인가요"/"질환·알레르기·복약" 둘 다 기본은 접어두고, 필요할 때만 펼쳐서
-  // 본다 — 화면 자체가 설명이 되어야 한다는 방침(2026-08-14 피드백)이라, 한 화면에 정보를
-  // 다 펼쳐놓기보다 필요한 사람만 더 눌러보게 한다.
-  const [reasonsExpanded, setReasonsExpanded] = useState(false);
-  const [conditionsExpanded, setConditionsExpanded] = useState(false);
 
   // isNewMember가 아직 null(최초 조회 중)이면 판단이 서기 전까지는 아무 카드도 안 보여준다 —
   // 여기서 바로 "기존 회원" 레이아웃을 그렸다가 조회 결과가 늦게 도착해 신규 회원으로
@@ -104,7 +119,25 @@ export function DietView({
           <span className="text-xs font-bold tracking-wide text-sidebar-primary">
             AI 반찬 매칭
           </span>
-          <span className="text-xl font-extrabold">오늘의 추천 반찬 조합</span>
+          <span className="text-xl font-extrabold">오늘의 {mealSlot} 추천 반찬 조합</span>
+          {/* 카드 전체가 SpeakableCard의 탭 영역(눌러서 읽어주기)이라, 끼니 버튼 클릭이
+              그대로 버블링되면 끼니 선택과 동시에 음성 읽기가 토글된다 — stopPropagation으로
+              막는다(home-view.tsx의 사진 업로드 라벨과 같은 이유). wrapper의 text-foreground는
+              선택 안 된 버튼(outline 변형, bg-background 밝은 배경)이 이 카드의 어두운
+              sidebar-foreground 글자색을 상속해 안 보이는 걸 막는다 — 다른 곳의 outline
+              버튼과 같은 배경/글자 조합으로 되돌린다. 라벨("끼니 선택")은 반대로 이 카드
+              배경(어두움) 위에 있어야 해서, 이 카드의 다른 옅은 라벨(나트륨/단백질/열량)과
+              같은 색을 labelClassName으로 따로 지정한다. */}
+          <div className="text-foreground" onClick={(e) => e.stopPropagation()}>
+            <ButtonSelectGroup
+              label="끼니 선택"
+              labelClassName="text-sidebar-foreground/60"
+              options={MEAL_SLOT_OPTIONS}
+              value={mealSlot}
+              onChange={setMealSlot}
+              columns={3}
+            />
+          </div>
           {todayMenu.isGenerating ? (
             <p className="text-sm text-sidebar-foreground/80">{TODAY_MENU_GENERATING_MESSAGE}</p>
           ) : (
