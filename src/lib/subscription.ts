@@ -20,13 +20,13 @@ export const PLANS: Plan[] = [
   {
     id: "basic",
     name: "라이트",
-    priceWon: 39000,
+    priceWon: 9900,
     features: ["평일 점심 배달", "기본 건강 리포트", "레시피 추천"],
   },
   {
     id: "standard",
     name: "스탠다드",
-    priceWon: 59000,
+    priceWon: 15900,
     features: [
       "매일 아침 · 점심 · 저녁 배달",
       "주간 건강 리포트",
@@ -37,6 +37,11 @@ export const PLANS: Plan[] = [
 ];
 
 export const PAYMENT_METHOD = { brand: "국민카드", last4: "4821" };
+
+// 구독료는 배송/서비스 비용이고, 실제 반찬 가격은 별도 결제라는 걸 이용자/보호자가 자꾸
+// 깜빡해 혼동하는 문의가 반복돼서(플랜 카드에 안 보이면 놓치기 쉬움) 두 구독 화면(guardian/
+// user subscription-view.tsx) 모두에서 가격 바로 아래 눈에 띄게 노출한다.
+export const BANCHAN_PAYMENT_NOTICE = "반찬 가격은 이 구독료와 별도로 결제돼요";
 
 // fetchActiveSubscriptionBackend가 돌려준 실제 plan_type("base"/"premium")을 화면 표시용
 // 플랜 id로 되돌린다 — 이제 백엔드 2단계와 화면 2단계가 정확히 1:1로 대응해서
