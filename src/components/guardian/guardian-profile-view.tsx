@@ -38,8 +38,8 @@ export function GuardianProfileView({
   const [linkedBackendWardIds, setLinkedBackendWardIds] = useState<Set<string>>(new Set());
   // "서버 연동됨"만으로는 이 대상자가 실제로 어떤 수준의 서비스를 받는지 알 수 없어서
   // 직관적이지 않다는 피드백(2026-08-18) — 대상자마다 다른 플랜을 쓸 수 있게 되면서
-  // (subscription-view.tsx 참고) 뱃지도 대상자별 실제 플랜명(라이트/스탠다드)을
-  // 보여주도록 바꿨다. 값이 없는 대상자는 연동만 됐고 아직 구독은 없는 경우다.
+  // (subscription-view.tsx 참고) 뱃지도 대상자별 실제 플랜명을 보여주도록 바꿨다. 값이
+  // 없는 대상자는 연동만 됐고 아직 구독은 없는 경우다.
   const [wardPlanNames, setWardPlanNames] = useState<Record<string, string>>({});
   // wards는 부모(page.tsx)가 렌더마다 getWards().filter(...)로 새로 만드는 배열이라 참조가
   // 매번 바뀐다 — 그대로 deps에 넣으면 렌더마다 재조회한다. report-view.tsx의

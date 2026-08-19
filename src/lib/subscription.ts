@@ -8,21 +8,18 @@ export type Plan = {
   name: string;
   priceWon: number;
   features: string[];
+  /** true면 카드만 미리 보여주고 선택은 막는다 — 백엔드가 아직 이 플랜을 모른다
+   *  (plan_type이 base/premium 2종뿐, 아래 toBackendPlanType 참고). */
+  comingSoon?: boolean;
 };
 
-// 백엔드가 구독 플랜을 base/premium 2단계로 확정했다(2026-08-18, 3단계
-// 확장안 grandfood_backend #64는 정책 미확정으로 보류) — 화면도 기존 3단계
-// (라이트/스탠다드/프리미엄)에서 2단계(라이트/스탠다드)로 맞춘다. 옛 프리미엄의
-// "아침·점심·저녁 배달"과 "레시피 추천"은 스탠다드로, "레시피 추천"은 라이트에도
-// 추가했다 — 나머지 프리미엄 전용 혜택(영양사 상담 무제한, SOS 우선 대응, 월간
-// 리포트)은 이번 정리에서 함께 없앤다.
+// 2026-08-19: 라이트를 없애고 스탠다드를 기본(유일하게 실제 구독 가능한) 플랜으로 유지한다.
+// 프리미엄은 OCR(처방전 · 영양정보 인식) 등을 더한 다음 단계 플랜을 미리 보여주기 위한
+// 카드로 새로 추가하지만, 백엔드 PlanType이 아직 base/premium 2종뿐이라(3단계 확장안
+// grandfood_backend #64는 정책 미확정으로 보류) 실제로 구독할 수는 없다 — comingSoon으로
+// 표시해 선택 버튼을 막는다. 스탠다드는 계속 백엔드 "premium"에 대응한다(toBackendPlanType/
+// resolveDisplayPlanId).
 export const PLANS: Plan[] = [
-  {
-    id: "basic",
-    name: "라이트",
-    priceWon: 9900,
-    features: ["평일 점심 배달", "기본 건강 리포트", "레시피 추천"],
-  },
   {
     id: "standard",
     name: "스탠다드",
@@ -34,6 +31,19 @@ export const PLANS: Plan[] = [
       "레시피 추천",
     ],
   },
+  {
+    id: "premium",
+    name: "프리미엄",
+    priceWon: 25900,
+    features: [
+      "매일 아침 · 점심 · 저녁 배달",
+      "주간 건강 리포트",
+      "영양사 상담 월 1회",
+      "레시피 추천",
+      "처방전 · 영양정보 OCR 인식",
+    ],
+    comingSoon: true,
+  },
 ];
 
 export const PAYMENT_METHOD = { brand: "국민카드", last4: "4821" };
@@ -44,14 +54,13 @@ export const PAYMENT_METHOD = { brand: "국민카드", last4: "4821" };
 export const BANCHAN_PAYMENT_NOTICE = "반찬 가격은 이 구독료와 별도로 결제돼요";
 
 // fetchActiveSubscriptionBackend가 돌려준 실제 plan_type("base"/"premium")을 화면 표시용
-// 플랜 id로 되돌린다 — 이제 백엔드 2단계와 화면 2단계가 정확히 1:1로 대응해서
-// (base=basic/라이트, premium=standard/스탠다드) 그대로 매핑하면 된다. 예전엔 백엔드가
-// 2단계인데 화면이 3단계(basic/standard/premium)라 "base"가 basic인지 standard인지
-// 백엔드 응답만으로 알 수 없어서, 이 화면에서 마지막으로 고른 값을 별도 저장소
-// (selfSubscriptionPlanStore)에 기억해뒀다가 되살리는 방식이 필요했다 — 화면이 2단계로
-// 줄면서 그 모호함 자체가 없어져 더 이상 필요 없다(2026-08-18).
-export function resolveDisplayPlanId(backendPlanType: string): string {
-  return backendPlanType === "premium" ? "standard" : "basic";
+// 플랜 id로 되돌린다. 라이트 카드를 없앤 뒤로 화면엔 스탠다드 하나뿐이라(프리미엄은
+// comingSoon이라 구독 자체가 안 됨), base든 premium이든 지금 실제로 살아있는 구독이면
+// 전부 스탠다드로 표시한다 — 예전 라이트 구독자(plan_type: base)도 그 카드가 사라졌으니
+// 가장 가까운 실제 플랜인 스탠다드로 보여주는 게, 아무 카드도 "이용중" 표시가 안 되는
+// 것보다 낫다(2026-08-19).
+export function resolveDisplayPlanId(_backendPlanType: string): string {
+  return "standard";
 }
 
 export function formatWon(value: number) {
@@ -67,8 +76,9 @@ function todayDateString(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// PLANS의 "basic"/"standard"가 백엔드 PlanType "base"/"premium"과 1:1로 대응한다
-// (위 resolveDisplayPlanId 참고).
+// 실제로 구독 가능한 유일한 플랜인 "standard"만 백엔드 "premium"으로 보낸다 — "premium"
+// 화면 카드는 comingSoon이라 애초에 이 함수까지 호출될 일이 없다("base"로 떨어지는
+// 경우는 지금은 도달하지 않는 방어적 기본값).
 function toBackendPlanType(planId: string): "base" | "premium" {
   return planId === "standard" ? "premium" : "base";
 }
