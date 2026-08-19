@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import {
   PLANS,
   PAYMENT_METHOD,
+  BANCHAN_PAYMENT_NOTICE,
   resolveDisplayPlanId,
   formatWon,
   syncSubscriptionToBackend,
@@ -128,6 +129,9 @@ export function SelfSubscriptionView({ ward }: { ward: Ward }) {
               <span className="text-lg font-bold text-foreground">
                 {formatWon(plan.priceWon)}
                 <span className="text-xs font-normal text-muted-foreground"> /월</span>
+              </span>
+              <span className="w-fit rounded-full bg-accent px-2.5 py-1 text-xs font-semibold text-accent-foreground">
+                {BANCHAN_PAYMENT_NOTICE}
               </span>
               <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
                 {plan.features.map((f) => (
