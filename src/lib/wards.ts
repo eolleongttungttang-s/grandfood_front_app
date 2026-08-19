@@ -123,6 +123,14 @@ function textToAllergyTags(text: string): AllergyTag[] {
   return [...found];
 }
 
+// "YYYY.MM.DD" — DELIVERIES(delivery.ts) 목업 데이터의 scheduledDate와 같은 표기.
+function formatTomorrow(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
+}
+
 export function getWardDetail(ward: Ward): WardDetail {
   const s = seedFromId(ward.id);
 
@@ -270,9 +278,10 @@ export function getWardDetail(ward: Ward): WardDetail {
   const leftoverPercent =
     ward.lastMeal.tone === "미응답" ? 100 : ward.lastMeal.tone === "소량" ? 55 : 5;
 
-  // 다음 배송일 — 실제 예정된 배송이 있으면 그 날짜를, 없으면 오늘 기준 가까운 날짜를 대략 보여준다.
+  // 다음 배송일 — 실제 예정된 배송이 있으면 그 날짜를, 없으면 오늘 기준 다음 날을 보여준다.
+  // 예전엔 "2026.07.29"로 고정돼 있어서 그 날짜가 지나면 항상 과거로 표시됐다(2026-08-19 피드백).
   const nextScheduled = wardDeliveries(deliveryStore.read(), ward.id).find((d) => d.status === "예정");
-  const nextDeliveryDate = nextScheduled?.scheduledDate ?? "2026.07.29";
+  const nextDeliveryDate = nextScheduled?.scheduledDate ?? formatTomorrow();
 
   return {
     conditions,
