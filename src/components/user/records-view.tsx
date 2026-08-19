@@ -80,8 +80,15 @@ export function RecordsView({
   // 기본으로 "오늘"(그리드 맨 끝 칸)을 펼쳐 보여준다 — 진입하자마자 가장 궁금할 날짜를
   // 바로 보여준다.
   const [selectedDate, setSelectedDate] = useState<string | null>(() => dateKeys[dateKeys.length - 1] ?? null);
-  const selectedDayEntries = selectedDate && rawDietHistory ? dietHistoryForDate(rawDietHistory, selectedDate) : [];
-  const selectedDayTone = selectedDate ? mealHistory[dateKeys.indexOf(selectedDate)] : undefined;
+  // dateKeys는 렌더마다 "오늘" 기준으로 새로 계산되지만 selectedDate는 sticky한 state라,
+  // 자정을 넘겨 화면을 켜둔 채 리렌더가 한 번이라도 일어나면 예전에 고른 날짜가 새 14일
+  // 창 밖으로 밀려날 수 있다(코드 리뷰 지적) — 그럴 땐 그 칸이 사라진 것처럼 상세가 조용히
+  // 안 보이는 대신, 다시 "오늘"(맨 끝 칸)을 고른 것으로 취급한다.
+  const effectiveSelectedDate =
+    selectedDate && dateKeys.includes(selectedDate) ? selectedDate : (dateKeys[dateKeys.length - 1] ?? null);
+  const selectedDayEntries =
+    effectiveSelectedDate && rawDietHistory ? dietHistoryForDate(rawDietHistory, effectiveSelectedDate) : [];
+  const selectedDayTone = effectiveSelectedDate ? mealHistory[dateKeys.indexOf(effectiveSelectedDate)] : undefined;
 
   const completeCount = mealHistory.filter((m) => m === "완식").length;
   const smallCount = mealHistory.filter((m) => m === "소량").length;
@@ -164,7 +171,7 @@ export function RecordsView({
           <div className="grid grid-cols-7 gap-1.5">
             {mealHistory.map((tone, i) => {
               const date = dateKeys[i];
-              const isSelected = date === selectedDate;
+              const isSelected = date === effectiveSelectedDate;
               return (
                 <button
                   key={i}
@@ -179,10 +186,10 @@ export function RecordsView({
             })}
           </div>
 
-          {selectedDate && selectedDayTone && (
+          {effectiveSelectedDate && selectedDayTone && (
             <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-foreground">{formatMonthDayLabel(selectedDate)}</span>
+                <span className="text-sm font-bold text-foreground">{formatMonthDayLabel(effectiveSelectedDate)}</span>
                 <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
                   <span className={`h-2 w-2 rounded-full ${MEAL_TONE_CLASS[selectedDayTone]}`} />
                   {selectedDayTone}

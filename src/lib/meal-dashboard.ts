@@ -14,6 +14,7 @@
 
 import { API_BASE_URL } from "@/lib/api-config";
 import {
+  findGuardianLoginIdForWard,
   getBackendGuardianSessionForWard,
   getCachedBackendWardId,
   resolveCachedBackendWardAccess,
@@ -91,9 +92,18 @@ async function getJson<T>(
 // report-view.tsx 등이 화면 진입 시 자동으로 부르는 순수 조회라, PR #8에서 고쳤던 것과 같은
 // 부수효과(화면 진입만으로 더미 phone/생년월일의 실제 백엔드 User가 생성되는 것)를 다시
 // 만들면 안 된다 — "AI 추천받기"처럼 실제로 대상자를 생성해도 되는 명시적 액션이 아니다.
+// expectedGuardianLoginId(옵션): backend-auth.ts의 resolveCachedBackendWardAccess와 같은
+// 안전망 — 이 브라우저에 보호자 A/B 세션이 동시에 캐시돼 있어도, 지금 로그인한 계정과
+// 캐시된 세션의 실제 관리자가 다르면 조회를 거부한다(코드 리뷰 지적: fetchGuardianDietHistory가
+// 이 확인 없이 캐시된 아무 보호자 세션이나 썼다 — ward-meal-dashboard.ts의
+// fetchWardMealDashboard는 이미 이 확인을 하고 있어 안전 수준이 달랐다).
 function resolveGuardianOnlyAccess(
-  identity: WardIdentity
+  identity: WardIdentity,
+  expectedGuardianLoginId?: string
 ): { accessToken: string; backendWardId: string } | null {
+  if (expectedGuardianLoginId && findGuardianLoginIdForWard(identity.mockWardId) !== expectedGuardianLoginId) {
+    return null;
+  }
   const session = getBackendGuardianSessionForWard(identity.mockWardId);
   if (!session) return null;
   const backendWardId = getCachedBackendWardId(identity.mockWardId);
@@ -217,9 +227,10 @@ export function dietHistoryForDate(items: DietHistoryEntry[], date: string): Die
 
 export async function fetchGuardianDietHistory(
   identity: WardIdentity,
-  days: number
+  days: number,
+  expectedGuardianLoginId?: string
 ): Promise<DietHistoryEntry[] | null> {
-  const access = resolveGuardianOnlyAccess(identity);
+  const access = resolveGuardianOnlyAccess(identity, expectedGuardianLoginId);
   if (!access) return null;
   const data = await getJson<Parameters<typeof parseDietHistory>[0]>(
     `${API_BASE_URL}/app/guardian/${access.backendWardId}/diet-history?days=${days}`,

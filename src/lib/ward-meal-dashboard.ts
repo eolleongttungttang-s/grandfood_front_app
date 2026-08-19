@@ -14,7 +14,10 @@ import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { MealTone } from "@/lib/ward-registry";
 
 const REQUEST_TIMEOUT_MS = 15_000;
-const HISTORY_DAYS = 14;
+// ward-detail-view.tsx가 mealDashboard.mealHistory[i]와 정확히 같은 길이/순서로 정렬해야
+// 하는 날짜 목록(recentKstDateKeys)을 만들 때도 이 값을 그대로 가져다 쓴다(코드 리뷰 지적) —
+// 따로 상수를 두면 한쪽만 바뀌었을 때 두 배열 길이가 어긋나도 컴파일러가 못 잡는다.
+export const HISTORY_DAYS = 14;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
 type BackendDietHistoryItem = {

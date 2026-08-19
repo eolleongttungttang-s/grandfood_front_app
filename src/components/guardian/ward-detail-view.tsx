@@ -17,7 +17,7 @@ import {
 import { toast } from "sonner";
 
 import { Ward, WardDetail, WardStatus } from "@/lib/wards";
-import { WardMealDashboard, recentKstDateKeys } from "@/lib/ward-meal-dashboard";
+import { HISTORY_DAYS, WardMealDashboard, recentKstDateKeys } from "@/lib/ward-meal-dashboard";
 import { dietHistoryForDate, DietHistoryEntry, fetchGuardianDietHistory } from "@/lib/meal-dashboard";
 import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
 import { getPartnerStore } from "@/lib/partner-stores";
@@ -75,7 +75,6 @@ const MEAL_TONE_CLASS: Record<string, string> = {
 // 표시용 매핑.
 const MEAL_TYPE_LABEL: Record<string, string> = { breakfast: "아침", lunch: "점심", dinner: "저녁" };
 const MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner"];
-const RECORDS_DAYS = 14;
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -91,6 +90,7 @@ export function WardDetailView({
   detail,
   guardianName,
   mealDashboard,
+  viewerGuardianLoginId,
 }: {
   ward: Ward;
   detail: WardDetail;
@@ -98,6 +98,11 @@ export function WardDetailView({
   /** null = 아직 실제 백엔드 조회 응답 전(로딩 중). "오늘 잔반율"/"최근 14일 섭취 기록" 두 카드만
    *  이 값으로 채운다 — 나머지(추천 반찬/건강 프로필 등)는 여전히 detail의 목업값을 쓴다. */
   mealDashboard: WardMealDashboard | null;
+  /** page-client.tsx가 fetchWardMealDashboard에 넘기는 것과 같은 값 — 아래 fetchGuardianDietHistory
+   *  호출도 "캐시된 세션이 지금 로그인한 보호자와 다르면 거부"하는 같은 안전망을 타도록 넘긴다
+   *  (코드 리뷰 지적: 이 필드 없이 부르면 이 브라우저에 캐시된 다른 보호자 세션의 데이터가 섞여
+   *  나올 수 있었다). */
+  viewerGuardianLoginId?: string;
 }) {
   // "오늘"을 포함한 14일 전체의 원탭 자가 보고 반영은 ward-meal-dashboard.ts의
   // fetchWardMealDashboard가 diet-history 응답의 quick_check_status로 이미 처리해서
@@ -118,22 +123,36 @@ export function WardDetailView({
     let cancelled = false;
     fetchGuardianDietHistory(
       { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
-      RECORDS_DAYS
+      HISTORY_DAYS,
+      viewerGuardianLoginId
     ).then((items) => {
       if (!cancelled && items) setRawDietHistory(items);
     });
     return () => {
       cancelled = true;
     };
-  }, [ward.id, ward.name, ward.age, ward.address]);
-  const recordDateKeys = recentKstDateKeys(RECORDS_DAYS);
+  }, [ward.id, ward.name, ward.age, ward.address, viewerGuardianLoginId]);
+  const recordDateKeys = recentKstDateKeys(HISTORY_DAYS);
   const [selectedRecordDate, setSelectedRecordDate] = useState<string | null>(
     () => recordDateKeys[recordDateKeys.length - 1] ?? null
   );
+  // recordDateKeys는 렌더마다 "오늘"(KST) 기준으로 새로 계산되지만 selectedRecordDate는
+  // sticky한 state라, 자정을 넘겨 화면을 켜둔 채 리렌더가 한 번이라도 일어나면 예전에
+  // 고른 날짜가 새 14일 창 밖으로 밀려날 수 있다(코드 리뷰 지적, records-view.tsx와 동일
+  // 문제) — 그럴 땐 상세가 조용히 안 보이는 대신 다시 "오늘"(맨 끝 칸)을 고른 것으로
+  // 취급한다.
+  const effectiveSelectedRecordDate =
+    selectedRecordDate && recordDateKeys.includes(selectedRecordDate)
+      ? selectedRecordDate
+      : (recordDateKeys[recordDateKeys.length - 1] ?? null);
   const selectedRecordEntries =
-    selectedRecordDate && rawDietHistory ? dietHistoryForDate(rawDietHistory, selectedRecordDate) : [];
+    effectiveSelectedRecordDate && rawDietHistory
+      ? dietHistoryForDate(rawDietHistory, effectiveSelectedRecordDate)
+      : [];
   const selectedRecordTone =
-    selectedRecordDate && mealHistory ? mealHistory[recordDateKeys.indexOf(selectedRecordDate)] : undefined;
+    effectiveSelectedRecordDate && mealHistory
+      ? mealHistory[recordDateKeys.indexOf(effectiveSelectedRecordDate)]
+      : undefined;
   const dislikedIds = wardDislikes(useLocalStore(dislikesStore), ward.id);
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
@@ -585,7 +604,7 @@ export function WardDetailView({
                 <div className="grid grid-cols-7 gap-1.5">
                   {mealHistory!.map((tone, i) => {
                     const date = recordDateKeys[i];
-                    const isSelected = date === selectedRecordDate;
+                    const isSelected = date === effectiveSelectedRecordDate;
                     return (
                       <button
                         key={i}
@@ -600,11 +619,11 @@ export function WardDetailView({
                   })}
                 </div>
 
-                {selectedRecordDate && selectedRecordTone && (
+                {effectiveSelectedRecordDate && selectedRecordTone && (
                   <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-foreground">
-                        {formatMonthDayLabel(selectedRecordDate)}
+                        {formatMonthDayLabel(effectiveSelectedRecordDate)}
                       </span>
                       <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
                         <span className={`h-2 w-2 rounded-full ${MEAL_TONE_CLASS[selectedRecordTone]}`} />
