@@ -67,6 +67,14 @@ type DayCell = {
 function buildDayCells(monthly: MonthlyBanchanRecommendation): DayCell[] {
   const cells: DayCell[] = [];
   for (const week of monthly.weeks) {
+    const allItems = week.recommendation?.items ?? [];
+    // banchan-recommendation.ts의 getRecommendationForDate와 같은 기준을 쓴다: 2026-08-19
+    // 정책 변경으로 지금 생성되는 데이터는 delivery_number가 항상 null이고 serviceDate로
+    // 날짜를 맞춰야 한다 — serviceDate가 하나도 없는 주(옛 회차 기반 데이터)만
+    // deliveryNumber로 폴백한다. 이 구분 없이 deliveryNumber로만 걸러내면, 생성은
+    // 실제로 성공했는데도(generationStatus: done) 모든 날짜 칸의 items가 항상 빈 배열이
+    // 돼서 "다시 추천받기"가 눈에 보이는 효과가 전혀 없는 것처럼 보인다.
+    const usesServiceDates = allItems.some((item) => item.serviceDate != null);
     for (let deliveryNumber = 1; deliveryNumber <= 7; deliveryNumber++) {
       const date = addDaysToDateString(week.weekStartDate, deliveryNumber - 1);
       cells.push({
@@ -76,7 +84,9 @@ function buildDayCells(monthly: MonthlyBanchanRecommendation): DayCell[] {
         weekStartDate: week.weekStartDate,
         generationStatus: week.generationStatus,
         error: week.error,
-        items: (week.recommendation?.items ?? []).filter((item) => item.deliveryNumber === deliveryNumber),
+        items: usesServiceDates
+          ? allItems.filter((item) => item.serviceDate === date)
+          : allItems.filter((item) => item.deliveryNumber === deliveryNumber),
       });
     }
   }
