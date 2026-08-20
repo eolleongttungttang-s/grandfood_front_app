@@ -18,6 +18,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonSelectGroup } from "@/components/app/button-select-group";
 import { ExpandToggle } from "@/components/app/expand-toggle";
 import { formatMonthDayLabel, WEEKDAY_LABELS } from "@/lib/date-format";
 import { healthProfileStore } from "@/lib/health-profile";
@@ -25,6 +26,7 @@ import { useLocalStore } from "@/lib/use-store";
 import {
   addDaysToDateString,
   addMonthsToMonthString,
+  BackendMealType,
   BanchanRecommendationItem,
   BanchanRecommendationGenerationStatus,
   BanchanSuitability,
@@ -47,22 +49,26 @@ const SUITABILITY_SEVERITY: Record<BanchanSuitability, number> = {
   recommended: 0,
 };
 
-// diet-day-detail.tsx의 MEAL_TYPE_LABEL/ORDER와 같은 개념 — 그쪽은 diet-history(실제로
-// 먹은 기록)용이고 여긴 banchan-recommendations(AI가 추천한 조합)용이라 타입이 달라
-// export해서 공유하지 않고 각자 둔다. 2026-08-19 정책 변경 이후로 하루에 최대 9개(3끼 x
-// 3개)까지 나올 수 있어서, slotIndex만으로 정렬하면 끼니가 뒤섞여 보인다 — 끼니별로
-// 묶어서 보여준다.
-const MEAL_TYPE_LABEL: Record<string, string> = { breakfast: "아침", lunch: "점심", dinner: "저녁" };
-const MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner"];
+// diet-view.tsx MEAL_SLOT_OPTIONS/diet-day-detail.tsx MEAL_TYPE_LABEL와 같은 개념인데
+// 타입/용도가 각각 달라(이용자 자가보고 vs AI 추천) export해서 공유하지 않고 여기서도
+// 각자 둔다(이 파일의 기존 관례). 2026-08-20 피드백 — 하루 최대 9개(3끼 x 3개)를
+// 소제목만으로 구분해 한 목록에 다 펼쳐두면 스크롤이 길고 지금 어느 끼니를 보고 있는지
+// 한눈에 안 들어온다 — 탭으로 끼니 하나씩만 골라 보여주는 구조로 바꾼다.
+const MEAL_TYPE_TAB_OPTIONS: { value: BackendMealType; label: string }[] = [
+  { value: "breakfast", label: "아침" },
+  { value: "lunch", label: "점심" },
+  { value: "dinner", label: "저녁" },
+];
 
-// mealType이 있는 항목은 끼니 순서 -> slotIndex로, 없는 항목(정책 변경 이전 옛 데이터)은
-// 항상 맨 뒤에 slotIndex 순으로 — 그룹 헤더 렌더링(renderItemGroups)과 짝을 이룬다.
-function sortByMealThenSlot(items: BanchanRecommendationItem[]): BanchanRecommendationItem[] {
-  return [...items].sort((a, b) => {
-    const aOrder = a.mealType ? MEAL_TYPE_ORDER.indexOf(a.mealType) : MEAL_TYPE_ORDER.length;
-    const bOrder = b.mealType ? MEAL_TYPE_ORDER.indexOf(b.mealType) : MEAL_TYPE_ORDER.length;
-    return aOrder - bOrder || a.slotIndex - b.slotIndex;
-  });
+// meal-log-store.ts의 getCurrentMealSlot()과 정확히 같은 시간대 기준(11시 이전=아침,
+// 11~17시=점심, 그 외=저녁)이다 — 그 함수는 화면 표시용 한글 MealSlot을 돌려주는데 여긴
+// 곧바로 BackendMealType이 필요해서, 값만 다시 옮기는 매핑을 하나 더 두는 대신 기준식을
+// 그대로 복제한다(이 파일도 banchan-recommendations 전용 타입/라벨을 따로 두는 관례).
+function defaultMealTypeForNow(): BackendMealType {
+  const hour = new Date().getHours();
+  if (hour < 11) return "breakfast";
+  if (hour < 17) return "lunch";
+  return "dinner";
 }
 
 function worstSuitability(items: BanchanRecommendationItem[]): BanchanSuitability | null {
@@ -150,6 +156,40 @@ function NutrientFact({ nutrient, value }: { nutrient: NutrientKey; value: strin
     <span className={`rounded-full px-2.5 py-1 text-sm font-semibold text-foreground ${tileClass}`}>
       {label} {value}
     </span>
+  );
+}
+
+// 반찬 카드 하나 — 끼니 탭(mealType 있는 데이터)과 옛 방식 플랫 목록(mealType 없는 데이터)
+// 둘 다 같은 카드를 쓰므로 뽑아둔다. 7080 사용자 UX는 은행 ATM처럼 화면 자체가 설명이
+// 되어야 한다는 방침(2026-08-14 피드백) — item.reason(반찬별 문장)을 여기서도 또 보여주면,
+// 위 "왜 이 조합인가요" 카드(today-menu.ts가 이 항목들의 reason을 그대로 모아 보여줌)와
+// 같은 문장이 한 화면에 두 번 나온다. 여기서는 반찬 하나를 식별하는 데 필요한 최소 정보
+// (분류 · 100g당 영양성분)만 보여주고, "왜 이 조합인지"는 그 카드 하나에 맡긴다.
+function DishCard({ item }: { item: BanchanRecommendationItem }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-lg font-bold text-foreground">{item.name}</span>
+        <Badge className={SUITABILITY_CLASS[item.suitability]}>{SUITABILITY_LABEL[item.suitability]}</Badge>
+      </div>
+      <span className="w-fit rounded-full bg-muted px-2.5 py-0.5 text-sm font-medium text-muted-foreground">
+        {item.category}
+      </span>
+      {/* 영양성분은 이 반찬 카드에서 가장 강조해야 할 정보라 요청받아(2026-08-19), 카테고리와
+          한 줄에 뒤섞여 있던 걸 분리하고 NUTRIENT_META 색 칩으로 바꾼다 — 숫자만 늘어놓기보다
+          "무슨 영양소인지"가 색+글자 라벨로 먼저 눈에 들어오게 한다(라벨은 NutrientFact가
+          붙여준다). 100g당 기준이라는 정보는 그대로 유지한다(kcal 칩에만 "/100g"을 남겨 단위
+          기준을 잃지 않게 한다 — 나머지 g/mg 칩은 바로 위 kcal 칩의 "/100g"으로 기준이 이미
+          전달된다). */}
+      <div className="flex flex-wrap gap-1.5">
+        {item.caloriePer100g != null && (
+          <NutrientFact nutrient="calorie" value={`${item.caloriePer100g}kcal/100g`} />
+        )}
+        {item.proteinPer100g != null && <NutrientFact nutrient="protein" value={`${item.proteinPer100g}g`} />}
+        {item.sodiumPer100g != null && <NutrientFact nutrient="sodium" value={`${item.sodiumPer100g}mg`} />}
+        {item.carbsPer100g != null && <NutrientFact nutrient="carbs" value={`${item.carbsPer100g}g`} />}
+      </div>
+    </div>
   );
 }
 
@@ -282,6 +322,20 @@ export function BanchanRecommendationCalendar({
   // 위치에 있든 항상 같은 표시로 바로 알아볼 수 있게 한다.
   const todayStr = todayDateString();
 
+  // "이 날의 반찬" 끼니 탭(아침/점심/저녁) 선택 상태 — 날짜를 바꾸면 기본값(오늘이면 지금
+  // 시간대, 아니면 아침)으로 되돌아간다. selectedDate와 같은 이유(React 문서가 권장하는
+  // "prop이 바뀔 때 state 조정하기" 패턴)로 렌더 중 selected.date를 비교해서 처리한다 —
+  // days는 폴링으로 몇 초마다 새 배열이 되지만 selected.date 자체(문자열)는 안 바뀌므로,
+  // 폴링 중에도 사용자가 골라둔 탭이 유지된다.
+  const [selectedMealType, setSelectedMealType] = useState<BackendMealType>(() =>
+    selected?.date === todayStr ? defaultMealTypeForNow() : "breakfast"
+  );
+  const [mealTypeTrackedDate, setMealTypeTrackedDate] = useState(selected?.date ?? null);
+  if ((selected?.date ?? null) !== mealTypeTrackedDate) {
+    setMealTypeTrackedDate(selected?.date ?? null);
+    setSelectedMealType(selected?.date === todayStr ? defaultMealTypeForNow() : "breakfast");
+  }
+
   // 전날/다음날 버튼이 월 경계를 넘으면(예: 8월 31일 → 9월 1일) selectedDate만 옮기고
   // viewedMonth는 그대로 둬서, 헤더/달력 그리드는 계속 "8월"을 보여주는데 아래 날짜 상세는
   // 9월 데이터를 보여주는 불일치가 있었다(코드 리뷰 지적). 날짜의 월(date.slice(0, 7) —
@@ -301,6 +355,16 @@ export function BanchanRecommendationCalendar({
       recommendation.targetProteinG != null ||
       recommendation.targetSodiumMg != null ||
       recommendation.targetCarbsG != null);
+
+  // 2026-08-19 정책 변경 이후 생성된 데이터만 mealType이 채워진다 — 그 전 옛 데이터(전부
+  // null)는 끼니 구분 자체가 없으니 탭을 보여줄 수 없고, 예전처럼 하루치를 그대로 나열한다
+  // (하위 호환).
+  const usesMealTypes = selected?.items.some((item) => item.mealType != null) ?? false;
+  const mealTypeItems = selected
+    ? selected.items
+        .filter((item) => item.mealType === selectedMealType)
+        .sort((a, b) => a.slotIndex - b.slotIndex)
+    : [];
 
   // 건강 프로필 저장은 이미 생성된 recommendation을 자동으로 다시 계산하지 않는다(2026-08-18
   // 확인 — 백엔드에 무효화/재계산 로직이 없음, 프론트에서 고칠 수 없는 부분). 그래서 로컬에
@@ -584,63 +648,36 @@ export function BanchanRecommendationCalendar({
                 </div>
               )}
 
-              {/* 7080 사용자 UX는 은행 ATM처럼 화면 자체가 설명이 되어야 한다는 방침(2026-08-14
-                  피드백) — item.reason(반찬별 문장)을 여기서도 또 보여주면, 위 "왜 이 조합인가요"
-                  카드(today-menu.ts가 이 항목들의 reason을 그대로 모아 보여줌)와 같은 문장이
-                  한 화면에 두 번 나온다. 여기서는 반찬 하나를 식별하는 데 필요한 최소 정보
-                  (분류 · 100g당 영양성분)만 보여주고, "왜 이 조합인지"는 그 카드 하나에 맡긴다. */}
-              <div className="flex flex-col gap-2">
-                {(() => {
-                  let lastMealType: string | null | undefined = undefined; // 최초 렌더 전 상태
-                  return sortByMealThenSlot(selected.items).map((item) => {
-                    // mealType이 바뀌는 지점에서만 소제목을 넣는다 — 옛 데이터(mealType 전부
-                    // null)는 한 번도 안 바뀌므로 자연히 소제목 없이 예전처럼 쭉 나열된다.
-                    const showHeader = item.mealType != null && item.mealType !== lastMealType;
-                    lastMealType = item.mealType;
-                    return (
-                      <div key={item.banchanId} className="flex flex-col gap-2">
-                        {showHeader && (
-                          <span className="mt-1 text-sm font-bold text-foreground">
-                            {MEAL_TYPE_LABEL[item.mealType!] ?? item.mealType}
-                          </span>
-                        )}
-                        <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-lg font-bold text-foreground">{item.name}</span>
-                            <Badge className={SUITABILITY_CLASS[item.suitability]}>
-                              {SUITABILITY_LABEL[item.suitability]}
-                            </Badge>
-                          </div>
-                          <span className="w-fit rounded-full bg-muted px-2.5 py-0.5 text-sm font-medium text-muted-foreground">
-                            {item.category}
-                          </span>
-                          {/* 영양성분은 이 반찬 카드에서 가장 강조해야 할 정보라 요청받아(2026-08-19),
-                              카테고리와 한 줄에 뒤섞여 있던 걸 분리하고 NUTRIENT_META 색 칩으로
-                              바꾼다 — 숫자만 늘어놓기보다 "무슨 영양소인지"가 색+글자 라벨로 먼저
-                              눈에 들어오게 한다(라벨은 NutrientFact가 붙여준다). 100g당 기준이라는
-                              정보는 그대로 유지한다(kcal 칩에만 "/100g"을 남겨 단위 기준을 잃지
-                              않게 한다 — 나머지 g/mg 칩은 바로 위 kcal 칩의 "/100g"으로 기준이
-                              이미 전달된다). */}
-                          <div className="flex flex-wrap gap-1.5">
-                            {item.caloriePer100g != null && (
-                              <NutrientFact nutrient="calorie" value={`${item.caloriePer100g}kcal/100g`} />
-                            )}
-                            {item.proteinPer100g != null && (
-                              <NutrientFact nutrient="protein" value={`${item.proteinPer100g}g`} />
-                            )}
-                            {item.sodiumPer100g != null && (
-                              <NutrientFact nutrient="sodium" value={`${item.sodiumPer100g}mg`} />
-                            )}
-                            {item.carbsPer100g != null && (
-                              <NutrientFact nutrient="carbs" value={`${item.carbsPer100g}g`} />
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
+              {/* 2026-08-20 피드백 — 하루 9개(3끼 x 3개)를 소제목만으로 구분해 한 목록에 다
+                  펼쳐두면 스크롤이 길고 지금 뭘 보고 있는지 헷갈린다. mealType이 있는
+                  데이터(2026-08-19 정책 변경 이후 생성분)만 탭으로 끼니 하나씩 골라
+                  보여주고, 옛 데이터(mealType 전부 null)는 탭 없이 예전처럼 그대로
+                  나열한다(하위 호환) — 그런 데이터엔 애초에 끼니 구분이 없어 탭을 만들
+                  기준이 없다. */}
+              {usesMealTypes ? (
+                <div className="flex flex-col gap-2">
+                  <ButtonSelectGroup
+                    label="끼니 선택"
+                    options={MEAL_TYPE_TAB_OPTIONS}
+                    value={selectedMealType}
+                    onChange={setSelectedMealType}
+                    columns={3}
+                  />
+                  {mealTypeItems.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">이 끼니엔 배정된 반찬이 없어요.</p>
+                  ) : (
+                    mealTypeItems.map((item) => <DishCard key={item.banchanId} item={item} />)
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {[...selected.items]
+                    .sort((a, b) => a.slotIndex - b.slotIndex)
+                    .map((item) => (
+                      <DishCard key={item.banchanId} item={item} />
+                    ))}
+                </div>
+              )}
 
               {recommendation && recommendation.referenceGuidelines.length > 0 && (
                 <div className="flex flex-col gap-1 border-t border-border pt-2">
