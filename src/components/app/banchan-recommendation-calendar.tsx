@@ -29,6 +29,7 @@ import {
   BanchanRecommendationGenerationStatus,
   BanchanSuitability,
   fetchMonthlyBanchanRecommendation,
+  getRecommendationForDate,
   MonthlyBanchanRecommendation,
   SUITABILITY_CLASS,
   SUITABILITY_DOT_CLASS,
@@ -45,6 +46,24 @@ const SUITABILITY_SEVERITY: Record<BanchanSuitability, number> = {
   caution: 1,
   recommended: 0,
 };
+
+// diet-day-detail.tsx의 MEAL_TYPE_LABEL/ORDER와 같은 개념 — 그쪽은 diet-history(실제로
+// 먹은 기록)용이고 여긴 banchan-recommendations(AI가 추천한 조합)용이라 타입이 달라
+// export해서 공유하지 않고 각자 둔다. 2026-08-19 정책 변경 이후로 하루에 최대 9개(3끼 x
+// 3개)까지 나올 수 있어서, slotIndex만으로 정렬하면 끼니가 뒤섞여 보인다 — 끼니별로
+// 묶어서 보여준다.
+const MEAL_TYPE_LABEL: Record<string, string> = { breakfast: "아침", lunch: "점심", dinner: "저녁" };
+const MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner"];
+
+// mealType이 있는 항목은 끼니 순서 -> slotIndex로, 없는 항목(정책 변경 이전 옛 데이터)은
+// 항상 맨 뒤에 slotIndex 순으로 — 그룹 헤더 렌더링(renderItemGroups)과 짝을 이룬다.
+function sortByMealThenSlot(items: BanchanRecommendationItem[]): BanchanRecommendationItem[] {
+  return [...items].sort((a, b) => {
+    const aOrder = a.mealType ? MEAL_TYPE_ORDER.indexOf(a.mealType) : MEAL_TYPE_ORDER.length;
+    const bOrder = b.mealType ? MEAL_TYPE_ORDER.indexOf(b.mealType) : MEAL_TYPE_ORDER.length;
+    return aOrder - bOrder || a.slotIndex - b.slotIndex;
+  });
+}
 
 function worstSuitability(items: BanchanRecommendationItem[]): BanchanSuitability | null {
   if (items.length === 0) return null;
@@ -67,16 +86,23 @@ type DayCell = {
 function buildDayCells(monthly: MonthlyBanchanRecommendation): DayCell[] {
   const cells: DayCell[] = [];
   for (const week of monthly.weeks) {
-    for (let deliveryNumber = 1; deliveryNumber <= 7; deliveryNumber++) {
-      const date = addDaysToDateString(week.weekStartDate, deliveryNumber - 1);
+    for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+      const date = addDaysToDateString(week.weekStartDate, dayOffset);
+      // 자리 찾기를 여기서 직접(deliveryNumber 위치 계산으로) 하지 않고 getRecommendationForDate에
+      // 맡긴다 — 2026-08-19 정책 변경으로 B2C 매일 배송도 serviceDate+mealType을 채우면서
+      // (grandfood_backend BanchanDeliveryScheduler.schedule_daily_deliveries) 이 파일이 예전에
+      // 쓰던 deliveryNumber 위치 계산이 새 데이터에서는 전부 매칭 실패(deliveryNumber가 항상
+      // null)해 하루 전체가 빈 칸으로 보이는 회귀가 있었다. mealType 없이 부르면 그날 전체
+      // (아침+점심+저녁 합산)를 그대로 돌려줘 이 달력의 "하루 한 칸" 요약과 맞는다.
+      const dateRec = getRecommendationForDate(monthly, date);
       cells.push({
         date,
         dayOfMonth: Number(date.slice(8, 10)),
         inTargetMonth: date.slice(0, 7) === monthly.month,
         weekStartDate: week.weekStartDate,
-        generationStatus: week.generationStatus,
+        generationStatus: dateRec?.status ?? week.generationStatus,
         error: week.error,
-        items: (week.recommendation?.items ?? []).filter((item) => item.deliveryNumber === deliveryNumber),
+        items: dateRec?.items ?? [],
       });
     }
   }
@@ -564,42 +590,56 @@ export function BanchanRecommendationCalendar({
                   한 화면에 두 번 나온다. 여기서는 반찬 하나를 식별하는 데 필요한 최소 정보
                   (분류 · 100g당 영양성분)만 보여주고, "왜 이 조합인지"는 그 카드 하나에 맡긴다. */}
               <div className="flex flex-col gap-2">
-                {[...selected.items]
-                  .sort((a, b) => a.slotIndex - b.slotIndex)
-                  .map((item) => (
-                    <div key={item.banchanId} className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-lg font-bold text-foreground">{item.name}</span>
-                        <Badge className={SUITABILITY_CLASS[item.suitability]}>
-                          {SUITABILITY_LABEL[item.suitability]}
-                        </Badge>
+                {(() => {
+                  let lastMealType: string | null | undefined = undefined; // 최초 렌더 전 상태
+                  return sortByMealThenSlot(selected.items).map((item) => {
+                    // mealType이 바뀌는 지점에서만 소제목을 넣는다 — 옛 데이터(mealType 전부
+                    // null)는 한 번도 안 바뀌므로 자연히 소제목 없이 예전처럼 쭉 나열된다.
+                    const showHeader = item.mealType != null && item.mealType !== lastMealType;
+                    lastMealType = item.mealType;
+                    return (
+                      <div key={item.banchanId} className="flex flex-col gap-2">
+                        {showHeader && (
+                          <span className="mt-1 text-sm font-bold text-foreground">
+                            {MEAL_TYPE_LABEL[item.mealType!] ?? item.mealType}
+                          </span>
+                        )}
+                        <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-lg font-bold text-foreground">{item.name}</span>
+                            <Badge className={SUITABILITY_CLASS[item.suitability]}>
+                              {SUITABILITY_LABEL[item.suitability]}
+                            </Badge>
+                          </div>
+                          <span className="w-fit rounded-full bg-muted px-2.5 py-0.5 text-sm font-medium text-muted-foreground">
+                            {item.category}
+                          </span>
+                          {/* 영양성분은 이 반찬 카드에서 가장 강조해야 할 정보라 요청받아(2026-08-19),
+                              카테고리와 한 줄에 뒤섞여 있던 걸 분리하고 NUTRIENT_META 색 칩으로
+                              바꾼다 — 숫자만 늘어놓기보다 "무슨 영양소인지"가 색+글자 라벨로 먼저
+                              눈에 들어오게 한다(라벨은 NutrientFact가 붙여준다). 100g당 기준이라는
+                              정보는 그대로 유지한다(kcal 칩에만 "/100g"을 남겨 단위 기준을 잃지
+                              않게 한다 — 나머지 g/mg 칩은 바로 위 kcal 칩의 "/100g"으로 기준이
+                              이미 전달된다). */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {item.caloriePer100g != null && (
+                              <NutrientFact nutrient="calorie" value={`${item.caloriePer100g}kcal/100g`} />
+                            )}
+                            {item.proteinPer100g != null && (
+                              <NutrientFact nutrient="protein" value={`${item.proteinPer100g}g`} />
+                            )}
+                            {item.sodiumPer100g != null && (
+                              <NutrientFact nutrient="sodium" value={`${item.sodiumPer100g}mg`} />
+                            )}
+                            {item.carbsPer100g != null && (
+                              <NutrientFact nutrient="carbs" value={`${item.carbsPer100g}g`} />
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <span className="w-fit rounded-full bg-muted px-2.5 py-0.5 text-sm font-medium text-muted-foreground">
-                        {item.category}
-                      </span>
-                      {/* 영양성분은 이 반찬 카드에서 가장 강조해야 할 정보라 요청받아(2026-08-19),
-                          카테고리와 한 줄에 뒤섞여 있던 걸 분리하고 NUTRIENT_META 색 칩으로
-                          바꾼다 — 숫자만 늘어놓기보다 "무슨 영양소인지"가 색+글자 라벨로 먼저
-                          눈에 들어오게 한다(라벨은 NutrientFact가 붙여준다). 100g당 기준이라는
-                          정보는 그대로 유지한다(kcal 칩에만 "/100g"을 남겨 단위 기준을 잃지
-                          않게 한다 — 나머지 g/mg 칩은 바로 위 kcal 칩의 "/100g"으로 기준이
-                          이미 전달된다). */}
-                      <div className="flex flex-wrap gap-1.5">
-                        {item.caloriePer100g != null && (
-                          <NutrientFact nutrient="calorie" value={`${item.caloriePer100g}kcal/100g`} />
-                        )}
-                        {item.proteinPer100g != null && (
-                          <NutrientFact nutrient="protein" value={`${item.proteinPer100g}g`} />
-                        )}
-                        {item.sodiumPer100g != null && (
-                          <NutrientFact nutrient="sodium" value={`${item.sodiumPer100g}mg`} />
-                        )}
-                        {item.carbsPer100g != null && (
-                          <NutrientFact nutrient="carbs" value={`${item.carbsPer100g}g`} />
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  });
+                })()}
               </div>
 
               {recommendation && recommendation.referenceGuidelines.length > 0 && (
