@@ -26,26 +26,34 @@ export function RecipeRecommendationList({
       {recipes.map((recipe) => {
         const content = (
           <>
-            <span className="flex items-center gap-2">
-              {recipe.thumbnailUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- 외부 유튜브 썸네일이라 next/image 최적화 대상이 아님
-                <img
-                  src={recipe.thumbnailUrl}
-                  alt=""
-                  className="h-8 w-8 shrink-0 rounded object-cover"
-                />
-              ) : (
-                <span className="text-lg">🍽️</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                {recipe.thumbnailUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- 외부 유튜브 썸네일이라 next/image 최적화 대상이 아님
+                  <img
+                    src={recipe.thumbnailUrl}
+                    alt=""
+                    className="h-8 w-8 shrink-0 rounded object-cover"
+                  />
+                ) : (
+                  <span className="text-lg">🍽️</span>
+                )}
+                {recipe.name}
+              </span>
+              {recipe.targetNutrientLabel && (
+                <span className="shrink-0 text-xs text-muted-foreground">{recipe.targetNutrientLabel}</span>
               )}
-              {recipe.name}
-            </span>
-            {recipe.targetNutrientLabel && (
-              <span className="shrink-0 text-xs text-muted-foreground">{recipe.targetNutrientLabel}</span>
+            </div>
+            {/* 왜 이 레시피를 추천했는지 — 백엔드가 오늘 배정 반찬의 부족분을 근거로
+                직접 지어주는 문장이다(recipe-recommendations.ts 참고). 이 문장이 없으면
+                영양소 배지만으로는 "그래서 왜"가 안 보인다. */}
+            {recipe.reason && (
+              <p className="text-xs leading-relaxed text-muted-foreground">{recipe.reason}</p>
             )}
           </>
         );
         const className =
-          "flex items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground hover:bg-muted";
+          "flex flex-col gap-1 rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground hover:bg-muted";
         // youtube_url이 null이면(링크 해소 실패 — 유튜브 API 키 미설정 등) 추천 자체는
         // 유효하니 링크 없이 텍스트만 보여준다(recipe-recommendations.ts 타입 주석 참고).
         return recipe.youtubeUrl ? (
