@@ -14,7 +14,7 @@ import {
   NutritionGapItem,
 } from "@/lib/meal-dashboard";
 import { deriveHealthInsight } from "@/lib/health-insights";
-import { getRecipeRecommendations, type RecipeRecommendation } from "@/lib/recipe-recommendations";
+import { fetchRecipeRecommendations, type RecipeRecommendationItem } from "@/lib/recipe-recommendations";
 import { mealLogStore, wardMealLogs } from "@/lib/meal-log-store";
 import { computeTodayNutritionSnapshot } from "@/lib/banchan-recommendation";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
@@ -22,6 +22,7 @@ import { useLocalStore } from "@/lib/use-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
+import { RecipeRecommendationList } from "@/components/app/recipe-recommendation-list";
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
@@ -109,24 +110,25 @@ export function ReportView({
   const insight = deriveHealthInsight(ward, todayNutrition, mealLogs);
 
   // "레시피 · 유튜브 추천"만 실제 비동기 조회다 — 이 페이지의 나머지 데이터는 전부 이미 받은
-  // props에서 동기 계산되지만, 레시피는 "결핍 상태가 정해진 뒤에야 뭘 추천할지 정해지는" 별도의
-  // 조회라서 useEffect로 따로 가져온다 (나중에 진짜 백엔드가 붙어도 이 부분만 로딩 상태가 생긴다).
-  const [recipes, setRecipes] = useState<RecipeRecommendation[] | null>(null);
-  // insight는 매 렌더마다 새로 계산되는 객체라(getWardDetail도 렌더마다 새로 호출됨), 객체 참조 자체를
-  // 의존성으로 넣으면 값이 안 바뀌어도 매번 다시 조회하게 된다. 그래서 "실제로 결과가 달라지는 값"만
-  // 문자열로 뽑아 의존성으로 쓴다.
-  const deficiencyKey = insight.deficiencies.join(",");
-  const leftoverKey = insight.frequentLeftoverIngredients.join(",");
+  // props에서 동기 계산되지만, 레시피는 실제 백엔드 호출(recipe-recommendations.ts)이라
+  // useEffect로 따로 가져온다. 백엔드가 오늘 배정 반찬 + 개인 목표치로 직접 결핍을
+  // 계산하므로(recipe-recommendations.ts 상단 주석 참고), 여기 insight(로컬 계산, 위
+  // 요약/배지 카드에는 계속 씀)를 넘길 필요는 없다.
+  const [recipes, setRecipes] = useState<RecipeRecommendationItem[] | null>(null);
   useEffect(() => {
     let cancelled = false;
-    getRecipeRecommendations(insight).then((result) => {
-      if (!cancelled) setRecipes(result);
+    fetchRecipeRecommendations({
+      mockWardId: ward.id,
+      name: ward.name,
+      age: ward.age,
+      address: ward.address,
+    }).then((result) => {
+      if (!cancelled) setRecipes(result?.items ?? []);
     });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 위 주석 참고: insight 참조 대신 파생 키만 사용
-  }, [insight.wardId, deficiencyKey, leftoverKey]);
+  }, [ward.id, ward.name, ward.age, ward.address]);
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -229,26 +231,7 @@ export function ReportView({
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">레시피 · 유튜브 추천</span>
-          {recipes === null ? (
-            <p className="text-sm text-muted-foreground">추천을 불러오는 중이에요...</p>
-          ) : recipes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">지금은 특별히 추천할 레시피가 없어요.</p>
-          ) : (
-            recipes.map((r) => (
-              <a
-                key={r.id}
-                href={r.youtubeUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground hover:bg-muted"
-              >
-                <span>
-                  {r.thumbnailEmoji} {r.title}
-                </span>
-                <span className="text-xs text-muted-foreground">{r.targetNutrient}</span>
-              </a>
-            ))
-          )}
+          <RecipeRecommendationList recipes={recipes} />
         </div>
 
         <p className="no-print text-center text-xs text-muted-foreground">
