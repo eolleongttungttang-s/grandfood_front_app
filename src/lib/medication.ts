@@ -223,7 +223,7 @@ async function request<T>(
   path: string,
   init: RequestInit,
   timeoutMs: number,
-  실패메시지: string
+  failureMessage: string
 ): Promise<T> {
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
     `${API_BASE_URL}${path}`,
@@ -234,7 +234,7 @@ async function request<T>(
   try {
     const response = await promise;
     if (!response.ok) {
-      throw new Error(`${실패메시지} (status ${response.status})`);
+      throw new Error(`${failureMessage} (status ${response.status})`);
     }
     // 타임아웃을 본문을 다 읽을 때까지 살려둔다 — 헤더는 빨리 왔는데 본문 스트리밍이
     // 멈추는 경우도 커버해야 한다 (rag-chat.ts와 같은 이유).
