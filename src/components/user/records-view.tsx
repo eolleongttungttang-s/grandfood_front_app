@@ -15,11 +15,11 @@ import {
 import { formatMonthDayLabel } from "@/lib/date-format";
 import { computeTodayNutritionSnapshot, getRecommendationForDate, todayDateString } from "@/lib/banchan-recommendation";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
-import { deriveHealthInsight } from "@/lib/health-insights";
-import { getRecipeRecommendations, type RecipeRecommendation } from "@/lib/recipe-recommendations";
+import { fetchRecipeRecommendations, type RecipeRecommendationItem } from "@/lib/recipe-recommendations";
 import { TopBar } from "@/components/app/top-bar";
 import { MealToneSummary } from "@/components/app/meal-tone-summary";
 import { DietDayDetail } from "@/components/app/diet-day-detail";
+import { RecipeRecommendationList } from "@/components/app/recipe-recommendation-list";
 import { NutrientMeter } from "@/components/app/nutrient-meter";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -110,23 +110,25 @@ export function RecordsView({
   const todayGenerationStatus = getRecommendationForDate(banchanRecommendation.monthly, todayDateString())?.status;
   const todayNutrition = computeTodayNutritionSnapshot(banchanRecommendation.monthly);
 
-  // 레시피 추천 — 오늘 영양성분 분석과 같은 목표치 기준으로 결핍을 판단한다(guardian/
-  // report-view.tsx와 공유하는 health-insights.ts). 이 화면은 잔반과 무관하게 건강정보만
-  // 보고 추천해야 해서(2026-08-18 요청) recentMealLogs를 빈 배열로 넘긴다 — 그러면
-  // frequentLeftoverIngredients도 자연히 빈 배열이 되어 잔반 기반 우선순위가 안 걸린다.
-  const recipeInsight = deriveHealthInsight(ward, todayNutrition, []);
-  const [recipes, setRecipes] = useState<RecipeRecommendation[] | null>(null);
-  const deficiencyKey = recipeInsight.deficiencies.join(",");
+  // 레시피 추천 — 이제 백엔드가 오늘 배정 반찬 + 개인 목표치로 직접 결핍을 계산해서
+  // 근거로 삼는다(recipe-recommendations.ts 상단 주석 참고). 예전엔 여기서
+  // deriveHealthInsight로 결핍을 먼저 계산해 그 결과를 넘겼는데, 이제 그 판단 자체가
+  // 백엔드 몫이라 더 필요 없다.
+  const [recipes, setRecipes] = useState<RecipeRecommendationItem[] | null>(null);
   useEffect(() => {
     let cancelled = false;
-    getRecipeRecommendations(recipeInsight).then((result) => {
-      if (!cancelled) setRecipes(result);
+    fetchRecipeRecommendations({
+      mockWardId: ward.id,
+      name: ward.name,
+      age: ward.age,
+      address: ward.address,
+    }).then((result) => {
+      if (!cancelled) setRecipes(result?.items ?? []);
     });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deficiencyKey만 파생 의존성으로 사용
-  }, [ward.id, deficiencyKey]);
+  }, [ward.id, ward.name, ward.age, ward.address]);
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -274,29 +276,10 @@ export function RecordsView({
           )}
         </div>
 
-        {todayNutrition.hasData && !recipeInsight.deficiencies.includes("정상") && (
+        {todayNutrition.hasData && (
           <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
             <span className="text-xs font-bold text-foreground">레시피 추천</span>
-            {recipes === null ? (
-              <p className="text-sm text-muted-foreground">추천을 불러오는 중이에요...</p>
-            ) : recipes.length === 0 ? (
-              <p className="text-sm text-muted-foreground">지금은 특별히 추천할 레시피가 없어요.</p>
-            ) : (
-              recipes.map((r) => (
-                <a
-                  key={r.id}
-                  href={r.youtubeUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground hover:bg-muted"
-                >
-                  <span>
-                    {r.thumbnailEmoji} {r.title}
-                  </span>
-                  <span className="text-xs text-muted-foreground">{r.targetNutrient}</span>
-                </a>
-              ))
-            )}
+            <RecipeRecommendationList recipes={recipes} />
           </div>
         )}
 
