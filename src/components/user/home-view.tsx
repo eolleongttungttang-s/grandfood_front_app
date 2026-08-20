@@ -32,7 +32,13 @@ import { DislikeToggleButton } from "@/components/app/dislike-toggle-button";
 import { LeftoverDishList, LeftoverOverallTile } from "@/components/app/leftover-result";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { getNutritionTip } from "@/lib/nutrition-tip";
-import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
+import {
+  dislikesStore,
+  fetchDislikedFoodNames,
+  syncDislikedFoodsToBackend,
+  toggleDislike,
+  wardDislikes,
+} from "@/lib/dislikes-store";
 import { useLocalStore } from "@/lib/use-store";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 
@@ -59,6 +65,29 @@ export function HomeView({
   detail: WardDetail;
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
+  // dislikesStore(로컬 id 목록)만으로는 이 브라우저에서 누른 기록만 보인다 — 백엔드에
+  // 이미 저장돼 있는 기피 목록(다른 기기에서 눌렀거나, 이전 세션에 눌러둔 것)은 이름
+  // 기준이라 별도로 받아와서 이름으로 비교한다(dislikes-store.ts 상단 주석 참고).
+  // todayMenu.items에 의존하지 않고 대상자 식별 정보만으로 한 번 받아온다 — todayMenu는
+  // 매 렌더 다시 계산되는 값이라 의존성에 넣으면 불필요하게 반복 호출된다.
+  const [backendDislikedNames, setBackendDislikedNames] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchDislikedFoodNames({ mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address }).then(
+      (names) => {
+        if (!cancelled && names) setBackendDislikedNames(new Set(names));
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [ward.id, ward.name, ward.age, ward.address]);
+  // 로컬(이 브라우저에서 방금 누른 것, id 기준) + 백엔드(이름 기준) 둘 중 하나라도
+  // 걸리면 기피로 본다 — 토글 직후엔 로컬이 먼저 반영되고(체감 즉시 반응), 다른
+  // 기기/이전 세션에서 표시해둔 건 백엔드 값으로 잡힌다.
+  function isDisliked(item: { id: string; name: string }): boolean {
+    return dislikes.includes(item.id) || (backendDislikedNames?.has(item.name) ?? false);
+  }
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   // diet-view.tsx와 같은 이유로 신규 회원(AI 반찬 추천을 한 번도 받은 적 없음)인지 본다 —
   // 여기 있는 카드들도 대부분 오늘의 추천 반찬 조합(목업)에서 파생된 값이라, 아직 실제 추천을
@@ -130,7 +159,7 @@ export function HomeView({
   const recommendedComboSpeech = todayMenu.isGenerating
     ? TODAY_MENU_GENERATING_MESSAGE
     : `오늘의 추천 반찬 조합이에요. ${partnerStore?.name ?? "담당 반찬가게"}에서 준비했어요. ${todayMenu.items
-        .map((item) => (dislikes.includes(item.id) ? `${item.name}, 기피 표시됨` : item.name))
+        .map((item) => (isDisliked(item) ? `${item.name}, 기피 표시됨` : item.name))
         .join(", ")}입니다.`;
   const deliverySpeech = `오늘 점심 배송이 ${detail.deliveryEta}에 예정되어 있어요.`;
   // 영양 팁 문장이 카드 폭에 거의 딱 맞게 들어가 있어서, SpeakableCard의 기본(우상단 오버레이)
@@ -378,7 +407,7 @@ export function HomeView({
               <p className="text-sm text-muted-foreground">이 날은 배정된 반찬이 없어요.</p>
             ) : (
               todayMenu.items.map((item) => {
-                const disliked = dislikes.includes(item.id);
+                const disliked = isDisliked(item);
                 return (
                   <div
                     key={item.id}
@@ -407,7 +436,37 @@ export function HomeView({
                     </div>
                     <DislikeToggleButton
                       disliked={disliked}
-                      onClick={() => toggleDislike(ward.id, item.id)}
+                      onClick={async () => {
+                        toggleDislike(ward.id, item.id);
+                        // 다음 AI 반찬 추천부터 이 반찬을 caution 이하로 낮춰 판단하도록
+                        // 백엔드에도 반영한다(dislikes-store.ts 상단 주석 참고). PUT은
+                        // "요청값이 곧 전체 목록"이라, 지금까지 알고 있는 전체 기피
+                        // 이름 집합(backendDislikedNames)에 이번 토글만 반영해서
+                        // 통째로 보낸다 — 오늘 메뉴에 없는(다른 날 기피 표시한) 항목도
+                        // 같이 보존된다.
+                        //
+                        // backendDislikedNames가 아직 null이면(화면 진입 직후 GET이
+                        // 아직 안 끝났는데 사용자가 빠르게 토글을 누른 경우) prev ?? []로
+                        // 빈 Set을 기준으로 삼으면 안 된다 — "아직 못 받아옴"과 "받아왔는데
+                        // 원래 비어있었음"을 못 구분해서, 이전에 저장해둔 다른 기피 항목이
+                        // 이번 PUT(전체 교체)으로 통째로 지워지는 유실이 생긴다. 그 경우
+                        // 보내기 전에 한 번 더 직접 받아와 기준으로 삼는다. 또한 setState
+                        // updater 안에서 네트워크 요청을 하면 안 되므로(React가 updater를
+                        // 여러 번 호출할 수 있음 — 순수해야 함) 별도로 계산한다.
+                        const identity = {
+                          mockWardId: ward.id,
+                          name: ward.name,
+                          age: ward.age,
+                          address: ward.address,
+                        };
+                        const baseNames =
+                          backendDislikedNames ?? new Set((await fetchDislikedFoodNames(identity)) ?? []);
+                        const next = new Set(baseNames);
+                        if (disliked) next.delete(item.name);
+                        else next.add(item.name);
+                        setBackendDislikedNames(next);
+                        syncDislikedFoodsToBackend(identity, [...next]);
+                      }}
                     />
                   </div>
                 );
