@@ -10,6 +10,7 @@
 // 분기를 따로 하면 하나만 고치고 잊어버리기 쉽다.
 
 import {
+  BackendMealType,
   BanchanSuitability,
   getRecommendationForDate,
   MonthlyBanchanRecommendation,
@@ -59,11 +60,16 @@ function sum(values: (number | null)[]): number {
 export const TODAY_MENU_GENERATING_MESSAGE =
   "AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.";
 
+// mealType을 넘기면 오늘 그 끼니(아침/점심/저녁)의 반찬만 돌려준다 — 2026-08-19 정책
+// 변경으로 B2C 매일 배송도 끼니별로 다른 반찬을 받으므로(grandfood_backend
+// BanchanDeliveryScheduler.schedule_daily_deliveries 참고) 이제 실제로 의미가 있다.
+// 안 넘기면(undefined) 예전처럼 그날 전체를 돌려준다.
 export function resolveTodayMenu(
   combo: DishCombo,
-  monthly: MonthlyBanchanRecommendation | null
+  monthly: MonthlyBanchanRecommendation | null,
+  mealType?: BackendMealType
 ): TodayMenu {
-  const real = getRecommendationForDate(monthly, todayDateString());
+  const real = getRecommendationForDate(monthly, todayDateString(), mealType);
   // items.length > 0을 조건에 넣지 않는다 — 생성이 끝났는데(done) 오늘 몫이 정말 0개인
   // 극히 드문 경우까지 목업으로 폴백하면, AI 반찬 추천 달력(이 날은 배정된 반찬이
   // 없어요)과 또 서로 다른 답을 보여주게 된다. done이면 items가 비어 있어도 그대로
