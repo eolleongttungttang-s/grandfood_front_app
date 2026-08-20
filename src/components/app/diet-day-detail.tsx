@@ -1,5 +1,6 @@
 import { DietHistoryEntry } from "@/lib/meal-dashboard";
 import { formatMonthDayLabel } from "@/lib/date-format";
+import { LeftoverDishList } from "@/components/app/leftover-result";
 import type { MealTone } from "@/lib/wards";
 
 // diet-history의 meal_type은 백엔드가 영어로 내려준다(grandfood_backend
@@ -58,14 +59,13 @@ export function DietDayDetail({
                   </span>
                 </div>
                 {entry.dishes.length > 0 && (
-                  <div className="flex flex-col gap-0.5">
-                    {entry.dishes.map((dish, di) => (
-                      <div key={di} className="flex justify-between text-sm">
-                        <span className="text-foreground">{dish.banchanName ?? "반찬"}</span>
-                        <span className="text-muted-foreground">{Math.round(dish.leftoverPct)}% 남음</span>
-                      </div>
-                    ))}
-                  </div>
+                  <LeftoverDishList
+                    dishes={entry.dishes.map((dish, di) => ({
+                      key: `${dish.banchanId}-${di}`,
+                      name: dish.banchanName ?? "반찬",
+                      leftoverPercent: Math.round(dish.leftoverPct),
+                    }))}
+                  />
                 )}
               </div>
             ))}

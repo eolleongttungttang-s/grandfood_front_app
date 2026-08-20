@@ -17,12 +17,19 @@ import { deriveMealTones, fetchElderDietHistory } from "@/lib/meal-dashboard";
 import { NotificationItem, fetchElderNotifications, notificationBadgeClass } from "@/lib/notifications";
 import { SUITABILITY_CLASS, SUITABILITY_LABEL } from "@/lib/banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
-import { getCurrentMealSlot, mealLogStore, submitMealLogPhotos, wardMealLogs } from "@/lib/meal-log-store";
+import {
+  applyLeftoverAnalysisResult,
+  getCurrentMealSlot,
+  mealLogStore,
+  submitMealLogPhotos,
+  wardMealLogs,
+} from "@/lib/meal-log-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 import { SpeakableCard } from "@/components/app/speakable-card";
 import { DislikeToggleButton } from "@/components/app/dislike-toggle-button";
+import { LeftoverDishList, LeftoverOverallTile } from "@/components/app/leftover-result";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { getNutritionTip } from "@/lib/nutrition-tip";
 import { dislikesStore, toggleDislike, wardDislikes } from "@/lib/dislikes-store";
@@ -154,16 +161,74 @@ export function HomeView({
   const afterPreview = useObjectUrl(afterPhoto);
   const mealLogs = wardMealLogs(useLocalStore(mealLogStore), ward.id);
   const latestLog = mealLogs[mealLogs.length - 1];
-  const mealCheckinSpeech = latestLog
-    ? `식사 전에 한 장, 식사 후에 한 장, 잊지 말고 찍어주세요. 최근 분석 결과, 전체 잔반율은 ${latestLog.leftoverRatePercent}%입니다.`
-    : "식사 전에 한 장, 식사 후에 한 장, 잊지 말고 찍어주세요.";
+
+  // 백엔드가 사진 업로드 응답으로는 항상 leftoverRatePercent=0/compartments=[]만 돌려주고
+  // (meal-log-store.ts submitMealLogPhotos 주석 참고 — 실제 GPU 분석은 background_tasks로
+  // 뒤로 미뤄짐), 반찬별 결과는 분석이 끝난 뒤 diet-history에만 반영된다. "잔반 분석하기"를
+  // 누른 이 화면에서 바로 결과를 보여주려고, 방금 올린 mealId를 diet-history에서 짧게
+  // 폴링해 찾는다 — 찾으면 로컬 기록을 실제 값으로 갱신하고, POLL_MAX_ATTEMPTS 안에 못
+  // 찾으면(분석이 유난히 오래 걸리거나 실패) 포기하고 "기록" 탭 안내로 넘긴다.
+  const [pendingAnalysisMealId, setPendingAnalysisMealId] = useState<string | null>(null);
+  const [analysisTimedOut, setAnalysisTimedOut] = useState(false);
+  const POLL_INTERVAL_MS = 4000;
+  const POLL_MAX_ATTEMPTS = 8; // 최대 약 32초
+
+  useEffect(() => {
+    if (!pendingAnalysisMealId) return;
+    const mealId = pendingAnalysisMealId;
+    let cancelled = false;
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout>;
+
+    async function poll() {
+      attempts += 1;
+      const items = await fetchElderDietHistory(
+        { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
+        1
+      );
+      if (cancelled) return;
+      const match = items?.find((item) => item.mealId === mealId);
+      if (match && match.dishes.length > 0) {
+        applyLeftoverAnalysisResult(
+          ward.id,
+          mealId,
+          match.dishes.map((d) => ({
+            dishId: d.banchanId,
+            name: d.banchanName ?? "반찬",
+            leftoverPercent: Math.round(d.leftoverPct),
+          }))
+        );
+        setPendingAnalysisMealId(null);
+        return;
+      }
+      if (attempts >= POLL_MAX_ATTEMPTS) {
+        setAnalysisTimedOut(true);
+        setPendingAnalysisMealId(null);
+        return;
+      }
+      timer = setTimeout(poll, POLL_INTERVAL_MS);
+    }
+
+    timer = setTimeout(poll, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [pendingAnalysisMealId, ward.id, ward.name, ward.age, ward.address]);
+
+  const mealCheckinSpeech = pendingAnalysisMealId
+    ? "식사 전에 한 장, 식사 후에 한 장, 잊지 말고 찍어주세요. 지금 반찬별 잔반을 분석하고 있어요."
+    : latestLog
+      ? `식사 전에 한 장, 식사 후에 한 장, 잊지 말고 찍어주세요. 최근 분석 결과, 전체 잔반율은 ${latestLog.leftoverRatePercent}%입니다.`
+      : "식사 전에 한 장, 식사 후에 한 장, 잊지 말고 찍어주세요.";
 
   async function analyzeLeftovers() {
     if (!beforePhoto || !afterPhoto) return;
     setSubmitting(true);
     setUploadError(null);
+    setAnalysisTimedOut(false);
     try {
-      await submitMealLogPhotos({
+      const entry = await submitMealLogPhotos({
         wardId: ward.id,
         wardName: ward.name,
         wardAge: ward.age,
@@ -175,6 +240,7 @@ export function HomeView({
       });
       setBeforePhoto(null);
       setAfterPhoto(null);
+      setPendingAnalysisMealId(entry.id);
     } catch (err) {
       // fetch() 자체가 실패하면(서버 연결 불가 등) 브라우저가 TypeError("Failed to fetch")를 던지는데,
       // 그 영어 메시지를 그대로 보여주는 대신 사용자에게 이해되는 한글 메시지로 바꾼다.
@@ -411,16 +477,26 @@ export function HomeView({
             </Button>
             {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
             {latestLog && (
-              <div className="flex flex-col gap-1 pt-1">
-                <span className="text-xs font-semibold text-muted-foreground">
-                  최근 분석 결과 · 전체 잔반율 {latestLog.leftoverRatePercent}%
-                </span>
-                {latestLog.compartments.map((c) => (
-                  <div key={c.dishId} className="flex justify-between text-sm">
-                    <span className="text-foreground">{c.name}</span>
-                    <span className="text-muted-foreground">{c.leftoverPercent}% 남음</span>
-                  </div>
-                ))}
+              <div className="flex flex-col gap-2 pt-1">
+                {pendingAnalysisMealId === latestLog.id ? (
+                  <span className="text-sm text-muted-foreground">반찬별 잔반을 분석하고 있어요...</span>
+                ) : latestLog.compartments.length > 0 ? (
+                  <>
+                    <span className="text-xs font-semibold text-muted-foreground">최근 분석 결과</span>
+                    <LeftoverOverallTile percent={latestLog.leftoverRatePercent} />
+                    <LeftoverDishList
+                      dishes={latestLog.compartments.map((c, i) => ({
+                        key: `${c.dishId}-${i}`,
+                        name: c.name,
+                        leftoverPercent: c.leftoverPercent,
+                      }))}
+                    />
+                  </>
+                ) : analysisTimedOut ? (
+                  <span className="text-sm text-muted-foreground">
+                    분석에 시간이 걸리고 있어요. 잠시 후 기록 탭에서 확인해 주세요.
+                  </span>
+                ) : null}
               </div>
             )}
           </div>
