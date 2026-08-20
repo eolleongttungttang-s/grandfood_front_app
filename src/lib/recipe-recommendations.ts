@@ -99,6 +99,14 @@ async function fetchTodayFromHistory(identity: WardIdentity): Promise<RecipeReco
   const todays = data.items.filter((item) => item.recommended_at?.slice(0, 10) === today);
   if (todays.length === 0) return null;
 
+  // 유튜브 API 키가 나중에(오늘 이미 한 번 생성된 뒤에) 설정된 경우, 캐시된 오늘치가
+  // 전부 링크 없음(youtube_url/thumbnail_url 다 null)일 수 있다 — 그걸 그대로 "오늘 이미
+  // 있음"으로 재사용하면 새 키로 다시 생성해도 절대 실제 링크를 못 받아온다(캐시 미스로
+  // 취급 안 하니 POST가 다시 안 불림). 항목이 하나라도 링크를 갖고 있으면 정상 캐시로
+  // 보고, 전부 없을 때만 "아직 제대로 안 된 것"으로 판단해 캐시를 안 쓰고 새로 생성한다.
+  const allLinksMissing = todays.every((item) => !item.youtube_url && !item.thumbnail_url);
+  if (allLinksMissing) return null;
+
   return {
     items: todays.map((item) => ({
       recipeId: item.recipe_id,
