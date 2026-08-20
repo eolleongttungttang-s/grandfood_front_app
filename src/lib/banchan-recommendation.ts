@@ -18,6 +18,10 @@ const BACKEND_SESSION_REQUIRED_MESSAGE =
 
 export type BanchanSuitability = "recommended" | "caution" | "avoid";
 
+/** 백엔드 health/schemas.py의 meal_type과 동일 — diet-day-detail.tsx의 MEAL_TYPE_LABEL과
+ *  같은 개념(표시용 한글 매핑은 그쪽/MEAL_TYPE_KO_TO_EN 참고). */
+export type BackendMealType = "breakfast" | "lunch" | "dinner";
+
 export type BanchanRecommendationItem = {
   banchanId: string;
   name: string;
@@ -27,12 +31,19 @@ export type BanchanRecommendationItem = {
   proteinPer100g: number | null;
   sodiumPer100g: number | null;
   carbsPer100g: number | null;
-  /** 그 주의 몇 번째 배송인지 (daily 고정이라 1~7) */
-  deliveryNumber: number;
-  /** 그 배송 안에서 몇 번째 반찬인지 */
+  /** 구 B2C 회차 기반(옛 데이터)에서만 채워진다 — 지금은 항상 null(delivery_number 대신
+   *  serviceDate/mealType을 씀). getRecommendationForDate가 옛 데이터 호환용으로만 쓴다. */
+  deliveryNumber: number | null;
+  /** 그 배송/끼니 안에서 몇 번째 반찬인지 */
   slotIndex: number;
   suitability: BanchanSuitability;
   reason: string | null;
+  /** 시설 대상자와, 2026-08-19 정책 변경 이후의 B2C 매일 배송 둘 다 채운다 — 구 B2C
+   *  회차 기반(delivery_number만 있던 옛 데이터)만 null. */
+  serviceDate: string | null;
+  /** 시설 대상자와 2026-08-19 이후 B2C 매일 배송 둘 다 채운다 — 그 전에 생성된 옛 B2C
+   *  일일 배송 데이터(serviceDate는 있지만 끼니 구분이 없던 상태)는 null. */
+  mealType: BackendMealType | null;
 };
 
 export type ReferenceGuideline = { title: string; chunk: string };
@@ -146,9 +157,20 @@ export type DateRecommendation = {
   targetCarbsG: number | null;
 };
 
+// mealType을 넘기면 그 끼니(아침/점심/저녁) 반찬만 골라준다 — 2026-08-19 정책 변경으로
+// 시설 대상자뿐 아니라 B2C 매일 배송도 이제 serviceDate+mealType을 채우기 때문에
+// (grandfood_backend BanchanDeliveryScheduler.schedule_daily_deliveries 참고) 가능해졌다.
+// 안 넘기면(undefined) 그날 전체(모든 끼니 합산) — computeNutritionSnapshotForDate처럼
+// "하루 총량"이 필요한 호출부용이다.
+//
+// 자리 찾기는 serviceDate로 먼저 하고, 그 주에 serviceDate가 채워진 항목이 하나도 없을
+// 때만(옛 B2C 회차 기반 데이터) delivery_number의 "이번 주 몇 번째 배송인지" 위치 계산으로
+// 폴백한다 — serviceDate 항목이 있는데 우연히 그 날짜에 없는 경우(예: 아직 생성 안 된 끼니)
+// 까지 옛 로직으로 새지 않도록, "그 주에 serviceDate 데이터가 있는지"로 방식 자체를 가른다.
 export function getRecommendationForDate(
   monthly: MonthlyBanchanRecommendation | null,
-  dateStr: string
+  dateStr: string,
+  mealType?: BackendMealType
 ): DateRecommendation | null {
   if (!monthly) return null;
   for (const week of monthly.weeks) {
@@ -156,9 +178,20 @@ export function getRecommendationForDate(
       (Date.parse(`${dateStr}T00:00:00Z`) - Date.parse(`${week.weekStartDate}T00:00:00Z`)) / 86_400_000
     ) + 1;
     if (deliveryNumber < 1 || deliveryNumber > 7) continue;
+
+    const allItems = week.recommendation?.items ?? [];
+    const usesServiceDates = allItems.some((item) => item.serviceDate != null);
+    const items = usesServiceDates
+      ? allItems.filter(
+          (item) =>
+            item.serviceDate === dateStr &&
+            (mealType == null || item.mealType == null || item.mealType === mealType)
+        )
+      : allItems.filter((item) => item.deliveryNumber === deliveryNumber); // 옛 회차 기반 데이터
+
     return {
       status: week.generationStatus,
-      items: (week.recommendation?.items ?? []).filter((item) => item.deliveryNumber === deliveryNumber),
+      items,
       targetCalorieKcal: week.recommendation?.targetCalorieKcal ?? null,
       targetProteinG: week.recommendation?.targetProteinG ?? null,
       targetSodiumMg: week.recommendation?.targetSodiumMg ?? null,
@@ -184,10 +217,12 @@ function parseRecommendation(data: any): BanchanRecommendation {
       proteinPer100g: item.protein_per_100g ?? null,
       sodiumPer100g: item.sodium_per_100g ?? null,
       carbsPer100g: item.carbs_per_100g ?? null,
-      deliveryNumber: item.delivery_number,
+      deliveryNumber: item.delivery_number ?? null,
       slotIndex: item.slot_index,
       suitability: item.suitability,
       reason: item.reason ?? null,
+      serviceDate: item.service_date ?? null,
+      mealType: item.meal_type ?? null,
     })),
     targetCalorieKcal: data.target_calorie_kcal ?? null,
     targetProteinG: data.target_protein_g ?? null,

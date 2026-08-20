@@ -6,6 +6,7 @@ import { Stethoscope } from "lucide-react";
 
 import { Ward, WardDetail } from "@/lib/wards";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
+import { BackendMealType } from "@/lib/banchan-recommendation";
 import { getCurrentMealSlot, MealSlot } from "@/lib/meal-log-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,14 @@ const MEAL_SLOT_OPTIONS: { value: MealSlot; label: string }[] = [
   { value: "점심", label: "점심" },
   { value: "저녁", label: "저녁" },
 ];
+
+// meal-log-store.ts의 MealSlot("아침"/"점심"/"저녁")을 백엔드 meal_type("breakfast"/
+// "lunch"/"dinner")으로 — diet-day-detail.tsx의 MEAL_TYPE_LABEL과 반대 방향 매핑.
+const MEAL_SLOT_TO_BACKEND_MEAL_TYPE: Record<MealSlot, BackendMealType> = {
+  아침: "breakfast",
+  점심: "lunch",
+  저녁: "dinner",
+};
 
 export function DietView({
   ward,
@@ -41,24 +50,29 @@ export function DietView({
     wardAddress: ward.address,
   };
   const banchanRecommendation = useMonthlyBanchanRecommendation(banchanIdentity);
-  // "오늘의 추천 반찬 조합"/"오늘 메뉴 구성"/"왜 이 조합인가요" 세 카드가 오늘 실제 AI 추천이
-  // 있으면 그걸 쓰고, 없으면 목업으로 자연스럽게 폴백한다 — 실제 추천이 생긴 뒤에도 이 카드들이
-  // 계속 목업만 보여줘서 바로 아래 AI 반찬 추천 달력과 서로 다른 답을 보여주던 문제(2026-08-13
-  // 피드백, "카드 내용이 안 맞는다")를 여기서 고친다.
-  const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly);
 
   // "왜 이 조합인가요"/"질환·알레르기·복약" 둘 다 기본은 접어두고, 필요할 때만 펼쳐서
   // 본다 — 화면 자체가 설명이 되어야 한다는 방침(2026-08-14 피드백)이라, 한 화면에 정보를
   // 다 펼쳐놓기보다 필요한 사람만 더 눌러보게 한다.
   const [reasonsExpanded, setReasonsExpanded] = useState(false);
   const [conditionsExpanded, setConditionsExpanded] = useState(false);
-  // UI 스텁(2026-08-19) — 스탠다드 플랜이 아침·점심·저녁을 다 배송하게 되면서 끼니를
-  // 골라볼 수 있어야 한다는 요청. 제목("오늘의 O 추천")은 고른 끼니에 맞춰 바로 바뀌지만,
-  // 그 아래 실제 반찬 목록/영양성분은 아직 안 바뀐다 — 백엔드의 AI 반찬 추천이
-  // B2C(delivery_number 기반) 대상자에겐 끼니 구분 없이 하루 전체를 한 조합으로 묶어
-  // 내려준다(health/models.py — meal_type은 시설 대상자 전용, B2C는 항상 NULL). 실제로
-  // 끼니별 다른 반찬을 보여주려면 백엔드가 B2C 경로에도 meal_type을 채워 내려줘야 한다.
+  // 끼니 선택 탭(2026-08-19 도입) — 스탠다드 플랜이 아침·점심·저녁을 각각 배송하게 되면서
+  // 생겼다. 처음엔 제목만 끼니에 맞춰 바뀌고 그 아래 반찬 목록은 하루 전체를 그대로
+  // 보여주는 "UI 스텁"이었는데(백엔드가 B2C 항목에 meal_type을 안 채워줬음), 백엔드가
+  // B2C 매일 배송도 시설 대상자처럼 service_date+meal_type을 채우도록 바뀌면서
+  // (grandfood_backend BanchanDeliveryScheduler.schedule_daily_deliveries) 실제로
+  // 골라 보이게 됐다 — MEAL_SLOT_TO_BACKEND_MEAL_TYPE으로 변환해 resolveTodayMenu에 넘긴다.
   const [mealSlot, setMealSlot] = useState<MealSlot>(getCurrentMealSlot());
+
+  // "오늘의 O 추천 반찬 조합"/"왜 이 조합인가요" 카드가 오늘 실제 AI 추천이 있으면 그걸
+  // 쓰고, 없으면 목업으로 자연스럽게 폴백한다 — 실제 추천이 생긴 뒤에도 이 카드들이 계속
+  // 목업만 보여줘서 바로 아래 AI 반찬 추천 달력과 서로 다른 답을 보여주던 문제(2026-08-13
+  // 피드백, "카드 내용이 안 맞는다")를 여기서 고친다.
+  const todayMenu = resolveTodayMenu(
+    detail.recommendedCombo,
+    banchanRecommendation.monthly,
+    MEAL_SLOT_TO_BACKEND_MEAL_TYPE[mealSlot]
+  );
 
   // 카드별 TTS(SpeakableCard)가 읽어줄 문장 — 화면에 보이는 값 그대로를 문장으로 풀어 쓴다.
   // isGenerating일 땐 totalSodiumMg 등이 전부 0/items가 빈 배열이라, 그대로 문장을 지으면
