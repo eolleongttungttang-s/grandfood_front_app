@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Mic, Send } from "lucide-react";
+import { Mic, Send, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Ward } from "@/lib/wards";
@@ -134,16 +134,27 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
     <div className="flex flex-1 flex-col gap-4 pb-6">
       <TopBar title="AI 도우미" subtitle="건강 질문도, 편한 이야기도 물어보세요" />
 
-      <div className="flex flex-col gap-2.5 px-5">
+      <div className="flex flex-col gap-3 px-5">
+        {/* 대화가 비어있을 때만 보이는 첫인사 — 채팅창이 텅 비어 있으면 뭘 물어봐야 할지
+            막막해 보인다는 인상을 준다(디자인 피드백, 2026-08-20). 여기 아이콘(Sparkles)은
+            "AI 반찬 추천"류 라벨에서 이미 쓰는 것과 같은 장식용 짝꿍이라, 글자 라벨을
+            아이콘으로 대체하는 게 아니다 — banchan-recommendation-calendar.tsx 피드백
+            ("아이콘보다 글자 라벨이 명확하다")은 아이콘 *하나만* 두고 의미를 읽어야 하는
+            경우 얘기라 여기와는 다르다. */}
         {messages.length === 0 && (
-          <p className="rounded-xl bg-muted px-4 py-3 text-sm text-muted-foreground">
-            {name}님, 식단이나 건강, 오늘 하루에 대해 편하게 물어보세요.
-          </p>
+          <div className="flex flex-col items-center gap-2 rounded-2xl bg-sidebar px-5 py-6 text-center text-sidebar-foreground">
+            <Sparkles className="h-6 w-6 text-sidebar-primary" />
+            <p className="text-base leading-relaxed">
+              {name}님, 식단이나 건강, 오늘 하루에 대해
+              <br />
+              편하게 물어보세요.
+            </p>
+          </div>
         )}
         {messages.map((m) =>
           m.from === "본인" ? (
             <div key={m.id} className="flex justify-end">
-              <div className="max-w-[80%] rounded-2xl bg-primary px-3.5 py-2 text-sm whitespace-pre-line text-primary-foreground">
+              <div className="max-w-[80%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-base whitespace-pre-line text-primary-foreground shadow-sm">
                 {m.text}
               </div>
             </div>
@@ -153,27 +164,35 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
             // 전체를 탭 영역으로)을 그대로 따른다. 라벨("AI 도우미")과 답변 사이에 아이콘이
             // 끼어들지 않도록, 아이콘 뒤에 라벨을 인라인으로 붙이고 답변은 그 아래 새 줄에
             // 별도 블록으로 둔다(variant="leading"은 children 맨 앞에 아이콘 하나만 붙임).
+            // 배경을 bg-muted 대신 이 앱의 다른 카드들과 같은 bg-card+테두리+그림자로
+            // 바꿔서, 채팅창만 동떨어진 기본 UI처럼 보이지 않고 나머지 화면과 톤이
+            // 맞도록 했다(디자인 피드백, 2026-08-20).
             <div key={m.id} className="flex justify-start">
               <SpeakableCard
                 id={m.id}
                 text={m.text}
                 variant="leading"
-                className="max-w-[80%] rounded-2xl bg-muted px-3.5 py-2 text-sm text-foreground"
+                className="max-w-[80%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 text-base text-foreground shadow-sm"
               >
-                <span className="text-xs font-semibold text-accent">{m.from}</span>
-                <div className="mt-0.5 whitespace-pre-line">{m.text}</div>
+                <span className="text-sm font-bold text-accent">{m.from}</span>
+                <div className="mt-1 whitespace-pre-line">{m.text}</div>
               </SpeakableCard>
             </div>
           )
         )}
         {sending && (
           <div className="flex justify-start">
-            <div className="max-w-[80%] rounded-2xl bg-muted px-3.5 py-2 text-sm text-muted-foreground">
-              답변을 준비하고 있어요...
+            <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 text-base text-muted-foreground shadow-sm">
+              답변을 준비하고 있어요
+              <span className="flex gap-0.5" aria-hidden>
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
+              </span>
             </div>
           </div>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         {/* 아이콘만 있는 작은 버튼으로는 "말해도 된다"는 게 한눈에 안 들어온다는
             피드백(2026-08-18) — 입력창과 나란한 부가 버튼이 아니라, 텍스트 라벨을 단
