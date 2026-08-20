@@ -124,3 +124,29 @@ export async function submitMealLogPhotos(params: {
   mealLogStore.update((prev) => ({ ...prev, [params.wardId]: [...(prev[params.wardId] ?? []), entry] }));
   return entry;
 }
+
+// 위 submitMealLogPhotos가 받는 응답은 항상 leftoverRatePercent=0/compartments=[]
+// 고정값이다(잔반 분석 자체가 background_tasks로 뒤로 미뤄져서 — 백엔드 meal/service.py
+// create_meal_log 주석 참고). 실제 반찬별 잔반율은 분석이 끝난 뒤 GET diet-history에만
+// 반영되므로, 홈 화면(home-view.tsx)이 분석 완료를 폴링해 diet-history에서 이 mealId와
+// 일치하는 항목을 찾으면 그 결과로 로컬 기록을 이 함수로 갱신한다 — "잔반 분석하기"를
+// 누른 그 화면에서 바로 반찬별 결과를 보여주기 위함(2026-08-20).
+export function applyLeftoverAnalysisResult(
+  wardId: string,
+  mealId: string,
+  compartments: MealLogCompartment[]
+): void {
+  const leftoverRatePercent =
+    compartments.length > 0
+      ? Math.round(compartments.reduce((sum, c) => sum + c.leftoverPercent, 0) / compartments.length)
+      : 0;
+  mealLogStore.update((prev) => {
+    const list = prev[wardId];
+    if (!list) return prev;
+    const index = list.findIndex((e) => e.id === mealId);
+    if (index === -1) return prev;
+    const next = [...list];
+    next[index] = { ...next[index], leftoverRatePercent, compartments };
+    return { ...prev, [wardId]: next };
+  });
+}
