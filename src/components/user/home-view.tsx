@@ -436,7 +436,7 @@ export function HomeView({
                     </div>
                     <DislikeToggleButton
                       disliked={disliked}
-                      onClick={() => {
+                      onClick={async () => {
                         toggleDislike(ward.id, item.id);
                         // 다음 AI 반찬 추천부터 이 반찬을 caution 이하로 낮춰 판단하도록
                         // 백엔드에도 반영한다(dislikes-store.ts 상단 주석 참고). PUT은
@@ -444,16 +444,28 @@ export function HomeView({
                         // 이름 집합(backendDislikedNames)에 이번 토글만 반영해서
                         // 통째로 보낸다 — 오늘 메뉴에 없는(다른 날 기피 표시한) 항목도
                         // 같이 보존된다.
-                        setBackendDislikedNames((prev) => {
-                          const next = new Set(prev ?? []);
-                          if (disliked) next.delete(item.name);
-                          else next.add(item.name);
-                          syncDislikedFoodsToBackend(
-                            { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
-                            [...next]
-                          );
-                          return next;
-                        });
+                        //
+                        // backendDislikedNames가 아직 null이면(화면 진입 직후 GET이
+                        // 아직 안 끝났는데 사용자가 빠르게 토글을 누른 경우) prev ?? []로
+                        // 빈 Set을 기준으로 삼으면 안 된다 — "아직 못 받아옴"과 "받아왔는데
+                        // 원래 비어있었음"을 못 구분해서, 이전에 저장해둔 다른 기피 항목이
+                        // 이번 PUT(전체 교체)으로 통째로 지워지는 유실이 생긴다. 그 경우
+                        // 보내기 전에 한 번 더 직접 받아와 기준으로 삼는다. 또한 setState
+                        // updater 안에서 네트워크 요청을 하면 안 되므로(React가 updater를
+                        // 여러 번 호출할 수 있음 — 순수해야 함) 별도로 계산한다.
+                        const identity = {
+                          mockWardId: ward.id,
+                          name: ward.name,
+                          age: ward.age,
+                          address: ward.address,
+                        };
+                        const baseNames =
+                          backendDislikedNames ?? new Set((await fetchDislikedFoodNames(identity)) ?? []);
+                        const next = new Set(baseNames);
+                        if (disliked) next.delete(item.name);
+                        else next.add(item.name);
+                        setBackendDislikedNames(next);
+                        syncDislikedFoodsToBackend(identity, [...next]);
                       }}
                     />
                   </div>
