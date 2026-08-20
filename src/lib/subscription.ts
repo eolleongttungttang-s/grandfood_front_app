@@ -53,12 +53,13 @@ export const PAYMENT_METHOD = { brand: "국민카드", last4: "4821" };
 // user subscription-view.tsx) 모두에서 가격 바로 아래 눈에 띄게 노출한다.
 export const BANCHAN_PAYMENT_NOTICE = "반찬 가격은 이 구독료와 별도로 결제돼요";
 
-// fetchActiveSubscriptionBackend가 돌려준 실제 plan_type("base"/"premium")을 화면 표시용
-// 플랜 id로 되돌린다. 라이트 카드를 없앤 뒤로 화면엔 스탠다드 하나뿐이라(프리미엄은
-// comingSoon이라 구독 자체가 안 됨), base든 premium이든 지금 실제로 살아있는 구독이면
-// 전부 스탠다드로 표시한다 — 예전 라이트 구독자(plan_type: base)도 그 카드가 사라졌으니
-// 가장 가까운 실제 플랜인 스탠다드로 보여주는 게, 아무 카드도 "이용중" 표시가 안 되는
-// 것보다 낫다(2026-08-19).
+// fetchActiveSubscriptionBackend가 돌려준 실제 plan_type("standard"/"premium", 예전엔
+// "base"/"premium")을 화면 표시용 플랜 id로 되돌린다. 라이트 카드를 없앤 뒤로 화면엔
+// 스탠다드 하나뿐이라(프리미엄은 comingSoon이라 구독 자체가 안 됨), 백엔드 값이 무엇이든
+// 지금 실제로 살아있는 구독이면 전부 스탠다드로 표시한다 — 예전 라이트 구독자(plan_type:
+// base, 백엔드에서 이미 "standard"로 백필됨)도 그 카드가 사라졌으니 가장 가까운 실제
+// 플랜인 스탠다드로 보여주는 게, 아무 카드도 "이용중" 표시가 안 되는 것보다 낫다
+// (2026-08-19).
 export function resolveDisplayPlanId(_backendPlanType: string): string {
   return "standard";
 }
@@ -76,11 +77,15 @@ function todayDateString(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// 실제로 구독 가능한 유일한 플랜인 "standard"만 백엔드 "premium"으로 보낸다 — "premium"
-// 화면 카드는 comingSoon이라 애초에 이 함수까지 호출될 일이 없다("base"로 떨어지는
-// 경우는 지금은 도달하지 않는 방어적 기본값).
-function toBackendPlanType(planId: string): "base" | "premium" {
-  return planId === "standard" ? "premium" : "base";
+// 백엔드 PlanType은 grandfood_backend 8aee88b에서 "base"/"premium" → "standard"/"premium"
+// 으로 이름을 맞췄다(정책 미확정으로 보류된 3단계 확장안 #64 대신, 지금까지 실제로 팔린
+// 플랜이 하나뿐이라는 사실에 이름을 맞춘 순수 리네이밍 — DB도 기존 base/premium 값을 전부
+// "standard"로 백필함). 그래서 화면상 유일하게 구독 가능한 플랜인 "standard"는 이제
+// 백엔드에도 "standard"로 그대로 보낸다("premium" 화면 카드는 comingSoon이라 애초에 이
+// 함수까지 호출될 일이 없다 — 그 외 값이 들어오는 경우는 지금은 도달하지 않는 방어적
+// 기본값).
+function toBackendPlanType(planId: string): "standard" | "premium" {
+  return planId === "standard" ? "standard" : "premium";
 }
 
 // 백엔드 FundingSource는 4종(self/guardian/facility/government)이지만 이 앱엔 그중 두
