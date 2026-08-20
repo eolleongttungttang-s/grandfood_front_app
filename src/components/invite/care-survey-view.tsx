@@ -12,12 +12,14 @@ import {
   LIVING_ARRANGEMENT_LABEL,
   LivingArrangement,
   MEDICATION_POOL,
+  MEDICATION_PRODUCT_POOL,
   MEDICATION_TIMING_POOL,
   MOBILITY_LABEL,
   MobilityLevel,
   RegisterCareProfileCommand,
 } from "@/lib/care-profile";
 import { ACTIVITY_LEVEL_LABEL, ActivityLevel } from "@/lib/health-profile";
+import { MedicationFoodSuggestionStep } from "@/components/invite/MedicationFoodSuggestionStep";
 import { PhoneInput } from "@/components/app/phone-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -111,6 +113,92 @@ function TimingChip({
     >
       {label}
     </button>
+  );
+}
+
+// 약군 하나를 체크하면 그 밑에서 실제 복용 중인 구체적인 약물명을 고를 수 있게 하는
+// 칩 목록 + 직접 입력. 지금은 "질환·알레르기·복약" 요약 화면에 표시하는 용도로만
+// 쓴다(care-profile.ts의 MedicationEntry.products 주석 참고) — 반찬 추천에 반영할지는
+// 법적 검토가 먼저 필요해 별도로 다루기로 했다.
+function MedicationProductPicker({
+  categoryName,
+  products,
+  // 기본값 [] — getCareProfile()이 옛 localStorage 데이터(products 필드가 생기기 전)도
+  // 이미 채워서 내려주지만, 혹시 모를 다른 경로로 undefined가 들어와도 여기서 한 번 더
+  // 막는다(같은 크래시를 두 번 겪지 않기 위한 방어).
+  selected = [],
+  onToggle,
+  onAddCustom,
+  onRemove,
+}: {
+  categoryName: string;
+  products: string[];
+  selected: string[];
+  onToggle: (product: string) => void;
+  onAddCustom: (product: string) => void;
+  onRemove: (product: string) => void;
+}) {
+  const [customInput, setCustomInput] = useState("");
+  // 목록에 없는데 이미 선택된 것 = 직접 입력으로 추가한 것들.
+  const customEntries = selected.filter((p) => !products.includes(p));
+
+  return (
+    <div className="flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
+      <span className="text-sm font-semibold text-muted-foreground">
+        {categoryName} 중 실제로 드시는 약이 있으면 골라주세요
+      </span>
+      <div className="flex flex-wrap gap-2">
+        {products.map((product) => (
+          <button
+            key={product}
+            type="button"
+            onClick={() => onToggle(product)}
+            className={cn(
+              "rounded-full border-2 px-3 py-1.5 text-sm font-semibold transition-colors",
+              selected.includes(product)
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-card text-muted-foreground hover:bg-muted"
+            )}
+          >
+            {product}
+          </button>
+        ))}
+      </div>
+      {customEntries.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {customEntries.map((product) => (
+            <span
+              key={product}
+              className="flex items-center gap-1.5 rounded-full border-2 border-primary bg-primary/10 px-3 py-1.5 text-sm font-semibold text-foreground"
+            >
+              {product}
+              <button type="button" aria-label={`${product} 지우기`} onClick={() => onRemove(product)}>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Input
+          value={customInput}
+          onChange={(e) => setCustomInput(e.target.value)}
+          placeholder="목록에 없으면 직접 입력해주세요"
+          className="h-9 flex-1 text-sm"
+        />
+        <button
+          type="button"
+          aria-label="직접 입력한 약물명 추가"
+          onClick={() => {
+            onAddCustom(customInput);
+            setCustomInput("");
+          }}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-border text-muted-foreground hover:bg-muted"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -258,7 +346,7 @@ export function CareSurveyView({
       ...prev,
       medications: prev.medications.some((m) => m.name === name)
         ? prev.medications.filter((m) => m.name !== name)
-        : [...prev.medications, { name, timings: [] }],
+        : [...prev.medications, { name, timings: [], products: [] }],
     }));
   }
 
@@ -278,6 +366,49 @@ export function CareSurveyView({
     }));
   }
 
+  // toggleMedicationTiming과 같은 모양 — 약군 하나 안에서 구체적인 약물명은 여러 개
+  // 고를 수 있다(예: 혈압약 중 노바스크정+알닥톤 둘 다 복용하는 경우).
+  function toggleMedicationProduct(name: string, product: string) {
+    setForm((prev) => ({
+      ...prev,
+      medications: prev.medications.map((m) =>
+        m.name === name
+          ? {
+              ...m,
+              products: m.products.includes(product)
+                ? m.products.filter((p) => p !== product)
+                : [...m.products, product],
+            }
+          : m
+      ),
+    }));
+  }
+
+  // MEDICATION_PRODUCT_POOL에 없는 약물명(직접 입력)도 products 배열에 그대로 추가한다 —
+  // 별도 자료구조를 안 만들고 toggleMedicationProduct와 동일하게 다룬다(이미 있으면
+  // 무시, 없으면 추가만 — 직접 입력은 지웠다 다시 추가하는 토글 동작이 필요 없다).
+  function addCustomMedicationProduct(name: string, product: string) {
+    const trimmed = product.trim();
+    if (!trimmed) return;
+    setForm((prev) => ({
+      ...prev,
+      medications: prev.medications.map((m) =>
+        m.name === name && !m.products.includes(trimmed)
+          ? { ...m, products: [...m.products, trimmed] }
+          : m
+      ),
+    }));
+  }
+
+  function removeMedicationProduct(name: string, product: string) {
+    setForm((prev) => ({
+      ...prev,
+      medications: prev.medications.map((m) =>
+        m.name === name ? { ...m, products: m.products.filter((p) => p !== product) } : m
+      ),
+    }));
+  }
+
   // 기타(목록에 없는 약)는 하나가 아니라 여러 개일 수 있고, 약마다 복용 시간이 다를 수 있다
   // (2026-08-14 피드백 — 피부약은 점심에만, 알레르기약은 아침·저녁에 먹는 경우 등, 자유
   // 텍스트 한 줄 + 시간 체크 하나를 공유하면 이 둘을 구분할 방법이 없었다). 그래서 이름도
@@ -286,7 +417,7 @@ export function CareSurveyView({
   function addCustomMedication() {
     setForm((prev) => ({
       ...prev,
-      customMedications: [...prev.customMedications, { name: "", timings: [] }],
+      customMedications: [...prev.customMedications, { name: "", timings: [], products: [] }],
     }));
   }
 
@@ -391,6 +522,11 @@ export function CareSurveyView({
         value: form.takesMedication
           ? [...form.medications, ...form.customMedications].map((m) => m.name).filter(Boolean).join(", ") || "있음"
           : "없음",
+      },
+      {
+        step: CARE_SURVEY_STEP.medicationFoodAvoidance,
+        label: "약물 관련 기피 음식",
+        value: form.medicationFoodAvoidances.join(", ") || "없음",
       },
       {
         step: CARE_SURVEY_STEP.chewingDifficulty,
@@ -688,16 +824,26 @@ export function CareSurveyView({
                           </span>
                         </button>
                         {entry && (
-                          <div className="flex gap-2">
-                            {MEDICATION_TIMING_POOL.map((timing) => (
-                              <TimingChip
-                                key={timing}
-                                label={timing}
-                                selected={entry.timings.includes(timing)}
-                                onClick={() => toggleMedicationTiming(name, timing)}
-                              />
-                            ))}
-                          </div>
+                          <>
+                            <div className="flex gap-2">
+                              {MEDICATION_TIMING_POOL.map((timing) => (
+                                <TimingChip
+                                  key={timing}
+                                  label={timing}
+                                  selected={entry.timings.includes(timing)}
+                                  onClick={() => toggleMedicationTiming(name, timing)}
+                                />
+                              ))}
+                            </div>
+                            <MedicationProductPicker
+                              categoryName={name}
+                              products={MEDICATION_PRODUCT_POOL[name]}
+                              selected={entry.products}
+                              onToggle={(product) => toggleMedicationProduct(name, product)}
+                              onAddCustom={(product) => addCustomMedicationProduct(name, product)}
+                              onRemove={(product) => removeMedicationProduct(name, product)}
+                            />
+                          </>
                         )}
                       </div>
                     );
@@ -755,6 +901,18 @@ export function CareSurveyView({
               </>
             )}
           </>
+        )}
+
+        {step === CARE_SURVEY_STEP.medicationFoodAvoidance && (
+          <MedicationFoodSuggestionStep
+            medicationLabels={
+              form.takesMedication
+                ? [...form.medications, ...form.customMedications].map((m) => m.name).filter(Boolean)
+                : []
+            }
+            selected={form.medicationFoodAvoidances}
+            onChange={(next) => update("medicationFoodAvoidances", next)}
+          />
         )}
 
         {step === CARE_SURVEY_STEP.chewingDifficulty && (

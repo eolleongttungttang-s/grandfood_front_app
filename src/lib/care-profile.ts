@@ -23,6 +23,10 @@ export const DISLIKED_INGREDIENT_POOL = [
 export const CONDITION_POOL = ["고혈압", "당뇨", "심부전", "신장질환", "치매", "관절염"] as const;
 
 // 자주 복용하는 약 종류 — 여기 없는 약은 customMedications(기타, 이름 직접 입력)에 적는다.
+// 골다공증약/치매약은 medication/catalog.py의 DRUG_GROUPS엔 이미 있었지만(2026-08-20
+// 추가) 이 설문 화면엔 없어서 체크할 방법이 없었다 — 이번에 같이 추가했다
+// (medication-food-suggestions.ts의 MEDICATION_LABEL_TO_BACKEND_FLAG에 이미 이
+// 두 라벨의 매핑이 들어있다).
 export const MEDICATION_POOL = [
   "혈압약",
   "당뇨약",
@@ -31,16 +35,40 @@ export const MEDICATION_POOL = [
   "심장약",
   "수면제 · 신경안정제",
   "항응고제(와파린 등)",
+  "골다공증약",
+  "치매약",
 ] as const;
 
 // 약은 하루에 여러 번(예: 아침·저녁 둘 다) 먹는 경우가 많아서, 복용 시간은 하나만 고르는 게
 // 아니라 중복 체크 가능한 목록으로 둔다.
 export const MEDICATION_TIMING_POOL = ["아침", "점심", "저녁", "자기 전"] as const;
 
+// 약군(MEDICATION_POOL)을 체크하면 그 아래에서 고를 수 있는 구체적인 약물명 —
+// medication/catalog.py의 DRUG_GROUPS[code]["products"]와 값을 맞췄다(백엔드 카탈로그가
+// 이미 갖고 있던 대표 약물명 목록, 새로 만든 데이터 아님). 목록에 없으면 각 약군 밑의
+// "기타" 입력칸에 직접 적을 수 있다.
+export const MEDICATION_PRODUCT_POOL: Record<(typeof MEDICATION_POOL)[number], string[]> = {
+  "혈압약": ["노바스크정", "다이크로짇정", "라식스정", "알닥톤", "코자정", "카프릴정"],
+  "당뇨약": ["다이아벡스정", "아마릴정", "자누비아정"],
+  "관절염약(소염진통제)": ["쎄레브렉스캡슐", "낙센정", "모빅캡슐"],
+  "고지혈증약": ["리피토정", "크레스토정", "조코정"],
+  "심장약": ["디고신정", "라식스정", "알닥톤"],
+  "수면제 · 신경안정제": ["자낙스정", "스틸녹스정"],
+  "항응고제(와파린 등)": ["와파린", "자렐토정", "엘리퀴스정"],
+  "골다공증약": ["포사맥스", "악토넬정"],
+  "치매약": ["아리셉트정", "에빅사정"],
+};
+
 export type MedicationEntry = {
   name: string;
   /** MEDICATION_TIMING_POOL의 부분집합 — 복수 선택 가능. */
   timings: string[];
+  /** 이 약군 안에서 실제로 복용 중인 구체적인 약물명 — MEDICATION_PRODUCT_POOL[name]의
+   *  부분집합이거나, 목록에 없어 직접 입력한 이름. 지금은 "질환·알레르기·복약" 요약
+   *  화면에 표시하는 용도로만 쓰고, 반찬 추천 로직에는 아직 반영하지 않는다(복약지도에
+   *  해당할 수 있어 법적 검토가 먼저 필요하다는 팀 판단, health/service.py의
+   *  MedicationFlag 문서 참고 — 이 부분은 내일 회의 후 결정). */
+  products: string[];
 };
 
 export type RegisterCareProfileCommand = {
@@ -61,6 +89,12 @@ export type RegisterCareProfileCommand = {
    *  복용시간 체크 하나를 모든 "기타" 약이 공유해서, 기타 약이 2개 이상이면 각자 언제
    *  먹는지 구분이 아예 안 됐다). */
   customMedications: MedicationEntry[];
+  /** 복약 단계 다음(medicationFoodAvoidance 단계)에서 모으는 구체적인 음식 이름들 —
+   *  약물표 제안 중 사용자가 확정한 것 + 직접 입력한 것. dislikedIngredients(재료
+   *  카테고리, 예: "돼지고기")와는 성격이 달라 별도 필드로 둔다. backend-auth.ts의
+   *  syncMedicationFoodRestrictions가 이 값을 그대로 food_rules(rule_type=
+   *  "restriction")로 보낸다 — 확정된 항목이라 알레르기처럼 결정론적으로 제외된다. */
+  medicationFoodAvoidances: string[];
   chewingDifficulty: boolean;
   mobilityLevel: MobilityLevel;
   emergencyContactName: string;
@@ -90,9 +124,10 @@ export const CARE_SURVEY_STEP = {
   allergy: 3,
   conditions: 4,
   medication: 5,
-  chewingDifficulty: 6,
-  mobility: 7,
-  emergencyContact: 8,
+  medicationFoodAvoidance: 6,
+  chewingDifficulty: 7,
+  mobility: 8,
+  emergencyContact: 9,
 } as const;
 
 export const CARE_SURVEY_TOTAL_STEPS = Object.keys(CARE_SURVEY_STEP).length;
@@ -117,6 +152,7 @@ export const EMPTY_CARE_PROFILE_COMMAND: RegisterCareProfileCommand = {
   takesMedication: false,
   medications: [],
   customMedications: [],
+  medicationFoodAvoidances: [],
   chewingDifficulty: false,
   mobilityLevel: "independent",
   emergencyContactName: "",
@@ -151,7 +187,21 @@ export function getCareProfile(wardId: string): CareProfileView | undefined {
   // ...careProfile.customMedications]`가 undefined를 스프레드하려다 실제로 크래시
   // 났다(코드 리뷰 지적) — 이 공유 접근자 한 곳에서 병합해두면 모든 소비자가 안전해지고,
   // 앞으로 필드가 또 추가돼도 이 함수만 챙기면 된다.
-  return { ...EMPTY_CARE_PROFILE_COMMAND, ...stored };
+  //
+  // 다만 medications/customMedications는 배열 "안"의 개별 항목이라 위 스프레드로는 못
+  // 고친다 — products 필드(2026-08-21 추가)가 생기기 전에 저장된 항목은 배열 자체는
+  // 있지만 그 안의 {name, timings}엔 products가 없어서, 그대로 쓰면 그 값을
+  // entry.products.filter(...)/entry.products.length 등으로 쓰는 화면(care-survey-
+  // view.tsx의 MedicationProductPicker, diet-view.tsx 등)이 그대로 죽는다(실제로 겪은
+  // 크래시 — 바로 위 문단과 같은 종류의 문제라 여기서 항목 단위로도 한 번 더 채워준다).
+  const withProducts = (entries: MedicationEntry[]): MedicationEntry[] =>
+    entries.map((m) => ({ ...m, products: m.products ?? [] }));
+  return {
+    ...EMPTY_CARE_PROFILE_COMMAND,
+    ...stored,
+    medications: withProducts(stored.medications ?? []),
+    customMedications: withProducts(stored.customMedications ?? []),
+  };
 }
 
 // TODO(backend): POST /wards/:id/care-profile — 최초 설문(생활·돌봄 정보) 등록.

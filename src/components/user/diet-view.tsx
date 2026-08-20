@@ -249,9 +249,16 @@ export function DietView({
               <div className="flex flex-col gap-1">
                 <span className="text-xs font-semibold text-muted-foreground">복약</span>
                 {detail.medications.map((m) => (
-                  <div key={m.name} className="flex justify-between text-sm">
-                    <span className="text-foreground">{m.name}</span>
-                    <span className="text-muted-foreground">{m.schedule}</span>
+                  <div key={m.name} className="flex flex-col gap-0.5">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-foreground">{m.name}</span>
+                      <span className="text-muted-foreground">{m.schedule}</span>
+                    </div>
+                    {m.products.length > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        {m.products.join(", ")}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

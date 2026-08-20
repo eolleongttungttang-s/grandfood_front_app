@@ -15,6 +15,7 @@ import { createLocalStore } from "@/lib/local-store";
 import { API_BASE_URL } from "@/lib/api-config";
 import { getAccounts, linkWardToGuardian } from "@/lib/auth";
 import { CONDITION_POOL, getCareProfile } from "@/lib/care-profile";
+import { MEDICATION_LABEL_TO_BACKEND_FLAG } from "@/lib/medication-food-suggestions";
 import type { BackendActivityLevel } from "@/lib/health-profile";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { addWard, calculateAge, newWardDefaults } from "@/lib/wards";
@@ -59,6 +60,18 @@ export function getBackendConditionFlags(mockWardId: string): string[] {
   const conditions = getCareProfile(mockWardId)?.conditions ?? [];
   return conditions
     .map((c) => lookup[c])
+    .filter((flag): flag is string => flag !== undefined);
+}
+
+// getBackendConditionFlags와 같은 이유(설문은 한국어 라벨로 고르지만 API는 표준화된
+// 코드로 받음) — 복약 체크리스트(MEDICATION_POOL) 버전. invite/survey/page.tsx도 같은
+// 매핑이 필요해서 export한다.
+export function getBackendMedicationFlags(mockWardId: string): string[] {
+  const profile = getCareProfile(mockWardId);
+  if (!profile?.takesMedication) return [];
+  const names = [...profile.medications, ...profile.customMedications].map((m) => m.name);
+  return names
+    .map((name) => MEDICATION_LABEL_TO_BACKEND_FLAG[name])
     .filter((flag): flag is string => flag !== undefined);
 }
 
@@ -685,6 +698,13 @@ export async function registerElderFromInviteBackend(
     planType: string;
     conditionFlags?: string[];
     ttsCallConsent?: boolean;
+    // 2026-08-20까지 이 함수는 medication_flags/food_rules를 전혀 안 보내고 있었다 —
+    // invite/service.py의 register_elder_from_invite는 이미 둘 다 받는데(181·187번째
+    // 줄) 프론트가 안 채웠던 것. foodRestrictions는 약물표 제안을 사용자가 확정한
+    // 음식 이름들 — rule_type: "restriction"으로 변환해서 보낸다(알레르기처럼 반찬
+    // 후보에서 결정론적으로 제외됨, health/service.py의 _exclude_allergens 참고).
+    medicationFlags?: string[];
+    foodRestrictions?: string[];
     // BMR/TDEE 기반 권장 영양성분 계산(health/nutrition_targets.py)에 쓰는 값들 — 전부
     // optional. 백엔드 UserOnboardingRequest가 이미 받아주는 필드라 그대로 실어 보낸다.
     gender?: "male" | "female";
@@ -705,6 +725,12 @@ export async function registerElderFromInviteBackend(
         address: input.address,
         plan_type: toBackendPlanType(input.planType),
         condition_flags: input.conditionFlags ?? [],
+        medication_flags: input.medicationFlags ?? [],
+        food_rules: (input.foodRestrictions ?? []).map((name) => ({
+          rule_type: "restriction",
+          item_name: name,
+          note: null,
+        })),
         tts_call_consent: input.ttsCallConsent ?? false,
         gender: input.gender,
         height_cm: input.heightCm,
@@ -742,6 +768,10 @@ export async function submitSelfHealthProfileBackend(params: {
   age: number;
   address: string;
   conditionFlags: string[];
+  // 2026-08-20까지 이 함수는 condition_flags만 보내고 medication_flags는 안 보내고
+  // 있었다 — SelfHealthProfileRequest가 이미 받는 필드인데 프론트가 안 채웠던 것.
+  // care-survey-view.tsx의 복약 체크리스트 답변을 실제로 반영하려면 필요하다.
+  medicationFlags: string[];
   // BMR/TDEE + KDRI 기반 서버 영양 목표치 계산 전용(전부 선택) — health-profile.ts의
   // HealthMetricsForm(키/몸무게/활동량)과 signup 시점의 성별을 실어 보내면, care-survey-view.tsx
   // 설문에서 여기까지 다 입력한 이용자는 실제 BMR/TDEE 계산까지 받을 수 있다. 넷 다 없어도
@@ -772,6 +802,7 @@ export async function submitSelfHealthProfileBackend(params: {
       },
       body: JSON.stringify({
         condition_flags: params.conditionFlags,
+        medication_flags: params.medicationFlags,
         gender: params.gender,
         height_cm: params.heightCm,
         weight_kg: params.weightKg,
@@ -916,6 +947,9 @@ export type BackendUserProfile = {
   planType: string;
   healthProfileId: string | null;
   conditionFlags: string[];
+  // UserResponse엔 원래 있던 필드인데(account/schemas.py) 여기 매핑이 빠져 있었다 —
+  // useRecommendationReadiness.ts가 "복약 정보 입력됐는지" 판단에 필요해서 추가한다.
+  medicationFlags: string[];
   ttsCallConsent: boolean;
 };
 
@@ -931,6 +965,7 @@ function parseUserProfile(data: any): BackendUserProfile {
     planType: data.plan_type,
     healthProfileId: data.health_profile_id ?? null,
     conditionFlags: data.condition_flags ?? [],
+    medicationFlags: data.medication_flags ?? [],
     ttsCallConsent: data.tts_call_consent ?? false,
   };
 }

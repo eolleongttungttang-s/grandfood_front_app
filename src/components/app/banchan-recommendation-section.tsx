@@ -9,13 +9,17 @@
 // 상태(특히 isNewMember)를 보고 카드 자체가 아니라 화면 전체를 다르게 그려야 해서, 상태를
 // 컴포넌트 안에 가두면 상위 화면이 같은 데이터를 다시 fetch해야 하는 구조가 된다.
 
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { WardIdentity } from "@/lib/banchan-recommendation";
 import { hasAnyProgress, MonthlyBanchanRecommendationState } from "@/lib/use-monthly-banchan-recommendation";
 import { BanchanRecommendationCalendar } from "@/components/app/banchan-recommendation-calendar";
+import { RecommendationReminderModal } from "@/components/app/RecommendationReminderModal";
+import { isMissingHealthInfo, useRecommendationReadiness } from "@/lib/useRecommendationReadiness";
 
 export function BanchanRecommendationSection({
   identity,
@@ -34,6 +38,27 @@ export function BanchanRecommendationSection({
   surveyHref?: string;
 }) {
   const { month, monthly, loading, requesting, polling, error, hasActiveSubscription, request } = state;
+  const router = useRouter();
+  const { check } = useRecommendationReadiness();
+  const [showReminder, setShowReminder] = useState(false);
+
+  // 합의안 3번 — 정보 미입력(또는 확인 필요) 상태면 바로 추천 요청을 쏘지 않고 리마인드부터
+  // 띄운다. 확인 자체가 실패하면(백엔드 세션 없음 등) 막지 않고 그냥 진행시킨다 — 이건
+  // 보조 리마인드지, 추천 자체를 막는 게이트가 아니다.
+  async function handleRequestClick() {
+    const result = await check({
+      mockWardId: identity.wardId,
+      name: identity.wardName,
+      age: identity.wardAge,
+      address: identity.wardAddress,
+    });
+    if (result && isMissingHealthInfo(result)) {
+      setShowReminder(true);
+      return;
+    }
+    request();
+  }
+
   // health/service.py의 get_active_subscription이 활성 구독을 요구하기 때문에, 구독이 없는
   // 상태에서 "AI 추천받기"를 눌러봐야 항상 404로 실패한다 — 실패를 겪게 두는 대신, 구독부터
   // 하도록 안내한다. hasActiveSubscription이 아직 null(확인 중)이면 판단이 서기 전까지는
@@ -58,7 +83,7 @@ export function BanchanRecommendationSection({
             구독하러 가기
           </Button>
         ) : (
-          <Button size="sm" onClick={request} disabled={requesting || loading || hasActiveSubscription == null}>
+          <Button size="sm" onClick={handleRequestClick} disabled={requesting || loading || hasActiveSubscription == null}>
             <Sparkles />
             {requesting ? "요청하는 중..." : hasProgress ? "다시 추천받기" : "AI 추천받기"}
           </Button>
@@ -85,6 +110,19 @@ export function BanchanRecommendationSection({
           surveyHref={surveyHref}
         />
       )}
+
+      <RecommendationReminderModal
+        open={showReminder}
+        onEditInfo={() => {
+          setShowReminder(false);
+          router.push(surveyHref ?? "/user/survey");
+        }}
+        onProceedAnyway={() => {
+          setShowReminder(false);
+          request();
+        }}
+        onClose={() => setShowReminder(false)}
+      />
     </div>
   );
 }

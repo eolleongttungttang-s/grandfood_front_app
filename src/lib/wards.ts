@@ -67,7 +67,7 @@ export type WardDetail = {
   /** 진단 질환 — 설문(care-profile.ts)에 응답이 있으면 그걸, 없으면 ward-registry.ts의 대체값을 쓴다. */
   conditions: string[];
   allergies: string[];
-  medications: { name: string; schedule: string }[];
+  medications: { name: string; schedule: string; products: string[] }[];
   chewingNote: string;
   /** 건강 프로필 등록 단계의 결과 (자가 입력 또는 마이데이터 연동). health-profile.ts 참고 */
   healthProfile: HealthProfileView;
@@ -169,12 +169,15 @@ export function getWardDetail(ward: Ward): WardDetail {
     ...(hasDislikedIngredientsData ? careProfile!.dislikedIngredients.flatMap(textToAllergyTags) : []),
   ].filter((tag, i, arr) => arr.indexOf(tag) === i);
 
-  const medications: { name: string; schedule: string }[] = [];
+  const medications: { name: string; schedule: string; products: string[] }[] = [];
   if (hasMedicationData) {
     if (careProfile!.takesMedication) {
       // 목록에서 고른 약(medications)과 기타로 직접 적은 약(customMedications) 둘 다 이름+
       // 복용시간을 따로 들고 있어서(2026-08-14 피드백 — 기타 약이 여러 개면 각자 언제
-      // 먹는지 구분돼야 함), 하나로 합쳐서 약마다 한 줄씩 보여준다.
+      // 먹는지 구분돼야 함), 하나로 합쳐서 약마다 한 줄씩 보여준다. products(구체적인
+      // 약물명, 2026-08-21 추가)도 같이 실어서 "질환·알레르기·복약" 요약 화면에서
+      // 보여줄 수 있게 한다 — 반찬 추천 로직에는 아직 안 쓴다(법적 검토 필요, care-
+      // profile.ts의 MedicationEntry.products 주석 참고).
       //
       // 이름이 빈 채로 남을 수 있다("기타 약 추가"만 누르고 이름을 안 적은 경우) — care-
       // survey-view.tsx의 설문 개요 화면은 이런 항목을 .filter(Boolean)으로 걸러내는데
@@ -191,19 +194,20 @@ export function getWardDetail(ward: Ward): WardDetail {
         medications.push({
           name,
           schedule: med.timings.length > 0 ? med.timings.join(" · ") : "복용 시간 미입력",
+          products: med.products,
         });
       }
       if (medications.length === 0) {
-        medications.push({ name: "복용 중 (상세 미입력)", schedule: "설문 응답 기준" });
+        medications.push({ name: "복용 중 (상세 미입력)", schedule: "설문 응답 기준", products: [] });
       }
     } else {
-      medications.push({ name: "특이 복약 없음", schedule: "-" });
+      medications.push({ name: "특이 복약 없음", schedule: "-", products: [] });
     }
   } else {
-    if (has("고혈압")) medications.push({ name: "암로디핀 5mg", schedule: "1일 1회 · 아침" });
-    if (has("당뇨")) medications.push({ name: "메트포르민 500mg", schedule: "1일 2회 · 식후" });
-    if (has("심부전")) medications.push({ name: "이뇨제", schedule: "1일 1회 · 아침" });
-    if (medications.length === 0) medications.push({ name: "특이 복약 없음", schedule: "-" });
+    if (has("고혈압")) medications.push({ name: "암로디핀 5mg", schedule: "1일 1회 · 아침", products: [] });
+    if (has("당뇨")) medications.push({ name: "메트포르민 500mg", schedule: "1일 2회 · 식후", products: [] });
+    if (has("심부전")) medications.push({ name: "이뇨제", schedule: "1일 1회 · 아침", products: [] });
+    if (medications.length === 0) medications.push({ name: "특이 복약 없음", schedule: "-", products: [] });
   }
 
   const chewingNote = hasChewingData
