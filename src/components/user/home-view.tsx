@@ -502,9 +502,12 @@ export function HomeView({
                   // JPEG로 변환하면서도 Android/데스크톱의 갤러리 선택창에서 예전에 찍어둔
                   // PNG/WEBP 사진까지 걸러지는 걸 막는다.
                   accept="image/jpeg,image/png,image/webp,image/gif"
-                  // capture="environment"를 넣으면 대부분 모바일 브라우저가 카메라 앱을
-                  // 바로 띄우고 "갤러리에서 선택"은 아예 안 보여준다 — 빼면 촬영/갤러리
-                  // 선택 둘 다 고를 수 있는 기본 선택창이 뜬다.
+                  // capture="environment"를 빼면 기본 파일 선택창(갤러리부터 보여주는
+                  // 경우가 많음)이 뜬다 — 있으면 카메라 뷰파인더를 먼저 열고 옆에 작은 원형
+                  // 갤러리 바로가기(최근 사진 썸네일)를 같이 보여줘서, 촬영이 기본이면서
+                  // 갤러리도 한 탭이면 갈 수 있다(2026-08-21 갤럭시 실기기 확인 — 주 타겟이
+                  // 70~80대라 갤럭시 위주 대응이 우선).
+                  capture="environment"
                   className="hidden"
                   onChange={(e) => setBeforePhoto(e.target.files?.[0] ?? null)}
                 />
@@ -523,6 +526,7 @@ export function HomeView({
                 <input
                   type="file"
                   accept="image/jpeg,image/png,image/webp,image/gif"
+                  capture="environment"
                   className="hidden"
                   onChange={(e) => setAfterPhoto(e.target.files?.[0] ?? null)}
                 />
