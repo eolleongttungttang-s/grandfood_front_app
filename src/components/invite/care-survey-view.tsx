@@ -292,10 +292,25 @@ export function CareSurveyView({
   );
   const [submitting, setSubmitting] = useState(false);
 
+  // "복용 중인 약" 항목을 목록에서 바로 골라 들어왔다가(jumpToStep) 확인을 누르면, 원래는
+  // enteredFromOverview 때문에 곧장 목록으로 돌아가서 바로 다음 단계인 "약물 관련 기피
+  // 음식"(제안 카드)을 볼 기회가 없었다 — 방금 추가한 약 때문에 새로 뜬 제안이 있어도
+  // 모른 채 저장하고 끝나는 문제(2026-08-21 피드백). 이 단계에 들어온 시점의 약 목록을
+  // 스냅샷으로 남겨뒀다가, 확인 시점에 실제로 바뀌었을 때만 목록으로 안 돌아가고 그
+  // 다음 단계로 한 번 더 이어준다 — 안 바꿨으면(그냥 확인만) 예전처럼 바로 돌아간다.
+  const [medicationSnapshotOnEnter, setMedicationSnapshotOnEnter] = useState<string | null>(null);
+
+  function medicationKey(f: RegisterCareProfileCommand): string {
+    return f.takesMedication
+      ? [...f.medications, ...f.customMedications].map((m) => m.name).filter(Boolean).join("|")
+      : "";
+  }
+
   function jumpToStep(target: number) {
     setStep(target);
     setEnteredFromOverview(true);
     setMode("wizard");
+    setMedicationSnapshotOnEnter(target === CARE_SURVEY_STEP.medication ? medicationKey(form) : null);
   }
 
   async function handleFinishEditing() {
@@ -457,6 +472,19 @@ export function CareSurveyView({
     // 목록에서 골라 들어온 단계면 "다음"이 다음 단계로 넘어가는 게 아니라 방금 고친 값을
     // 들고 목록으로 돌아간다 — 순서대로 쭉 진행하는 흐름과는 이 버튼의 의미 자체가 다르다.
     if (enteredFromOverview) {
+      // 예외: "복용 중인 약" 단계를 들어왔다 나갈 때 실제로 약 목록이 바뀌었으면, 목록으로
+      // 바로 안 돌아가고 "약물 관련 기피 음식"(제안 카드) 단계를 한 번 더 보여준다 — 새로
+      // 추가한 약 때문에 새로 뜬 제안을 놓치지 않게 하려는 것(2026-08-21 피드백). 안
+      // 바꿨으면(그냥 확인만 눌렀으면) 예전처럼 바로 목록으로 돌아간다.
+      if (
+        step === CARE_SURVEY_STEP.medication &&
+        medicationSnapshotOnEnter !== null &&
+        medicationKey(form) !== medicationSnapshotOnEnter
+      ) {
+        setMedicationSnapshotOnEnter(null);
+        setStep(CARE_SURVEY_STEP.medicationFoodAvoidance);
+        return;
+      }
       setEnteredFromOverview(false);
       setMode("overview");
       return;

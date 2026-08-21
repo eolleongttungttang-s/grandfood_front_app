@@ -9,6 +9,13 @@
 import { seedFromId } from "@/lib/seed";
 import { DISH_CATALOG, getDish, type AllergyTag, type Dish, type DishCategory } from "@/lib/dishes";
 
+// 소수 값 여러 개를 reduce로 더하면 부동소수점 오차가 그대로 쌓여 "24.630000000000003"처럼
+// 노출될 수 있다(2026-08-21 버그 리포트, today-menu.ts의 sum()과 동일한 원인) — 소수점
+// 둘째 자리에서 반올림해 지운다.
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export type MatchDishesCommand = {
   wardId: string;
   storeId: string;
@@ -87,9 +94,9 @@ function buildCombo(cmd: MatchDishesCommand, seed: number): DishCombo {
     wardId: cmd.wardId,
     storeId: cmd.storeId,
     items: dishes.map(toComboItem),
-    totalKcal: dishes.reduce((sum, d) => sum + d.kcal, 0),
-    totalSodiumMg: dishes.reduce((sum, d) => sum + d.sodiumMg, 0),
-    totalProteinG: dishes.reduce((sum, d) => sum + d.proteinG, 0),
+    totalKcal: round2(dishes.reduce((sum, d) => sum + d.kcal, 0)),
+    totalSodiumMg: round2(dishes.reduce((sum, d) => sum + d.sodiumMg, 0)),
+    totalProteinG: round2(dishes.reduce((sum, d) => sum + d.proteinG, 0)),
     reasons,
     matchedAt: new Date().toISOString(),
   };
@@ -123,8 +130,8 @@ export async function swapComboItem(
   return {
     ...combo,
     items,
-    totalKcal: items.reduce((sum, i) => sum + i.kcal, 0),
-    totalSodiumMg: items.reduce((sum, i) => sum + i.sodiumMg, 0),
-    totalProteinG: items.reduce((sum, i) => sum + i.proteinG, 0),
+    totalKcal: round2(items.reduce((sum, i) => sum + i.kcal, 0)),
+    totalSodiumMg: round2(items.reduce((sum, i) => sum + i.sodiumMg, 0)),
+    totalProteinG: round2(items.reduce((sum, i) => sum + i.proteinG, 0)),
   };
 }

@@ -39,6 +39,21 @@ export function ttsCallConsentReadAloudText() {
   );
 }
 
+// 2026-08-21: 구체적 약물명(PR#74)까지 포함해 질환·알레르기·복약 정보를 다음 화면
+// (invite/survey)에서 수집하는데, 위 readAloudText()/동의 체크박스는 성명·연락처·주소
+// 얘기만 하고 이 부분을 전혀 언급하지 않았다. 개인정보보호법상 건강정보는 민감정보로
+// 분류되어 일반 개인정보와 별도 동의가 필요해서, 안부확인콜처럼 독립된 체크박스로 뺐다 —
+// 다만 안부확인콜과 달리 이건 필수다(지금 당장 복약이 없어도 몇 달/몇 년 뒤 생길 수 있는데
+// 그때 다시 동의를 받으러 오는 게 더 번거롭다는 판단, 2026-08-21 논의).
+export function healthInfoConsentReadAloudText() {
+  return (
+    "다음 화면에서 질환, 알레르기, 복약 여부와 복용 중인 구체적 약물명, 키·체중 같은 " +
+    "건강정보를 여쭤볼 거예요. 이 정보는 AI가 몸에 맞는 반찬을 추천하고 위험한 음식을 " +
+    "미리 알려드리는 데만 쓰이고, 등록된 보호자에게도 공유돼요. " +
+    "법률상 민감정보라 이 서비스를 이용하시려면 반드시 동의가 필요해요. 동의하시겠어요?"
+  );
+}
+
 export function ConsentView({
   guardianName,
   guardianLoginId,
@@ -56,6 +71,7 @@ export function ConsentView({
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState<"여" | "남" | null>(null);
   const [agreed, setAgreed] = useState(false);
+  const [healthInfoConsent, setHealthInfoConsent] = useState(false);
   const [ttsCallConsent, setTtsCallConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -71,7 +87,7 @@ export function ConsentView({
   const generatedPassword = deriveElderBackendPassword(form.elderPhone);
 
   async function handleAccept() {
-    if (!agreed || submitting) return;
+    if (!agreed || !healthInfoConsent || submitting) return;
     setError(null);
     if (generatedPassword.length !== 4) {
       setError("연락처를 정확히 입력해 주세요.");
@@ -294,6 +310,53 @@ export function ConsentView({
           내용 들려주기
         </Button>
 
+        {/* 건강정보(질환·알레르기·복약, 구체적 약물명 포함)는 개인정보보호법상 민감정보라
+            위 일반 개인정보 동의와 별도로 동의를 받는다 — 바로 다음 화면(invite/survey)에서
+            실제로 이 정보를 수집한다. 필수 동의다(2026-08-21 논의: 지금 복약이 없어도
+            나중에 생길 수 있는데, 그때 다시 동의받으러 오는 게 더 번거롭다는 판단). */}
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <span className="text-xs font-bold text-foreground">건강정보는 이렇게 쓰여요</span>
+          <div className="flex flex-col gap-2 text-sm">
+            <div className="flex items-start justify-between gap-3">
+              <span className="shrink-0 text-muted-foreground">수집 정보</span>
+              <span className="text-right text-foreground">
+                질환·알레르기·복약 정보(복용 중인 구체적 약물명 포함), 키·체중 등 신체 정보
+              </span>
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <span className="shrink-0 text-muted-foreground">이용 목적</span>
+              <span className="text-right text-foreground">AI 반찬 추천, 위험 식품 안내</span>
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <span className="shrink-0 text-muted-foreground">공유 대상</span>
+              <span className="text-right text-foreground">{guardianName}님(보호자)</span>
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <span className="shrink-0 text-muted-foreground">보관 기간</span>
+              <span className="text-right text-foreground">서비스 탈퇴 시까지</span>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            법률상 민감정보로 분류되어 별도 동의가 필요해요. 다음 화면에서 실제로 입력받아요.
+          </p>
+        </div>
+
+        <label className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5">
+          <Checkbox checked={healthInfoConsent} onCheckedChange={setHealthInfoConsent} />
+          <span className="text-sm text-foreground">
+            건강정보(질환·알레르기·복약, 구체적 약물명 포함) 수집·이용에 동의해요
+          </span>
+        </label>
+
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => speakOnDemand(healthInfoConsentReadAloudText())}
+        >
+          <Volume2 />
+          건강정보 동의가 뭔지 들려주기
+        </Button>
+
         <label className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5">
           <Checkbox checked={ttsCallConsent} onCheckedChange={setTtsCallConsent} />
           <span className="text-sm text-foreground">
@@ -321,7 +384,14 @@ export function ConsentView({
           <Button
             size="lg"
             className="w-full"
-            disabled={!agreed || submitting || !birthDate || !gender || generatedPassword.length !== 4}
+            disabled={
+              !agreed ||
+              !healthInfoConsent ||
+              submitting ||
+              !birthDate ||
+              !gender ||
+              generatedPassword.length !== 4
+            }
             onClick={handleAccept}
           >
             동의하고 가입하기

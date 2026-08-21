@@ -399,12 +399,16 @@ export function computeNutritionSnapshotForDate(
 ): TodayNutritionSnapshot {
   const target = getRecommendationForDate(monthly, dateStr);
   const items = target?.items ?? [];
+  // 소수 100g당 값을 여러 개 더하면 부동소수점 오차가 그대로 쌓여 "24.630000000000003"처럼
+  // 노출된다(2026-08-21 버그 리포트, today-menu.ts의 sum()과 동일한 원인) — 소수점 둘째
+  // 자리에서 반올림해 지운다.
+  const round2 = (n: number) => Math.round(n * 100) / 100;
   return {
     hasData: target?.status === "done" && items.length > 0,
-    kcal: items.reduce((sum, i) => sum + (i.caloriePer100g ?? 0), 0),
-    proteinG: items.reduce((sum, i) => sum + (i.proteinPer100g ?? 0), 0),
-    sodiumMg: items.reduce((sum, i) => sum + (i.sodiumPer100g ?? 0), 0),
-    carbsG: items.reduce((sum, i) => sum + (i.carbsPer100g ?? 0), 0),
+    kcal: round2(items.reduce((sum, i) => sum + (i.caloriePer100g ?? 0), 0)),
+    proteinG: round2(items.reduce((sum, i) => sum + (i.proteinPer100g ?? 0), 0)),
+    sodiumMg: round2(items.reduce((sum, i) => sum + (i.sodiumPer100g ?? 0), 0)),
+    carbsG: round2(items.reduce((sum, i) => sum + (i.carbsPer100g ?? 0), 0)),
     targetCalorieKcal: target?.targetCalorieKcal ?? null,
     targetProteinG: target?.targetProteinG ?? null,
     targetSodiumMg: target?.targetSodiumMg ?? null,

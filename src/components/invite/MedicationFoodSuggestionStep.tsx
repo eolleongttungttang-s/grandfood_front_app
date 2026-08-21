@@ -32,7 +32,9 @@ export function MedicationFoodSuggestionStep({
   // 린트 규칙에 걸리고(콜백 안에서만 setState하라는 규칙), ref는 렌더 중에 못 읽는다
   // (react-hooks/refs) — state로 감싸면 둘 다 피하면서 "로딩 중이었는데 medicationLabels가
   // 또 바뀌어 실제로는 낡은 결과"인 경우도 자동으로 처리된다(key가 다르면 무조건 로딩중).
-  const [loaded, setLoaded] = useState<{ key: string; suggestions: FoodSuggestion[] } | null>(null);
+  const [loaded, setLoaded] = useState<
+    { key: string; suggestions: FoodSuggestion[]; consultNotice: string | null } | null
+  >(null);
   const [customInput, setCustomInput] = useState("");
 
   // 배열을 그대로 deps에 넣으면 매 렌더마다 새 배열 참조라 무한 재요청이 된다 — 내용이
@@ -41,6 +43,7 @@ export function MedicationFoodSuggestionStep({
   const medicationLabelsKey = medicationLabels.join("|");
   const loading = medicationLabels.length > 0 && loaded?.key !== medicationLabelsKey;
   const suggestions = loaded?.key === medicationLabelsKey ? loaded.suggestions : [];
+  const consultNotice = loaded?.key === medicationLabelsKey ? loaded.consultNotice : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -48,13 +51,13 @@ export function MedicationFoodSuggestionStep({
       return;
     }
     fetchFoodSuggestions(medicationLabels)
-      .then((result) => {
-        if (!cancelled) setLoaded({ key: medicationLabelsKey, suggestions: result });
+      .then(({ suggestions, consultNotice }) => {
+        if (!cancelled) setLoaded({ key: medicationLabelsKey, suggestions, consultNotice });
       })
       .catch(() => {
         // 제안을 못 가져와도 설문 자체는 막지 않는다 — 이 단계는 참고용 보조 기능이라,
         // 실패하면 그냥 빈 목록으로 다음 단계로 넘어가면 된다.
-        if (!cancelled) setLoaded({ key: medicationLabelsKey, suggestions: [] });
+        if (!cancelled) setLoaded({ key: medicationLabelsKey, suggestions: [], consultNotice: null });
       });
     return () => {
       cancelled = true;
@@ -113,7 +116,10 @@ export function MedicationFoodSuggestionStep({
             key={s.food}
             type="button"
             onClick={() => toggle(s.food)}
-            title={s.reason}
+            // medication.ts 상단 "⚠️ 화면에 반드시 지켜야 할 것" 2번(출처 표기) — 화면을
+            // 더 채우지 않으려고 새 줄 대신 기존 툴팁에 이유와 같이 넣는다(2026-08-21,
+            // "화면이 너무 가득 차면 안 된다" 피드백).
+            title={`${s.reason} · 출처: ${s.source}`}
             className={cn(
               "rounded-full border-2 px-4 py-2 text-sm font-semibold transition-colors",
               selected.includes(s.food)
@@ -125,6 +131,13 @@ export function MedicationFoodSuggestionStep({
           </button>
         ))}
       </div>
+
+      {/* medication.ts 상단 "⚠️ 화면에 반드시 지켜야 할 것" 1번(consultNotice 항상 노출) —
+          제안이 하나라도 있을 때만, 카드 전체에 한 줄만 덧붙인다(항목별로 안 넣는 이유는
+          위와 동일, 화면을 채우지 않기 위함). */}
+      {suggestions.length > 0 && consultNotice && (
+        <p className="text-xs text-muted-foreground">{consultNotice}</p>
+      )}
 
       <div className="flex flex-col gap-2">
         {customEntries.map((name) => (
