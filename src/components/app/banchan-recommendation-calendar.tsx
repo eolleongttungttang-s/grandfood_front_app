@@ -221,6 +221,8 @@ export function BanchanRecommendationCalendar({
   monthly,
   polling,
   surveyHref,
+  onTodayMealTypeChange,
+  todayCompletedMealTypes,
 }: {
   identity: WardIdentity;
   /** 항상 "실제 오늘이 속한 달"의 최신 상태 — 폴링 중엔 몇 초마다 갱신된다. 아래에서 다른
@@ -234,6 +236,14 @@ export function BanchanRecommendationCalendar({
    *  정보를 보호자가 대신 입력/수정할 화면이 없어(이 대상자는 자기 계정으로 직접 입력해야
    *  함) undefined를 넘기면 버튼 없이 안내 문구만 보여준다. */
   surveyHref?: string;
+  /** 오늘 날짜를 보고 있는 동안 이 안의 끼니 탭(selectedMealType)이 바뀔 때마다 호출된다 —
+   *  diet-view.tsx가 예전엔 따로 갖고 있던 "끼니 선택" 버튼을 없애고, 이 탭 하나로
+   *  "오늘의 O 추천 반찬 조합" 제목/영양성분까지 같이 바꾸기 위해 씀(2026-08-21, 두
+   *  끼니 선택 UI가 한 화면에 겹쳐 보인다는 피드백). 다른 날짜를 보고 있을 땐 안 부른다. */
+  onTodayMealTypeChange?: (mealType: BackendMealType) => void;
+  /** 오늘 이미 식전+식후 사진을 다 올린 끼니 — 오늘 날짜를 보고 있을 때만 탭에 완료 배지로
+   *  표시한다(예전엔 diet-view.tsx의 상단 버튼에 있던 표시를 여기로 옮겼다). */
+  todayCompletedMealTypes?: readonly BackendMealType[];
 }) {
   const [viewedMonth, setViewedMonth] = useState(monthly.month);
   // 오늘이 속한 달이 아닌 달은 방문할 때마다 조회 결과를 이 캐시에 쌓아둔다 — 달 하나짜리
@@ -335,6 +345,11 @@ export function BanchanRecommendationCalendar({
     setMealTypeTrackedDate(selected?.date ?? null);
     setSelectedMealType(selected?.date === todayStr ? defaultMealTypeForNow() : "breakfast");
   }
+  // 오늘 날짜를 보는 동안에만 상위(diet-view.tsx)에 지금 고른 끼니를 알려준다 — 다른 날짜를
+  // 보고 있을 땐 "오늘의 O 추천 반찬 조합" 제목이 그 날짜를 따라 바뀌면 안 되므로 안 부른다.
+  useEffect(() => {
+    if (selected?.date === todayStr) onTodayMealTypeChange?.(selectedMealType);
+  }, [selected?.date, selectedMealType, todayStr, onTodayMealTypeChange]);
 
   // 전날/다음날 버튼이 월 경계를 넘으면(예: 8월 31일 → 9월 1일) selectedDate만 옮기고
   // viewedMonth는 그대로 둬서, 헤더/달력 그리드는 계속 "8월"을 보여주는데 아래 날짜 상세는
@@ -662,6 +677,7 @@ export function BanchanRecommendationCalendar({
                     value={selectedMealType}
                     onChange={setSelectedMealType}
                     columns={3}
+                    completedValues={selected?.date === todayStr ? todayCompletedMealTypes : undefined}
                   />
                   {mealTypeItems.length === 0 ? (
                     <p className="text-sm text-muted-foreground">이 끼니엔 배정된 반찬이 없어요.</p>
