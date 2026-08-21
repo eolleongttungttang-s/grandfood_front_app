@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   ChevronRight,
+  Images,
   PartyPopper,
   Sparkles,
   Truck,
@@ -188,6 +189,12 @@ export function HomeView({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const beforePreview = useObjectUrl(beforePhoto);
   const afterPreview = useObjectUrl(afterPhoto);
+  // 촬영용 입력(capture="environment")과 별개로 갤러리 전용 입력을 하나 더 두고, 버튼으로
+  // 그 input.click()을 직접 트리거한다 — capture 속성이 있으면 갤러리 선택창이 아예 안 뜨는
+  // 경우가 많아서(2026-08-21), "촬영"과 "갤러리에서 선택"을 각자 다른 input으로 분리해야
+  // 카톡처럼 둘 다 제공할 수 있다.
+  const beforeGalleryInputRef = useRef<HTMLInputElement>(null);
+  const afterGalleryInputRef = useRef<HTMLInputElement>(null);
   const mealLogs = wardMealLogs(useLocalStore(mealLogStore), ward.id);
   const latestLog = mealLogs[mealLogs.length - 1];
 
@@ -485,7 +492,7 @@ export function HomeView({
                 막는다(analyzeLeftovers 버튼도 동일, diet-view.tsx에 있던 것과 동일한 이유). */}
             <div className="flex gap-2">
               <label
-                className="flex flex-1 cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-border bg-muted/40 p-5 text-center"
+                className="relative flex flex-1 cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-border bg-muted/40 p-5 text-center"
                 onClick={(e) => e.stopPropagation()}
               >
                 {beforePreview ? (
@@ -502,18 +509,39 @@ export function HomeView({
                   // JPEG로 변환하면서도 Android/데스크톱의 갤러리 선택창에서 예전에 찍어둔
                   // PNG/WEBP 사진까지 걸러지는 걸 막는다.
                   accept="image/jpeg,image/png,image/webp,image/gif"
-                  // capture="environment"를 빼면 기본 파일 선택창(갤러리부터 보여주는
-                  // 경우가 많음)이 뜬다 — 있으면 카메라 뷰파인더를 먼저 열고 옆에 작은 원형
-                  // 갤러리 바로가기(최근 사진 썸네일)를 같이 보여줘서, 촬영이 기본이면서
-                  // 갤러리도 한 탭이면 갈 수 있다(2026-08-21 갤럭시 실기기 확인 — 주 타겟이
-                  // 70~80대라 갤럭시 위주 대응이 우선).
+                  // capture="environment"가 있으면 카메라 뷰파인더가 먼저 뜨고(갤럭시 실기기
+                  // 확인, 주 타겟 70~80대 기준) 갤러리 선택은 아예 안 나오는 경우가 많다 —
+                  // 그래서 갤러리는 아래 버튼의 별도 input(갤러리 전용)으로 분리했다.
                   capture="environment"
+                  className="hidden"
+                  onChange={(e) => setBeforePhoto(e.target.files?.[0] ?? null)}
+                />
+                {/* 카톡 사진 첨부처럼 "촬영" 옆에 갤러리 바로가기를 따로 둔다 — 실제 최근 사진
+                    썸네일은 웹페이지가 갤러리를 미리 읽을 권한이 없어 못 그려주지만, 버튼을
+                    누르면 네이티브 갤러리 선택창이 뜨는 건 동일하다. preventDefault로 위
+                    label의 기본 동작(촬영용 input 열기)이 같이 발동하는 걸 막는다. */}
+                <button
+                  type="button"
+                  aria-label="갤러리에서 식전 사진 선택"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    beforeGalleryInputRef.current?.click();
+                  }}
+                  className="absolute right-2 bottom-2 flex h-9 w-9 items-center justify-center rounded-full bg-card text-foreground shadow ring-1 ring-border"
+                >
+                  <Images className="h-4 w-4" />
+                </button>
+                <input
+                  ref={beforeGalleryInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
                   className="hidden"
                   onChange={(e) => setBeforePhoto(e.target.files?.[0] ?? null)}
                 />
               </label>
               <label
-                className="flex flex-1 cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-border bg-muted/40 p-5 text-center"
+                className="relative flex flex-1 cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-border bg-muted/40 p-5 text-center"
                 onClick={(e) => e.stopPropagation()}
               >
                 {afterPreview ? (
@@ -527,6 +555,25 @@ export function HomeView({
                   type="file"
                   accept="image/jpeg,image/png,image/webp,image/gif"
                   capture="environment"
+                  className="hidden"
+                  onChange={(e) => setAfterPhoto(e.target.files?.[0] ?? null)}
+                />
+                <button
+                  type="button"
+                  aria-label="갤러리에서 식후 사진 선택"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    afterGalleryInputRef.current?.click();
+                  }}
+                  className="absolute right-2 bottom-2 flex h-9 w-9 items-center justify-center rounded-full bg-card text-foreground shadow ring-1 ring-border"
+                >
+                  <Images className="h-4 w-4" />
+                </button>
+                <input
+                  ref={afterGalleryInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
                   className="hidden"
                   onChange={(e) => setAfterPhoto(e.target.files?.[0] ?? null)}
                 />
