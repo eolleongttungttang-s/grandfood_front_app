@@ -15,7 +15,19 @@ import { TopBar } from "@/components/app/top-bar";
 import { SpeakableCard } from "@/components/app/speakable-card";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { ExpandToggle } from "@/components/app/expand-toggle";
+import { NutrientMeter } from "@/components/app/nutrient-meter";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
+
+// 이 화면의 목표 대비 비교는 todayMenu가 이미 한 끼(mealType)로 걸러 놓은 값인데, target*는
+// "하루" 목표치 그대로 넘어온다(today-menu.ts 참고) — 하루 목표를 한 끼 합계에 그대로 들이대면
+// 항상 30%대로만 보여서 의미가 없다. 이 반찬 추천은 항상 아침/점심/저녁 3끼로 배정되므로
+// (BanchanDeliveryScheduler의 FACILITY_MEAL_TYPES 참고) 하루 목표를 3등분한 근사치를 "이 끼니
+// 목표"로 쓴다 — 백엔드가 반찬 배정 자체를 계산할 때 쓰는 것과 같은 3등분 전제다.
+const MEALS_PER_DAY = 3;
+
+function perMealTarget(dailyTarget: number | null): number | null {
+  return dailyTarget == null ? null : dailyTarget / MEALS_PER_DAY;
+}
 
 // meal-log-store.ts의 MealSlot("아침"/"점심"/"저녁")을 백엔드 meal_type("breakfast"/
 // "lunch"/"dinner")으로 — diet-day-detail.tsx의 MEAL_TYPE_LABEL과 반대 방향 매핑. 최초
@@ -108,10 +120,19 @@ export function DietView({
   // "나트륨 0mg..." 같은 잘못된 값이나 빈 목록 문장이 화면 문구와 다르게 읽힌다 — 시각 카드와
   // 똑같이 생성 중 안내로 맞춘다.
   const mealTypeLabel = BACKEND_MEAL_TYPE_LABEL[mealType];
+  // 목표치가 있으면 "이 끼니 목표 대비 몇 %"까지 읽어준다 — 숫자만 불러주면 시각 카드와
+  // 마찬가지로 좋은지 나쁜지 판단하기 어렵다는 지적(2026-08-21)이 TTS에도 똑같이 적용된다.
+  const kcalTarget = perMealTarget(todayMenu.targetCalorieKcal);
+  const proteinTarget = perMealTarget(todayMenu.targetProteinG);
+  const sodiumTarget = perMealTarget(todayMenu.targetSodiumMg);
+  const pctOf = (value: number, target: number | null) =>
+    target != null && target > 0 ? `(목표의 ${Math.round((value / target) * 100)}%)` : "";
   const recommendedComboSpeech = todayMenu.isGenerating
     ? TODAY_MENU_GENERATING_MESSAGE
-    : `오늘의 ${mealTypeLabel} 추천 반찬 조합이에요. 나트륨 ${todayMenu.totalSodiumMg}mg, ` +
-      `단백질 ${todayMenu.totalProteinG}g, 열량 ${todayMenu.totalKcal}kcal입니다.`;
+    : `오늘의 ${mealTypeLabel} 추천 반찬 조합이에요. ` +
+      `나트륨 ${todayMenu.totalSodiumMg}mg${pctOf(todayMenu.totalSodiumMg, sodiumTarget)}, ` +
+      `단백질 ${todayMenu.totalProteinG}g${pctOf(todayMenu.totalProteinG, proteinTarget)}, ` +
+      `열량 ${todayMenu.totalKcal}kcal${pctOf(todayMenu.totalKcal, kcalTarget)}입니다.`;
   const reasonsSpeech = todayMenu.isGenerating
     ? TODAY_MENU_GENERATING_MESSAGE
     : todayMenu.reasons.join(" ");
@@ -168,20 +189,76 @@ export function DietView({
               끼니 탭이 이 제목/영양성분까지 같이 바꾼다(onTodayMealTypeChange, 2026-08-21). */}
           {todayMenu.isGenerating ? (
             <p className="text-sm text-sidebar-foreground/80">{TODAY_MENU_GENERATING_MESSAGE}</p>
+          ) : todayMenu.targetCalorieKcal == null ? (
+            // 목표치 미설정(온보딩에 키/체중/활동량 미입력) — 값 자체는 계속 보여주되(기존
+            // 동작 유지), 목표 대비 비교를 보려면 뭘 해야 하는지 바로 옆에 안내한다.
+            // records-view.tsx("오늘 영양성분 분석")는 이 경우 값을 아예 숨기고 CTA만
+            // 보여주는데, 여긴 이미 값이 노출돼 있던 화면이라 정보를 줄이지 않는 쪽을 택했다.
+            <div className="flex flex-col gap-2 pt-1">
+              <div className="flex gap-4 text-xs">
+                <div className="flex flex-col">
+                  <span className="text-sidebar-foreground/60">나트륨</span>
+                  <span className="font-semibold">{todayMenu.totalSodiumMg}mg</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-sidebar-foreground/60">단백질</span>
+                  <span className="font-semibold">{todayMenu.totalProteinG}g</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-sidebar-foreground/60">열량</span>
+                  <span className="font-semibold">{todayMenu.totalKcal}kcal</span>
+                </div>
+              </div>
+              <Link
+                href="/user/profile"
+                className="text-xs font-semibold text-sidebar-primary underline underline-offset-2"
+              >
+                건강 프로필을 입력하면 목표 대비 비교를 볼 수 있어요
+              </Link>
+            </div>
           ) : (
-            <div className="flex gap-4 pt-1 text-xs">
-              <div className="flex flex-col">
-                <span className="text-sidebar-foreground/60">나트륨</span>
-                <span className="font-semibold">{todayMenu.totalSodiumMg}mg</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-sidebar-foreground/60">단백질</span>
-                <span className="font-semibold">{todayMenu.totalProteinG}g</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-sidebar-foreground/60">열량</span>
-                <span className="font-semibold">{todayMenu.totalKcal}kcal</span>
-              </div>
+            // 아래 진입 조건(targetCalorieKcal != null)은 열량 목표만 보장한다 — 단백질/
+            // 나트륨 목표는 이론상 개별적으로 null일 수 있어(records-view.tsx와 동일한
+            // 방어) 각자 없으면 막대 대신 원래 raw 표시로 개별 폴백한다.
+            <div className="flex flex-col gap-2.5 pt-1">
+              {sodiumTarget != null ? (
+                <NutrientMeter
+                  label="나트륨"
+                  value={todayMenu.totalSodiumMg}
+                  target={sodiumTarget}
+                  unit="mg"
+                  tone="sidebar"
+                />
+              ) : (
+                <div className="flex flex-col text-xs">
+                  <span className="text-sidebar-foreground/60">나트륨</span>
+                  <span className="font-semibold">{todayMenu.totalSodiumMg}mg</span>
+                </div>
+              )}
+              {proteinTarget != null ? (
+                <NutrientMeter
+                  label="단백질"
+                  value={todayMenu.totalProteinG}
+                  target={proteinTarget}
+                  unit="g"
+                  tone="sidebar"
+                />
+              ) : (
+                <div className="flex flex-col text-xs">
+                  <span className="text-sidebar-foreground/60">단백질</span>
+                  <span className="font-semibold">{todayMenu.totalProteinG}g</span>
+                </div>
+              )}
+              <NutrientMeter
+                label="열량"
+                value={todayMenu.totalKcal}
+                target={kcalTarget ?? 0}
+                unit="kcal"
+                tone="sidebar"
+              />
+              <p className="text-[11px] text-sidebar-foreground/60">
+                이 끼니 목표는 하루 목표치를 3끼로 나눈 값이에요.
+              </p>
             </div>
           )}
         </SpeakableCard>
