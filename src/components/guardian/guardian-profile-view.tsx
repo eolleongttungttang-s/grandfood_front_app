@@ -96,7 +96,10 @@ export function GuardianProfileView({
   async function createInvite() {
     setCreatingInvite(true);
     try {
-      await createGuardianInvite({ wardIds: wards.map((w) => w.id) });
+      await createGuardianInvite({
+        wardIds: wards.map((w) => w.id),
+        expectedGuardianLoginId: account.loginId,
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "초대 코드 발급에 실패했어요.");
     } finally {

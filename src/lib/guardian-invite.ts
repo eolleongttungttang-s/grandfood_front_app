@@ -6,7 +6,11 @@
 // 다른 store들처럼 localStorage 기반으로 바꿔서 새로고침해도 유지되게 한다.
 
 import { API_BASE_URL } from "@/lib/api-config";
-import { getBackendGuardianSessionForWard, getCachedBackendWardId } from "@/lib/backend-auth";
+import {
+  findGuardianLoginIdForWard,
+  getBackendGuardianSessionForWard,
+  getCachedBackendWardId,
+} from "@/lib/backend-auth";
 import { createLocalStore } from "@/lib/local-store";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
@@ -14,6 +18,11 @@ const REQUEST_TIMEOUT_MS = 15_000;
 
 export type CreateGuardianInviteCommand = {
   wardIds: string[];
+  /** meal-dashboard.ts의 resolveGuardianOnlyAccess와 같은 안전망 — 지금 로그인한
+   *  보호자 계정을 넘겨주면, 이 브라우저에 캐시된 다른 보호자 세션(보호자 A/B가 같은
+   *  기기를 같이 쓰는 경우 등)으로 잘못 초대장이 발급되는 걸 막는다. 생략하면(옵션)
+   *  기존처럼 그 wardId를 관리하는 아무 캐시된 세션이나 쓴다. */
+  expectedGuardianLoginId?: string;
 };
 
 export type GuardianInviteResult = {
@@ -44,6 +53,19 @@ export const guardianInviteStore = createLocalStore<GuardianInviteResult | null>
 export async function createGuardianInvite(cmd: CreateGuardianInviteCommand): Promise<GuardianInviteResult> {
   if (cmd.wardIds.length === 0) {
     throw new Error("초대할 대상자를 한 명 이상 선택해 주세요.");
+  }
+
+  // cmd.expectedGuardianLoginId가 있으면, 넘어온 모든 wardId가 실제로 "지금 로그인한
+  // 그 계정"이 관리하는 대상자인지부터 확인한다 — 이 확인 없이 캐시된 아무 보호자
+  // 세션이나 쓰면, 이 브라우저에 다른 보호자 세션이 남아있을 때 엉뚱한 보호자 이름으로
+  // 초대장이 발급될 수 있다(meal-dashboard.ts resolveGuardianOnlyAccess와 같은 이유 —
+  // 코드 리뷰 지적: fetchGuardianDietHistory가 이 확인 없이 캐시된 아무 세션이나 썼던
+  // 것과 같은 문제).
+  if (
+    cmd.expectedGuardianLoginId &&
+    cmd.wardIds.some((wardId) => findGuardianLoginIdForWard(wardId) !== cmd.expectedGuardianLoginId)
+  ) {
+    throw new Error("로그인 정보가 이 대상자와 맞지 않아요. 다시 로그인한 뒤 시도해 주세요.");
   }
 
   // 이 보호자의 백엔드 세션은 관리하는 대상자 아무나로나 찾을 수 있다(같은 보호자 소유이므로
