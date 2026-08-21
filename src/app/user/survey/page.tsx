@@ -18,7 +18,8 @@ import {
   toBackendActivityLevel,
 } from "@/lib/health-profile";
 import { CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
-import { getBackendConditionFlags, submitSelfHealthProfileBackend } from "@/lib/backend-auth";
+import { getBackendConditionFlags, getBackendMedicationFlags, submitSelfHealthProfileBackend } from "@/lib/backend-auth";
+import { syncMedicationFoodRestrictions } from "@/lib/medication-food-restrictions";
 import { TopBar } from "@/components/app/top-bar";
 import { useLocalStore } from "@/lib/use-store";
 
@@ -90,6 +91,7 @@ function UserSurveyPageContent() {
       age: ward.age,
       address: ward.address,
       conditionFlags: getBackendConditionFlags(wardId),
+      medicationFlags: getBackendMedicationFlags(wardId),
       gender: ward.gender === "여" ? "female" : "male",
       heightCm,
       weightKg,
@@ -97,6 +99,18 @@ function UserSurveyPageContent() {
     });
     if ("error" in result) {
       toast.info("일부 기능은 나중에 이 계정으로 다시 로그인하면 활성화돼요.");
+      return;
+    }
+
+    // 약물표 제안 중 확정한 음식들 — 설문에서 고른 값을 그대로 전체 목록으로 보낸다
+    // (홈 화면에 별도 "제한 음식" 토글 UI가 없어 기존 값과 합칠 필요가 없음, dislikes와
+    // 다른 점).
+    const avoidances = getCareProfile(wardId)?.medicationFoodAvoidances ?? [];
+    if (avoidances.length > 0) {
+      await syncMedicationFoodRestrictions(
+        { mockWardId: wardId, name: ward.name, age: ward.age, address: ward.address },
+        avoidances
+      );
     }
   }
 

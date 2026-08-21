@@ -9,7 +9,8 @@ import { getWard } from "@/lib/wards";
 import { careProfileStore, getCareProfile, registerCareProfile, skipCareProfile } from "@/lib/care-profile";
 import { healthProfileStore, registerHealthProfile, toBackendActivityLevel } from "@/lib/health-profile";
 import { CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
-import { getBackendConditionFlags, submitSelfHealthProfileBackend } from "@/lib/backend-auth";
+import { getBackendConditionFlags, getBackendMedicationFlags, submitSelfHealthProfileBackend } from "@/lib/backend-auth";
+import { syncMedicationFoodRestrictions } from "@/lib/medication-food-restrictions";
 import { TopBar } from "@/components/app/top-bar";
 import { useLocalStore } from "@/lib/use-store";
 
@@ -80,6 +81,7 @@ function GuardianWardSurveyPageClient() {
       age: ward.age,
       address: ward.address,
       conditionFlags: getBackendConditionFlags(ward.id),
+      medicationFlags: getBackendMedicationFlags(ward.id),
       gender: ward.gender === "여" ? "female" : "male",
       heightCm,
       weightKg,
@@ -87,6 +89,15 @@ function GuardianWardSurveyPageClient() {
     });
     if ("error" in result) {
       toast.info("일부 기능은 나중에 다시 로그인하면 활성화돼요.");
+      return;
+    }
+
+    const avoidances = getCareProfile(ward.id)?.medicationFoodAvoidances ?? [];
+    if (avoidances.length > 0) {
+      await syncMedicationFoodRestrictions(
+        { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
+        avoidances
+      );
     }
   }
 

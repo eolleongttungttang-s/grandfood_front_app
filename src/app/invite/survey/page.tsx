@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 import { useSession } from "@/lib/session";
 import { getWard } from "@/lib/wards";
-import { registerCareProfile, skipCareProfile } from "@/lib/care-profile";
+import { getCareProfile, registerCareProfile, skipCareProfile } from "@/lib/care-profile";
 import {
   healthProfileStore,
   mergeHealthMetrics,
@@ -17,6 +17,7 @@ import {
   backendWardIdMapStore,
   deriveElderBackendPassword,
   getBackendConditionFlags,
+  getBackendMedicationFlags,
   loginUserBackend,
   registerElderFromInviteBackend,
 } from "@/lib/backend-auth";
@@ -49,6 +50,8 @@ function InviteSurveyPageContent() {
       address: account.address ?? "",
       planType: account.planType ?? "basic",
       conditionFlags: getBackendConditionFlags(wardId),
+      medicationFlags: getBackendMedicationFlags(wardId),
+      foodRestrictions: getCareProfile(wardId)?.medicationFoodAvoidances ?? [],
       ttsCallConsent: account.ttsCallConsent,
       gender: GENDER_TO_BACKEND[ward!.gender],
       heightCm: health.heightCm,
