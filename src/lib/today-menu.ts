@@ -50,8 +50,13 @@ export type TodayMenu = {
   isGenerating: boolean;
 };
 
+// 부동소수점 덧셈은 0.1 + 0.2 같은 오차가 그대로 쌓인다 — 100g당 단백질 같은 소수 값을
+// 여러 개 더하면 "24.630000000000003g"처럼 화면에 그대로 노출된다(2026-08-21 버그 리포트).
+// 소수점 둘째 자리에서 반올림해 오차를 지운다 — toFixed(2)로 문자열화하지 않는 이유는
+// 나트륨/열량처럼 원래 정수인 값에 불필요한 ".00"이 붙는 걸 막기 위함.
 function sum(values: (number | null)[]): number {
-  return values.reduce<number>((acc, v) => acc + (v ?? 0), 0);
+  const total = values.reduce<number>((acc, v) => acc + (v ?? 0), 0);
+  return Math.round(total * 100) / 100;
 }
 
 /** isGenerating일 때 화면(JSX)과 TTS 문장 양쪽이 공통으로 쓰는 안내 문구 — diet-view.tsx/
