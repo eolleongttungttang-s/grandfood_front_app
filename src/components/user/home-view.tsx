@@ -497,9 +497,11 @@ export function HomeView({
                 <span className="text-base font-semibold text-foreground">식전 사진</span>
                 <input
                   type="file"
-                  // iOS Safari는 accept="image/*"면 HEIC 원본을 그대로 넘긴다 — image/jpeg로
-                  // 좁히면 카메라 캡처 시점에 자동으로 JPEG로 변환해서 넘겨준다.
-                  accept="image/jpeg"
+                  // iOS Safari는 accept="image/*"면 HEIC 원본을 그대로 넘긴다 — HEIC/HEIF만
+                  // 빼고 나머지 흔한 포맷은 다 허용해야, 카메라 캡처 시점엔 iOS가 자동으로
+                  // JPEG로 변환하면서도 Android/데스크톱의 갤러리 선택창에서 예전에 찍어둔
+                  // PNG/WEBP 사진까지 걸러지는 걸 막는다.
+                  accept="image/jpeg,image/png,image/webp,image/gif"
                   capture="environment"
                   className="hidden"
                   onChange={(e) => setBeforePhoto(e.target.files?.[0] ?? null)}
@@ -518,7 +520,7 @@ export function HomeView({
                 <span className="text-base font-semibold text-foreground">식후 사진</span>
                 <input
                   type="file"
-                  accept="image/jpeg"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
                   capture="environment"
                   className="hidden"
                   onChange={(e) => setAfterPhoto(e.target.files?.[0] ?? null)}
