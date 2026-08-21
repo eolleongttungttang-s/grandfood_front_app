@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Mic, Send, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,6 +15,7 @@ import {
   addMessage,
   assistantThreadId,
   chatStore,
+  clearThread,
   threadMessages,
 } from "@/lib/chat-store";
 import { askHealthQuestion } from "@/lib/rag-chat";
@@ -23,6 +25,7 @@ import { useLocalStore } from "@/lib/use-store";
 // 기반으로만 답하도록 되어 있어(domains/rag/service.py), 건강과 무관한 잡담엔 "모른다"고
 // 답할 수 있다 — 그래도 하나의 도우미로 합치는 쪽을 택했다(2026-08-06 논의).
 export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) {
+  const router = useRouter();
   const threadId = assistantThreadId(ward.id);
   const messages = threadMessages(useLocalStore(chatStore), threadId);
   const [text, setText] = useState("");
@@ -38,6 +41,12 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
   // 누르는 단계는 남기되, 그 단계를 최대한 눈에 띄게 만드는 절충.
   const [justRecognized, setJustRecognized] = useState(false);
   const listenControllerRef = useRef<ListenController | null>(null);
+  // send()가 응답을 기다리는 도중 화면을 벗어나면(하단 탭 이동 등) 아래 clearThread
+  // 이펙트가 먼저 실행돼 대화를 지우는데, 그 뒤에 응답이 도착하면 addMessage가 방금 지운
+  // 스토어에 질문 없는 AI 답변만 다시 써 넣는다(2026-08-21 코드 리뷰 지적) — 다음에 이
+  // 화면에 들어오면 "항상 빈 대화로 시작"이어야 하는데 그 답변만 고아로 남는다. 응답이
+  // 도착했을 때 이미 벗어났으면 store에 쓰지 않도록 이 플래그로 막는다.
+  const unmountedRef = useRef(false);
 
   // 강조를 계속 켜두면 나중엔 그냥 배경처럼 안 보이게 된다 — 몇 초 뒤 스스로 꺼지게
   // 해서, 그 사이에도 안 누르면 평소(안 강조된) 버튼으로 돌아간다.
@@ -57,6 +66,18 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
     };
   }, []);
 
+  // "나가기"/"재접속 시 초기화"(2026-08-21 피드백)를 하나로 묶는다 — 화면을 벗어날 때
+  // (아래 TopBar 뒤로가기든, 하단 탭으로 다른 화면 이동이든, 브라우저 뒤로가기든 상관없이)
+  // 이 대화만 지운다. 다음에 다시 들어오면 항상 빈 대화로 시작 — 마운트 시점에 지우면
+  // localStorage에 남아있던 이전 대화가 지워지기 전에 한 순간 화면에 비쳤다 사라지는
+  // 깜빡임이 생기므로, 대신 나갈 때(언마운트) 지워서 다음 진입은 처음부터 깨끗하다.
+  useEffect(() => {
+    return () => {
+      unmountedRef.current = true;
+      clearThread(threadId);
+    };
+  }, [threadId]);
+
   async function send() {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
@@ -73,17 +94,19 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
         wardAddress: ward.address,
         query: trimmed,
       });
-      addMessage(threadId, "AI 도우미", result.answer);
+      if (!unmountedRef.current) addMessage(threadId, "AI 도우미", result.answer);
     } catch (err) {
-      setError(
-        err instanceof TypeError
-          ? "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요."
-          : err instanceof Error
-            ? err.message
-            : "AI 도우미가 답변하지 못했어요."
-      );
+      if (!unmountedRef.current) {
+        setError(
+          err instanceof TypeError
+            ? "서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요."
+            : err instanceof Error
+              ? err.message
+              : "AI 도우미가 답변하지 못했어요."
+        );
+      }
     } finally {
-      setSending(false);
+      if (!unmountedRef.current) setSending(false);
     }
   }
 
@@ -132,7 +155,11 @@ export function AssistantChatView({ ward, name }: { ward: Ward; name: string }) 
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
-      <TopBar title="AI 도우미" subtitle="건강 질문도, 편한 이야기도 물어보세요" />
+      <TopBar
+        title="AI 도우미"
+        subtitle="건강 질문도, 편한 이야기도 물어보세요"
+        onBack={() => router.back()}
+      />
 
       <div className="flex flex-col gap-3 px-5">
         {/* 대화가 비어있을 때만 보이는 첫인사 — 채팅창이 텅 비어 있으면 뭘 물어봐야 할지

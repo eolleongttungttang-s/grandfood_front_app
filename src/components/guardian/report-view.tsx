@@ -7,12 +7,14 @@ import { ChevronLeft, Download } from "lucide-react";
 import { Ward, WardDetail } from "@/lib/wards";
 import { getNutritionReport, ReportPeriod } from "@/lib/reports";
 import {
+  deriveDailyLeftover,
   fetchGuardianDietHistory,
   fetchGuardianHealthReport,
   fetchGuardianNutritionGaps,
   HealthReportSummary,
   NutritionGapItem,
 } from "@/lib/meal-dashboard";
+import { recentKstDateKeys } from "@/lib/ward-meal-dashboard";
 import { deriveHealthInsight } from "@/lib/health-insights";
 import { fetchRecipeRecommendations, type RecipeRecommendationItem } from "@/lib/recipe-recommendations";
 import { mealLogStore, wardMealLogs } from "@/lib/meal-log-store";
@@ -72,8 +74,15 @@ export function ReportView({
 
     fetchGuardianDietHistory(identity, days, viewerGuardianLoginId).then((items) => {
       if (cancelled || !items || items.length === 0) return;
-      const completedCount = items.filter((i) => i.completed).length;
-      setBackendCompleteRate(Math.round((completedCount / items.length) * 100));
+      // "완료된 끼니 비율"이 아니라 "얼마나 실제로 드셨는지"(100 - 평균 잔반율)로 바꿨다
+      // (2026-08-21 피드백) — 사진 전후 비교로 이미 정확한 잔반율을 아는데, 사진을
+      // 찍었는지 여부만 보는 완료율은 "얼마나 남겼는지"를 담지 못한다. 라벨("식사
+      // 완료율")은 그대로 두고 계산 기준만 바꾼다.
+      const daily = deriveDailyLeftover(items, recentKstDateKeys(days));
+      const known = daily.filter((d) => d.avgLeftoverPercent !== null);
+      if (known.length === 0) return;
+      const avgLeftover = known.reduce((sum, d) => sum + (d.avgLeftoverPercent ?? 0), 0) / known.length;
+      setBackendCompleteRate(Math.round(100 - avgLeftover));
     });
     fetchGuardianNutritionGaps(identity, days, viewerGuardianLoginId).then((items) => {
       if (!cancelled && items) setBackendGaps(items);

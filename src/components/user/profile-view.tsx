@@ -55,6 +55,17 @@ export function ProfileView({
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   useLocalStore(careProfileStore);
   const careProfile = getCareProfile(ward.id);
+  // "건강 프로필 다시 입력하기" 버튼 문구 — 생활 정보 쪽(careProfile 존재 여부)과 같은
+  // 패턴이다. 건강 프로필은 completed 같은 별도 추적이 없어서(값 전부가 선택 항목이라
+  // care-survey-view.tsx도 이 카드 진입 시 answeredHealth 여부를 존재 유무로만 판단한다),
+  // 여기도 6개 필드 중 하나라도 값이 있으면 "이미 입력한 적 있음"으로 본다.
+  const hasHealthProfileData =
+    detail.healthProfile.systolicBP != null ||
+    detail.healthProfile.diastolicBP != null ||
+    detail.healthProfile.fastingGlucose != null ||
+    detail.healthProfile.heightCm != null ||
+    detail.healthProfile.weightKg != null ||
+    detail.healthProfile.activityLevel != null;
 
   // 서버에 실제로 조회할 수 있는 프로필이 있으면(보호자가 관리하는 대상자를 이 브라우저에서
   // 보호자로도 로그인해본 적 있는 경우 — backend-auth.ts의 fetchBackendWardProfile 주석
@@ -161,17 +172,19 @@ export function ProfileView({
             variant="outline"
             className="w-full justify-center"
             nativeButton={false}
-            render={<Link href="/user/survey" />}
+            render={<Link href="/user/survey?section=care" />}
           >
             <ClipboardEdit />
             {careProfile ? "생활 정보 다시 입력하기" : "생활 정보 입력하기"}
           </Button>
         </div>
 
-        {/* "생활 정보 입력하기" 설문(care-survey-view.tsx) 하나가 위 생활 정보와 이 건강
-            프로필을 한 번에 같이 받는다 — 입력 화면(여기, 마이페이지)과 결과 확인 화면이
-            갈라져 있으면 헷갈린다고 판단해 예전엔 섭취기록 탭에 있던 이 카드를 여기로
-            옮겼다(2026-08-13 피드백). */}
+        {/* care-survey-view.tsx의 같은 설문이 생활 정보와 이 건강 프로필을 문항으로 이어
+            받는다 — 입력 화면(여기, 마이페이지)과 결과 확인 화면이 갈라져 있으면 헷갈린다고
+            판단해 예전엔 섭취기록 탭에 있던 이 카드를 여기로 옮겼다(2026-08-13 피드백).
+            다만 위 "생활 정보" 버튼만 있고 이 카드엔 수정 버튼이 없어 건강 프로필만 따로
+            고칠 방법이 없었다(2026-08-21 피드백) — section="health"로 이 카드만 다루는
+            흐름을 따로 두고, 아래에 그 진입 버튼을 추가한다. */}
         <div className="flex flex-col gap-0.5 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-baseline justify-between pb-1">
             <span className="text-xs font-bold text-foreground">건강 프로필</span>
@@ -224,6 +237,15 @@ export function ProfileView({
                 : "미입력"
             }
           />
+          <Button
+            variant="outline"
+            className="mt-3 w-full justify-center"
+            nativeButton={false}
+            render={<Link href="/user/survey?section=health" />}
+          >
+            <ClipboardEdit />
+            {hasHealthProfileData ? "건강 프로필 다시 입력하기" : "건강 프로필 입력하기"}
+          </Button>
         </div>
 
         <Button

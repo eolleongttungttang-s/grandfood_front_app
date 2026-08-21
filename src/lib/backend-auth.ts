@@ -772,6 +772,22 @@ export async function submitSelfHealthProfileBackend(params: {
   // 있었다 — SelfHealthProfileRequest가 이미 받는 필드인데 프론트가 안 채웠던 것.
   // care-survey-view.tsx의 복약 체크리스트 답변을 실제로 반영하려면 필요하다.
   medicationFlags: string[];
+  // 질환 체크리스트에 자유 텍스트로 덧붙인 설명(care-profile.ts의 conditionsNote) —
+  // SelfHealthProfileRequest가 이미 받는 필드인데 지금까지 안 보내고 있었다(이슈 #80).
+  // health_profiles.conditions 컬럼은 매 저장마다 새 스냅샷 행에 값을 그대로 덮어써서
+  // (submit_own_health_profile이 매번 create_health_profile로 새 행을 만듦, get_latest_
+  // health_profile이 항상 최신 행만 읽음) 반복 저장해도 누적/중복 문제가 없다 — food_rules
+  // 처럼 append-only 테이블에 매번 새 행이 쌓이는 것과는 다르다.
+  //
+  // food_rules(알레르기·기피 재료)는 일부러 여기 안 넣는다 — submit_own_health_profile의
+  // food_rules는 create_food_rules(append-only)를 쓴다(health/repository.py 확인).
+  // "기피"(dislike)/"약물표 확정 기피"(restriction)는 이미 별도 PUT 교체 엔드포인트
+  // (dislikes-store.ts/medication-food-restrictions.ts)가 있어 안전한데, "알레르기"(allergy)
+  // 타입은 그런 교체 엔드포인트가 없다 — 이 함수는 "생활 정보 다시 입력하기"에서 한 항목만
+  // 고쳐도 매번 다시 호출되므로, 여기로 알레르기를 보내면 저장할 때마다 같은 알레르기 행이
+  // 중복 누적된다. 백엔드에 allergy용 교체 엔드포인트(또는 동급 방식)가 생기기 전까지는
+  // 보내지 않는다.
+  conditionsNote?: string;
   // BMR/TDEE + KDRI 기반 서버 영양 목표치 계산 전용(전부 선택) — health-profile.ts의
   // HealthMetricsForm(키/몸무게/활동량)과 signup 시점의 성별을 실어 보내면, care-survey-view.tsx
   // 설문에서 여기까지 다 입력한 이용자는 실제 BMR/TDEE 계산까지 받을 수 있다. 넷 다 없어도
@@ -803,6 +819,7 @@ export async function submitSelfHealthProfileBackend(params: {
       body: JSON.stringify({
         condition_flags: params.conditionFlags,
         medication_flags: params.medicationFlags,
+        conditions_note: params.conditionsNote,
         gender: params.gender,
         height_cm: params.heightCm,
         weight_kg: params.weightKg,

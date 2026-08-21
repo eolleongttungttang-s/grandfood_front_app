@@ -8,7 +8,7 @@ import { useSession } from "@/lib/session";
 import { getWard } from "@/lib/wards";
 import { careProfileStore, getCareProfile, registerCareProfile, skipCareProfile } from "@/lib/care-profile";
 import { healthProfileStore, registerHealthProfile, toBackendActivityLevel } from "@/lib/health-profile";
-import { CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
+import { CareSurveySection, CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
 import { getBackendConditionFlags, getBackendMedicationFlags, submitSelfHealthProfileBackend } from "@/lib/backend-auth";
 import { syncMedicationFoodRestrictions } from "@/lib/medication-food-restrictions";
 import { TopBar } from "@/components/app/top-bar";
@@ -52,6 +52,10 @@ function GuardianWardSurveyPageClient() {
   const existing = getCareProfile(wardId);
   const existingHealth = healthProfiles[wardId];
   const afterCompleteHref = `/guardian/wards/detail?id=${wardId}`;
+  // user/survey/page.tsx와 동일 — ?section 없이 들어오면 예전 그대로 15문항 통합 흐름.
+  const sectionParam = searchParams.get("section");
+  const section: CareSurveySection =
+    sectionParam === "care" || sectionParam === "health" ? sectionParam : "both";
 
   // user/survey/page.tsx의 saveHealthMetrics와 같은 이유(개별 필드 단위로 병합, 신체 수치를
   // 하나도 안 넣어도 condition_flags는 항상 백엔드로 보내야 함)로 거의 동일하게 구성했다.
@@ -82,6 +86,7 @@ function GuardianWardSurveyPageClient() {
       address: ward.address,
       conditionFlags: getBackendConditionFlags(ward.id),
       medicationFlags: getBackendMedicationFlags(ward.id),
+      conditionsNote: getCareProfile(ward.id)?.conditionsNote || undefined,
       gender: ward.gender === "여" ? "female" : "male",
       heightCm,
       weightKg,
@@ -101,22 +106,26 @@ function GuardianWardSurveyPageClient() {
     }
   }
 
+  const sectionLabel = section === "health" ? "건강 프로필" : "생활 정보";
   return (
     <div className="flex flex-1 flex-col">
-      <TopBar title={`${ward.name}님 생활 정보 수정`} subtitle="언제든 다시 입력하실 수 있어요" />
+      <TopBar title={`${ward.name}님 ${sectionLabel} 수정`} subtitle="언제든 다시 입력하실 수 있어요" />
       <CareSurveyView
         wardId={ward.id}
         wardName={ward.name}
+        section={section}
         initialValues={existing}
         initialHealthValues={existingHealth}
         onComplete={async (cmd, health) => {
-          await registerCareProfile(cmd);
+          // user/survey/page.tsx와 같은 이유 — 건강 프로필만 고치는 흐름에선 생활 정보를
+          // completed:true로 확정하면 안 된다.
+          if (section !== "health") await registerCareProfile(cmd);
           await saveHealthMetrics(health);
           toast.success("입력해주셔서 감사해요!");
           router.push(afterCompleteHref);
         }}
         onSkip={async (partial, answeredStep, health) => {
-          await skipCareProfile(ward.id, partial, answeredStep);
+          if (section !== "health") await skipCareProfile(ward.id, partial, answeredStep);
           await saveHealthMetrics(health);
           router.push(afterCompleteHref);
         }}

@@ -17,7 +17,7 @@ import {
   registerHealthProfile,
   toBackendActivityLevel,
 } from "@/lib/health-profile";
-import { CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
+import { CareSurveySection, CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
 import { getBackendConditionFlags, getBackendMedicationFlags, submitSelfHealthProfileBackend } from "@/lib/backend-auth";
 import { syncMedicationFoodRestrictions } from "@/lib/medication-food-restrictions";
 import { TopBar } from "@/components/app/top-bar";
@@ -41,6 +41,12 @@ function UserSurveyPageContent() {
     returnToParam && returnToParam.startsWith("/") && !returnToParam.startsWith("//")
       ? returnToParam
       : null;
+  // 마이 화면이 "생활 정보"/"건강 프로필" 두 카드를 각자 따로 수정할 수 있게 진입점을
+  // 나눴다(2026-08-21 피드백) — ?section 없이 들어오면(최초 온보딩, /signup?first=1) 예전
+  // 그대로 15문항을 한 흐름으로 묻는다.
+  const sectionParam = searchParams.get("section");
+  const section: CareSurveySection =
+    sectionParam === "care" || sectionParam === "health" ? sectionParam : "both";
   const { account } = useSession();
   const wardId = account?.selfWardId;
   const ward = wardId ? getWard(wardId) : undefined;
@@ -92,6 +98,7 @@ function UserSurveyPageContent() {
       address: ward.address,
       conditionFlags: getBackendConditionFlags(wardId),
       medicationFlags: getBackendMedicationFlags(wardId),
+      conditionsNote: getCareProfile(wardId)?.conditionsNote || undefined,
       gender: ward.gender === "여" ? "female" : "male",
       heightCm,
       weightKg,
@@ -114,25 +121,31 @@ function UserSurveyPageContent() {
     }
   }
 
+  const sectionLabel = section === "health" ? "건강 프로필" : "생활 정보";
   return (
     <div className="flex flex-1 flex-col">
       <TopBar
-        title={isFirstTime ? "생활 정보 입력" : "생활 정보 수정"}
+        title={isFirstTime ? "생활 정보 입력" : `${sectionLabel} 수정`}
         subtitle={isFirstTime ? "더 꼭 맞는 식단을 위해 몇 가지만 여쭤볼게요" : "언제든 다시 입력하실 수 있어요"}
       />
       <CareSurveyView
         wardId={wardId}
         wardName={ward.name}
+        section={section}
         initialValues={existing}
         initialHealthValues={existingHealth}
         onComplete={async (cmd, health) => {
-          await registerCareProfile(cmd);
+          // "건강 프로필"만 고치는 흐름에선 생활 정보(care-profile) 쪽은 이번에 전혀 안
+          // 건드렸으니 registerCareProfile을 호출하면 안 된다 — 그러면 아직 한 번도 안
+          // 물어본 생활 정보 문항까지 EMPTY_CARE_PROFILE_COMMAND 기본값 그대로
+          // completed:true로 확정돼버린다(2026-08-21, 분리하며 발견).
+          if (section !== "health") await registerCareProfile(cmd);
           await saveHealthMetrics(health);
           toast.success("입력해주셔서 감사해요!");
           router.push(afterCompleteHref);
         }}
         onSkip={async (partial, answeredStep, health) => {
-          await skipCareProfile(wardId, partial, answeredStep);
+          if (section !== "health") await skipCareProfile(wardId, partial, answeredStep);
           await saveHealthMetrics(health);
           router.push(afterCompleteHref);
         }}

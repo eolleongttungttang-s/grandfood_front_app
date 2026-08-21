@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { Ward, WardDetail, WardStatus } from "@/lib/wards";
 import { HISTORY_DAYS, WardMealDashboard, recentKstDateKeys } from "@/lib/ward-meal-dashboard";
 import { dietHistoryForDate } from "@/lib/meal-dashboard";
+import { LeftoverDayGrid, LeftoverLegend } from "@/components/app/leftover-day-grid";
 import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
@@ -43,7 +44,6 @@ import { requestDietChange } from "@/lib/diet-requests-store";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { BottomTabBar } from "@/components/app/bottom-tab-bar";
 import { ExpandToggle } from "@/components/app/expand-toggle";
-import { MealToneSummary } from "@/components/app/meal-tone-summary";
 import { DietDayDetail } from "@/components/app/diet-day-detail";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
@@ -53,7 +53,7 @@ import {
   computeNutritionSnapshotForDate,
   todayDateString,
 } from "@/lib/banchan-recommendation";
-import { formatMonthDayLabel, weekdayLabel } from "@/lib/date-format";
+import { weekdayLabel } from "@/lib/date-format";
 import { requestWellnessCall } from "@/lib/wellness-calls";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
@@ -68,12 +68,6 @@ const STATUS_BADGE_CLASS: Record<WardStatus, string> = {
   "확인 필요": "bg-risk-high text-risk-high-foreground",
   관찰중: "bg-risk-caution text-risk-caution-foreground",
   양호: "bg-risk-normal text-risk-normal-foreground",
-};
-
-const MEAL_TONE_CLASS: Record<string, string> = {
-  완식: "bg-foreground",
-  소량: "bg-risk-caution-foreground",
-  미응답: "bg-risk-high-foreground",
 };
 
 // 대상자 상세 화면 하단 탭 — 11개 카드가 한 화면에 쌓여 스크롤이 너무 길다는 피드백
@@ -114,12 +108,9 @@ export function WardDetailView({
 }) {
   // "오늘"을 포함한 14일 전체의 원탭 자가 보고 반영은 ward-meal-dashboard.ts의
   // fetchWardMealDashboard가 diet-history 응답의 quick_check_status로 이미 처리해서
-  // mealHistory에 담아 넘겨준다 — 실제 백엔드 기록이라 여기서 로컬 스토어를 따로 볼 필요가
+  // dailyLeftover에 담아 넘겨준다 — 실제 백엔드 기록이라 여기서 로컬 스토어를 따로 볼 필요가
   // 없다(2026-08-14, grandfood_backend 9f01c26).
-  const mealHistory = mealDashboard?.status === "ready" ? mealDashboard.mealHistory : null;
-  const completeCount = mealHistory?.filter((m) => m === "완식").length ?? 0;
-  const smallCount = mealHistory?.filter((m) => m === "소량").length ?? 0;
-  const noResponseCount = mealHistory?.filter((m) => m === "미응답").length ?? 0;
+  const dailyLeftover = mealDashboard?.status === "ready" ? mealDashboard.dailyLeftover : null;
   // 그리드 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를 보여준다(2026-08-19, records-view.tsx와
   // 동일) — 예전엔 이 원본(dishes/mealType 포함)을 fetchGuardianDietHistory로 같은
   // /app/guardian/{id}/diet-history를 한 번 더 불러서 얻었는데(코드 리뷰 지적: 요청이 두
@@ -127,12 +118,12 @@ export function WardDetailView({
   // 파싱해서 주므로 그걸 그대로 쓴다.
   const rawDietHistory = mealDashboard?.status === "ready" ? mealDashboard.rawItems : null;
   // recentKstDateKeys(HISTORY_DAYS)를 렌더마다 새로 부르면 "지금"(KST) 기준으로 매번
-  // 다시 계산되는데, mealHistory/rawDietHistory는 mealDashboard prop이 새로 올 때만
+  // 다시 계산되는데, dailyLeftover/rawDietHistory는 mealDashboard prop이 새로 올 때만
   // 바뀐다(마운트 시 한 번 fetch, 폴링 없음) — 자정을 넘겨 화면을 켜둔 채로 있으면 날짜
-  // 배열만 하루 밀려서 mealHistory[i]/rawDietHistory가 가리키는 실제 날짜와 어긋난다
+  // 배열만 하루 밀려서 dailyLeftover[i]/rawDietHistory가 가리키는 실제 날짜와 어긋난다
   // (코드 리뷰 지적: 그리드 칸 색상·라벨이 서로 다른 날을 가리키게 됨). mealDashboard와
   // 같은 시점에만 재계산되도록 묶어서, 데이터가 갱신될 때만 날짜 배열도 같이 갱신되게 한다.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- mealDashboard는 계산에 쓰이는 값이 아니라, mealHistory와 같은 시점에만 재계산되도록 하는 동기화 키로 일부러 넣음
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mealDashboard는 계산에 쓰이는 값이 아니라, dailyLeftover와 같은 시점에만 재계산되도록 하는 동기화 키로 일부러 넣음
   const recordDateKeys = useMemo(() => recentKstDateKeys(HISTORY_DAYS), [mealDashboard]);
   const [selectedRecordDate, setSelectedRecordDate] = useState<string | null>(
     () => recordDateKeys[recordDateKeys.length - 1] ?? null
@@ -146,14 +137,25 @@ export function WardDetailView({
     selectedRecordDate && recordDateKeys.includes(selectedRecordDate)
       ? selectedRecordDate
       : (recordDateKeys[recordDateKeys.length - 1] ?? null);
+  // 같은 날짜를 다시 누르면 접는다(2026-08-21 피드백, records-view.tsx와 동일) —
+  // selectedRecordDate를 null로 만들면 위 fallback 때문에 "오늘"이 다시 펼쳐져버려서,
+  // 펼침 여부는 별도 state로 관리한다.
+  const [isRecordDetailOpen, setIsRecordDetailOpen] = useState(true);
+  function handleSelectRecordDate(date: string) {
+    if (date === effectiveSelectedRecordDate && isRecordDetailOpen) {
+      setIsRecordDetailOpen(false);
+    } else {
+      setSelectedRecordDate(date);
+      setIsRecordDetailOpen(true);
+    }
+  }
   const selectedRecordEntries =
     effectiveSelectedRecordDate && rawDietHistory
       ? dietHistoryForDate(rawDietHistory, effectiveSelectedRecordDate)
       : [];
-  const selectedRecordTone =
-    effectiveSelectedRecordDate && mealHistory
-      ? mealHistory[recordDateKeys.indexOf(effectiveSelectedRecordDate)]
-      : undefined;
+  const selectedRecordLeftover = effectiveSelectedRecordDate
+    ? (dailyLeftover?.find((d) => d.date === effectiveSelectedRecordDate)?.avgLeftoverPercent ?? null)
+    : null;
   const dislikedIds = wardDislikes(useLocalStore(dislikesStore), ward.id);
   // "기록" 탭 안 JSX에서만 쓰이지만, Hook은 조건부 렌더 안에서 부르면 안 되므로(Rules of
   // Hooks) 다른 탭을 볼 때도 항상 여기서 구독한다.
@@ -451,7 +453,7 @@ export function WardDetailView({
           identity={banchanIdentity}
           state={banchanRecommendation}
           subscribeHref="/guardian/subscription"
-          surveyHref={`/guardian/wards/detail/survey?id=${ward.id}`}
+          surveyHref={`/guardian/wards/detail/survey?id=${ward.id}&section=health`}
         />
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
@@ -666,14 +668,11 @@ export function WardDetailView({
           )}
 
           <div className={`flex flex-col gap-3 ${hasNutritionTrend ? "border-t border-border pt-4" : ""}`}>
-            <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
-            {mealHistory && (
-              <MealToneSummary
-                completeCount={completeCount}
-                smallCount={smallCount}
-                noResponseCount={noResponseCount}
-              />
-            )}
+            {/* 범례는 제목과 한 줄에 두어야 가시성이 좋다는 피드백에 따라 같은 행에 둔다. */}
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+              <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
+              {dailyLeftover !== null && <LeftoverLegend />}
+            </div>
             {mealDashboard === null ? (
               <p className="text-sm text-muted-foreground">불러오는 중이에요...</p>
             ) : mealDashboard.status === "not-linked" ? (
@@ -684,32 +683,19 @@ export function WardDetailView({
               <p className="text-sm text-destructive">{mealDashboard.message}</p>
             ) : (
               <>
-                {/* 칸이 title 툴팁(마우스 오버)만으로 하루 상태를 알려줘서 터치 기기에선
-                    사실상 정보가 안 보였다 — 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를
-                    아래에 펼쳐 보여주도록 바꿨다(2026-08-19, records-view.tsx와 동일). */}
-                <div className="grid grid-cols-7 gap-1.5">
-                  {mealHistory!.map((tone, i) => {
-                    const date = recordDateKeys[i];
-                    const isSelected = date === effectiveSelectedRecordDate;
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        aria-label={`${formatMonthDayLabel(date)} ${tone}`}
-                        onClick={() => setSelectedRecordDate(date)}
-                        className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]} ${
-                          isSelected ? "ring-2 ring-inset ring-foreground" : ""
-                        }`}
-                      />
-                    );
-                  })}
-                </div>
+                {/* 완식/소량이라는 임의 경계 대신 실제 평균 잔반율 숫자로 보여준다
+                    (2026-08-21 피드백) — 칸은 색+날짜 숫자만, 정확한 값은 탭했을 때 아래
+                    상세에서 크게 보여준다. */}
+                <LeftoverDayGrid
+                  dailyLeftover={dailyLeftover!}
+                  selectedDate={isRecordDetailOpen ? effectiveSelectedRecordDate : null}
+                  onSelectDate={handleSelectRecordDate}
+                />
 
-                {effectiveSelectedRecordDate && selectedRecordTone && (
+                {effectiveSelectedRecordDate && isRecordDetailOpen && (
                   <DietDayDetail
                     date={effectiveSelectedRecordDate}
-                    tone={selectedRecordTone}
-                    toneDotClass={MEAL_TONE_CLASS[selectedRecordTone]}
+                    leftoverPercent={selectedRecordLeftover}
                     entries={rawDietHistory === null ? null : selectedRecordEntries}
                   />
                 )}

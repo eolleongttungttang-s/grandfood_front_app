@@ -11,7 +11,7 @@ import {
 } from "@/lib/backend-auth";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { createLocalStore } from "@/lib/local-store";
-import { deriveMealTones, fetchElderDietHistory } from "@/lib/meal-dashboard";
+import { deriveDailyLeftover, fetchElderDietHistory, recentDateKeys } from "@/lib/meal-dashboard";
 
 // "기타"는 백엔드가 지금 두 alert_type(excessive_leftover/nutrition_deficiency) 외의 값을 보내는
 // 경우를 위한 폴백이다 — splitHealthAlertSummary() 참고. 모르는 타입을 그냥 "영양부족"으로
@@ -210,7 +210,14 @@ export async function fetchElderNotifications(params: { mockWardId: string }): P
 // 테이블 없음, 파일 상단 주석 참고) 실제 백엔드 알림처럼 서버에서 오는 게 아니라 여기서
 // diet-history를 직접 조회해 프론트에서 합성한다 — guardian 쪽 SOS(sos-store.ts, 로컬
 // 저장소 기반 합성 알림)와 같은 패턴. 완식이 0일이면 보여줄 내용이 없으므로 null.
+//
+// 그리드/리포트는 완식/소량 카테고리를 없애고 실제 평균 잔반율 숫자로 바꿨지만
+// (deriveDailyLeftover, 2026-08-21), 이 격려 문구는 문구 그대로 두기로 했다 — "며칠
+// 완식했는지" 격려 성격상 대략적인 기준으로도 충분하다는 판단(사용자 확인). 내부 판정
+// 기준만 평균 잔반율 10% 미만으로 새로 정한다(예전 50% 경계보다 훨씬 엄격함 — "완식"이라고
+// 부를 만한 날만 세도록).
 const STREAK_DAYS = 7;
+const STREAK_COMPLETE_THRESHOLD_PCT = 10;
 
 export async function fetchElderStreakNotification(identity: {
   mockWardId: string;
@@ -223,7 +230,9 @@ export async function fetchElderStreakNotification(identity: {
     STREAK_DAYS
   );
   if (!items) return null;
-  const completeCount = deriveMealTones(items, STREAK_DAYS).filter((t) => t === "완식").length;
+  const completeCount = deriveDailyLeftover(items, recentDateKeys(STREAK_DAYS)).filter(
+    (d) => d.avgLeftoverPercent != null && d.avgLeftoverPercent < STREAK_COMPLETE_THRESHOLD_PCT
+  ).length;
   if (completeCount === 0) return null;
   return {
     // 날짜+횟수를 id에 넣어서, 다음 날 카운트가 바뀌면 "이미 본 항목"이 아니라 새 항목으로

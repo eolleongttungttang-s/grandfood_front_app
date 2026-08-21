@@ -21,9 +21,9 @@ export type LeftoverDish = {
   leftoverPercent: number;
 };
 
-type Severity = "normal" | "caution" | "high";
+export type Severity = "normal" | "caution" | "high";
 
-function severityOf(percent: number): Severity {
+export function severityOf(percent: number): Severity {
   if (percent >= 60) return "high";
   if (percent >= 30) return "caution";
   return "normal";

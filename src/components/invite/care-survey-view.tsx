@@ -242,9 +242,18 @@ const MOBILITY_OPTIONS: { value: MobilityLevel; label: string }[] = [
   { value: "bedridden", label: "누워서 지내는 시간이 많아요" },
 ];
 
+// 마이페이지에서 "생활 정보"와 "건강 프로필" 카드를 각자 따로 수정할 수 있게 분리한
+// 진입 모드(2026-08-21 피드백 — "건강 프로필에는 개별 입력 버튼이 없다, 둘을 나누고
+// 싶다"). "both"는 기존처럼 15문항을 하나로 이어 묻는다(초대/자가가입 최초 온보딩 전용 —
+// 그 흐름은 이번 요청과 무관해 그대로 둔다). "care"는 생활 정보 10문항만, "health"는
+// 건강 프로필 5문항만 다룬다 — 절대 step 번호(CARE_SURVEY_STEP/HEALTH_STEP)는 그대로
+// 두고, 이 범위 밖으로 못 나가게 진행/뒤로가기/목록만 구간에 맞게 제한한다.
+export type CareSurveySection = "care" | "health" | "both";
+
 export function CareSurveyView({
   wardId,
   wardName,
+  section = "both",
   initialValues,
   initialHealthValues,
   onComplete,
@@ -252,6 +261,7 @@ export function CareSurveyView({
 }: {
   wardId: string;
   wardName: string;
+  section?: CareSurveySection;
   // completed/answeredStep은 CareProfileView(care-profile.ts)에만 있는 필드라 optional로
   // 열어둔다 — 호출부가 실제로는 CareProfileView 전체를 넘기지만(user/survey/page.tsx),
   // 이 컴포넌트가 필요한 만큼만 타입에 요구한다.
@@ -264,6 +274,13 @@ export function CareSurveyView({
     health: HealthMetricsForm
   ) => void | Promise<void>;
 }) {
+  // 이 구간(section)에서 실제로 다룰 step 범위 — 절대 번호(0~14)는 그대로 두고 시작/끝만
+  // 좁힌다. "health" 구간의 시작이 곧 HEALTH_STEP_OFFSET이라, 예전처럼 매번 0부터 세지
+  // 않고 이 두 값만 바꾸면 진행률/이전·다음 경계가 전부 따라온다.
+  const sectionStart = section === "health" ? HEALTH_STEP_OFFSET : 0;
+  const sectionEnd = section === "care" ? CARE_SURVEY_TOTAL_STEPS - 1 : TOTAL_STEPS - 1;
+  const sectionStepCount = sectionEnd - sectionStart + 1;
+
   // 목록 화면(overview)은 initialValues의 각 필드가 "실제로 답한 값"이라는 전제로 그대로
   // 보여준다 — completed가 false인 프로필(예전에 "나중에 할게요"로 건너뜀)은 답한 적 없는
   // 필드도 EMPTY_CARE_PROFILE_COMMAND 기본값(예: 음식 알레르기 "없음", 거동 "혼자 잘
@@ -272,14 +289,65 @@ export function CareSurveyView({
   // 안 물어본 답이 영구히 "답함"으로 남는다). 그래서 completed가 확실히 true일 때만 목록을
   // 보여주고, 아니면(건너뛴 적 있음/최초 온보딩) 지금까지처럼 순서대로 다 물어보게 둔다 —
   // 그래야 미답변 필드도 반드시 한 번은 화면에 노출된 뒤 저장된다.
-  const isEditMode = initialValues?.completed === true;
+  //
+  // "health" 구간은 care-profile.ts 같은 completed/answeredStep 추적이 아예 없다(건강
+  // 수치는 전부 선택 항목이라 "완료"라는 개념 자체가 옅다) — 대신 이 대상자의 건강 프로필이
+  // 한 번이라도 저장된 적 있으면(initialHealthValues 존재) 목록 화면을, 처음이면 순서대로
+  // 물어보는 흐름을 보여준다.
+  // "health" 구간은 completed 같은 확정 플래그가 없어(주석 위 참고) 대신 5문항이 전부
+  // 채워져 있는지로 판단한다 — 예전엔 initialHealthValues가 있기만 하면(하나라도 채워져
+  // 있으면) 곧장 overview로 보내서, 아래 firstUnansweredStep의 health 이어서 시작 로직이
+  // 실제로는 절대 실행될 수 없는 죽은 코드였다(2026-08-21 코드 리뷰 지적 — h가 wizard
+  // 모드에선 항상 undefined라 키부터 다시 시작됨). 부분 입력이면 wizard로 보내 이어서
+  // 답하게 하고, 5문항이 다 있을 때만 overview로 보낸다.
+  //
+  // "care"(생활 정보 단독 수정) 구간도 completed는 false지만 실제로는 10문항을 다 답하고
+  // 건강 문항 중에 건너뛴 경우(careFullyAnswered)가 있다 — 이때도 completed만 보면 매번
+  // 마지막 문항(비상연락처)을 안 답한 것처럼 다시 보여주게 된다(2026-08-21 코드 리뷰
+  // 지적). "both"는 여기 포함하지 않는다 — care가 다 채워졌어도 건강 문항이 남아있을 수
+  // 있어(정상 흐름), 아래 firstUnansweredStep이 이어서 건강 문항으로 넘어가도록 따로 처리한다.
+  const careFullyAnswered = (initialValues?.answeredStep ?? 0) >= CARE_SURVEY_TOTAL_STEPS;
+  const isHealthComplete =
+    initialHealthValues != null &&
+    initialHealthValues.heightCm != null &&
+    initialHealthValues.weightKg != null &&
+    (initialHealthValues.systolicBP != null || initialHealthValues.diastolicBP != null) &&
+    initialHealthValues.fastingGlucose != null &&
+    initialHealthValues.activityLevel != null;
+  const isEditMode =
+    section === "health"
+      ? isHealthComplete
+      : initialValues?.completed === true || (section === "care" && careFullyAnswered);
   const [mode, setMode] = useState<"overview" | "wizard">(isEditMode ? "overview" : "wizard");
   // 목록 화면에서 특정 단계로 바로 들어온 경우, 그 단계를 확인하고 나면 다음 단계로
   // 넘어가는 게 아니라 목록으로 돌아가야 한다 — 순서대로 진행 중인 것과 버튼 동작이
   // 달라야 해서 이 값으로 구분한다.
   const [enteredFromOverview, setEnteredFromOverview] = useState(false);
 
-  const [step, setStep] = useState(0);
+  // 위저드 모드(isEditMode=false)로 들어오면 항상 맨 처음(0번)부터 다시 물었었다 — 예전에
+  // "나중에 할게요"로 몇 문항 답하고 건너뛴 적 있어도 다시 1번부터였다(2026-08-21 피드백,
+  // "미입력한 부분부터 시작하면 좋겠다"). care/both 구간은 answeredStep(실제로 답하고 지나간
+  // 문항 수)을 그대로 재시작 지점으로 쓴다. health 구간은 그런 진행도 추적이 없으니, 5문항을
+  // 순서대로 훑어 값이 비어있는 첫 문항을 찾는다(혈압은 수축기·이완기 둘 다 없을 때만
+  // "안 답함"으로 본다 — 한쪽만 있어도 이미 그 화면에 들어와 값을 남긴 것).
+  function firstUnansweredStep(): number {
+    if (section === "health") {
+      const h = initialHealthValues;
+      if (h?.heightCm == null) return HEALTH_STEP.height;
+      if (h?.weightKg == null) return HEALTH_STEP.weight;
+      if (h?.systolicBP == null && h?.diastolicBP == null) return HEALTH_STEP.bloodPressure;
+      if (h?.fastingGlucose == null) return HEALTH_STEP.glucose;
+      return HEALTH_STEP.activityLevel;
+    }
+    // "both" 구간에서 케어 10문항은 다 답했는데(careFullyAnswered) 건강 문항 중에
+    // 건너뛴 경우, 아래 Math.min 그대로 쓰면 이미 답한 마지막 케어 문항(비상연락처)을
+    // 안 답한 것처럼 다시 보여주게 된다(2026-08-21 코드 리뷰 지적) — 이어서 건강
+    // 문항부터 시작한다. "care" 단독 구간은 careFullyAnswered면 위에서 이미 overview로
+    // 보내(isEditMode) 이 함수 자체가 wizard 진입용으로 안 불리니 여기선 안 다룬다.
+    if (section === "both" && careFullyAnswered) return HEALTH_STEP_OFFSET;
+    return Math.min(initialValues?.answeredStep ?? 0, CARE_SURVEY_TOTAL_STEPS - 1);
+  }
+  const [step, setStep] = useState(firstUnansweredStep);
   // EMPTY_CARE_PROFILE_COMMAND를 먼저 펼치고 그 위에 initialValues를 덮어쓴다 — 그냥
   // initialValues를 통째로 쓰면, 이 설문에 필드가 새로 추가된 뒤(예: medications 체크리스트)
   // 그 필드가 생기기 전에 저장된 옛 localStorage 데이터엔 새 필드 자체가 없어서
@@ -466,7 +534,7 @@ export function CareSurveyView({
     }));
   }
 
-  const isLast = step === TOTAL_STEPS - 1;
+  const isLast = step === sectionEnd;
 
   async function handleNext() {
     // 목록에서 골라 들어온 단계면 "다음"이 다음 단계로 넘어가는 게 아니라 방금 고친 값을
@@ -503,7 +571,7 @@ export function CareSurveyView({
   }
 
   function handleBack() {
-    setStep((s) => Math.max(0, s - 1));
+    setStep((s) => Math.max(sectionStart, s - 1));
   }
 
   async function handleSkip() {
@@ -511,17 +579,24 @@ export function CareSurveyView({
     setSubmitting(true);
     try {
       // care-profile.ts의 answeredStep은 "care-profile 단계 중 몇 번째까지 답했는지"라는
-      // 의미로 문서화돼 있어(0~CARE_SURVEY_TOTAL_STEPS) — 건강정보 단계(9~13)까지 진행한
-      // 뒤 건너뛰어도 care-profile 쪽엔 그 의미를 벗어나지 않게 상한을 맞춰서 전달한다.
+      // 의미로 문서화돼 있어(0~CARE_SURVEY_TOTAL_STEPS) — 건강정보 단계까지 진행한 뒤
+      // 건너뛰어도 care-profile 쪽엔 그 의미를 벗어나지 않게 상한을 맞춰서 전달한다.
       // (health는 건너뛴 시점의 값 그대로 partial 저장 — 별도 진행도 추적은 안 함.)
-      await onSkip(form, Math.min(step, CARE_SURVEY_TOTAL_STEPS), healthForm);
+      //
+      // "health" 구간을 건너뛸 땐 step이 애초에 care 범위 밖(10~14)이라, 그대로
+      // Math.min(step, 10)을 쓰면 care를 한 번도 안 물어봤어도 "10문항 다 답함"으로
+      // 잘못 기록된다(2026-08-21, 생활 정보/건강 프로필 분리하며 발견) — care 진행도는
+      // 이 구간에서 전혀 안 바뀌었으니 원래 있던 값을 그대로 돌려보낸다.
+      const careAnsweredStep =
+        section === "health" ? (initialValues?.answeredStep ?? 0) : Math.min(step, CARE_SURVEY_TOTAL_STEPS);
+      await onSkip(form, careAnsweredStep, healthForm);
     } finally {
       setSubmitting(false);
     }
   }
 
   if (mode === "overview") {
-    const rows: { step: number; label: string; value: string }[] = [
+    const allRows: { step: number; label: string; value: string }[] = [
       { step: CARE_SURVEY_STEP.mealsPerDay, label: "하루 식사 횟수", value: `${form.mealsPerDay}회` },
       {
         step: CARE_SURVEY_STEP.livingArrangement,
@@ -598,6 +673,9 @@ export function CareSurveyView({
         value: healthForm.activityLevel ? ACTIVITY_LEVEL_LABEL[healthForm.activityLevel] : "미입력",
       },
     ];
+    // "care"/"health" 구간은 이 화면이 각자 자기 몫만 다루므로, 목록도 그 구간에 속한
+    // 항목만 보여준다 — "both"(최초 온보딩)는 지금까지처럼 15개 전부.
+    const rows = allRows.filter((row) => row.step >= sectionStart && row.step <= sectionEnd);
 
     return (
       <div className="flex flex-1 flex-col">
@@ -653,7 +731,7 @@ export function CareSurveyView({
         <>
           <div className="flex items-center justify-between px-5 pt-5">
             <span className="text-base font-semibold text-muted-foreground">
-              {step + 1} / {TOTAL_STEPS}
+              {step - sectionStart + 1} / {sectionStepCount}
             </span>
             <button
               type="button"
@@ -667,7 +745,7 @@ export function CareSurveyView({
           <div className="mx-5 mt-3 h-2 overflow-hidden rounded-full bg-muted">
             <div
               className="h-full rounded-full bg-primary transition-all"
-              style={{ width: `${((step + 1) / TOTAL_STEPS) * 100}%` }}
+              style={{ width: `${((step - sectionStart + 1) / sectionStepCount) * 100}%` }}
             />
           </div>
         </>
@@ -1139,7 +1217,7 @@ export function CareSurveyView({
       <div className="flex gap-2 px-5 pb-6">
         {/* 목록에서 골라 들어온 단계엔 "이전"이 의미가 없다 — 순서상 앞 단계로 가는 버튼이지,
             목록으로 돌아가는 버튼이 아니라서 그대로 두면 오히려 헷갈린다. */}
-        {!enteredFromOverview && step > 0 && (
+        {!enteredFromOverview && step > sectionStart && (
           <Button
             variant="outline"
             size="lg"

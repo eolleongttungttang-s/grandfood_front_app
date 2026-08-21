@@ -81,26 +81,10 @@ export type MonthlyBanchanRecommendation = {
   weeks: MonthlyBanchanRecommendationWeek[];
 };
 
-export const SUITABILITY_LABEL: Record<BanchanSuitability, string> = {
-  recommended: "추천",
-  caution: "주의",
-  avoid: "피하기",
-};
-
-export const SUITABILITY_CLASS: Record<BanchanSuitability, string> = {
-  recommended: "bg-risk-normal text-risk-normal-foreground",
-  caution: "bg-risk-caution text-risk-caution-foreground",
-  avoid: "bg-risk-high text-risk-high-foreground",
-};
-
-// risk-normal/caution/high(배경색)은 배지 위에 짙은 텍스트를 얹는 용도라 일부러 아주
-// 옅게 잡혀 있다(globals.css) — 글자 없이 점만으로 구분해야 하는 곳(달력 칸 등)엔 이
-// -foreground 쪽(짙은 회갈색/황토색/적갈색)을 대신 쓴다.
-export const SUITABILITY_DOT_CLASS: Record<BanchanSuitability, string> = {
-  recommended: "bg-risk-normal-foreground",
-  caution: "bg-risk-caution-foreground",
-  avoid: "bg-risk-high-foreground",
-};
+// SUITABILITY_LABEL/CLASS/DOT_CLASS(반찬별 "추천/주의/피하기" 배지·달력 칸 점)는 큰
+// 의미가 없다는 피드백으로 뺐다(2026-08-21, home-view.tsx/banchan-recommendation-
+// calendar.tsx). BanchanSuitability 타입과 item.suitability 필드 자체는 남겨둔다 —
+// 백엔드가 여전히 채워주고, 나중에 다른 형태로 다시 쓸 수도 있다.
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
