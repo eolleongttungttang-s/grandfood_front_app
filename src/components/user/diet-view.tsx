@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Stethoscope } from "lucide-react";
 
 import { Ward, WardDetail } from "@/lib/wards";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
-import { BackendMealType } from "@/lib/banchan-recommendation";
-import { getCurrentMealSlot, MealSlot } from "@/lib/meal-log-store";
+import { BackendMealType, todayDateString } from "@/lib/banchan-recommendation";
+import { getCurrentMealSlot, mealTypeToSlot, MealSlot } from "@/lib/meal-log-store";
+import { fetchElderDietHistory } from "@/lib/meal-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
@@ -63,6 +64,31 @@ export function DietView({
   // (grandfood_backend BanchanDeliveryScheduler.schedule_daily_deliveries) 실제로
   // 골라 보이게 됐다 — MEAL_SLOT_TO_BACKEND_MEAL_TYPE으로 변환해 resolveTodayMenu에 넘긴다.
   const [mealSlot, setMealSlot] = useState<MealSlot>(getCurrentMealSlot());
+
+  // 오늘 이미 식전+식후 사진을 다 올린 끼니(diet-history의 completed)는 회색으로 "이미
+  // 기록했어요"만 표시한다.
+  const [completedMealSlots, setCompletedMealSlots] = useState<Set<MealSlot>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchElderDietHistory({ mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address }, 1).then(
+      (entries) => {
+        if (cancelled || !entries) return;
+        const today = todayDateString();
+        const done = new Set<MealSlot>();
+        for (const entry of entries) {
+          if (entry.mealDate !== today || !entry.completed) continue;
+          const slot = mealTypeToSlot(entry.mealType);
+          if (slot) done.add(slot);
+        }
+        setCompletedMealSlots(done);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ward.id]);
 
   // "오늘의 O 추천 반찬 조합"/"왜 이 조합인가요" 카드가 오늘 실제 AI 추천이 있으면 그걸
   // 쓰고, 없으면 목업으로 자연스럽게 폴백한다 — 실제 추천이 생긴 뒤에도 이 카드들이 계속
@@ -150,6 +176,7 @@ export function DietView({
               value={mealSlot}
               onChange={setMealSlot}
               columns={3}
+              completedValues={[...completedMealSlots]}
             />
           </div>
           {todayMenu.isGenerating ? (
