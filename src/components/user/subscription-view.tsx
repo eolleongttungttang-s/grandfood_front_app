@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { toast } from "sonner";
 
@@ -32,6 +33,7 @@ import { getPartnerStore } from "@/lib/partner-stores";
 // 확인받는다 — 특히 본인이 이 화면에서 만든 게 아닌 구독(funding_source !== "self", 즉
 // 보호자가 만들었을 가능성이 높은 경우)은 문구를 더 강하게 경고한다.
 export function SelfSubscriptionView({ ward }: { ward: Ward }) {
+  const router = useRouter();
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   const identity = { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address };
 
@@ -92,7 +94,7 @@ export function SelfSubscriptionView({ ward }: { ward: Ward }) {
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
-      <TopBar title="구독 관리" subtitle="플랜과 결제수단" />
+      <TopBar title="구독 관리" subtitle="플랜과 결제수단" onBack={() => router.back()} />
 
       <div className="flex flex-col gap-3 px-5">
         {!checkingBackend && !hasActiveSubscription && (

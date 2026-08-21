@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { toast } from "sonner";
 
@@ -23,6 +24,7 @@ import { getPartnerStore } from "@/lib/partner-stores";
 type WardPlanState = { planId: string; fundingSource: string } | null;
 
 export function SubscriptionView({ wards }: { wards: Ward[] }) {
+  const router = useRouter();
   const [selectedWardId, setSelectedWardId] = useState(wards[0]?.id ?? "");
   // 대상자별로 플랜이 다를 수 있어서(2026-08-18 피드백 — 식사 준비가 아예 어려운
   // 어르신과 하루 한 끼만 챙겨도 되는 어르신처럼 필요한 수준이 다르다) 대상자 id를
@@ -105,7 +107,7 @@ export function SubscriptionView({ wards }: { wards: Ward[] }) {
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
-      <TopBar title="구독 관리" subtitle="대상자별 플랜과 결제수단" />
+      <TopBar title="구독 관리" subtitle="대상자별 플랜과 결제수단" onBack={() => router.back()} />
 
       {wards.length === 0 ? (
         <div className="mx-5 rounded-2xl border border-border bg-card p-5 text-sm text-muted-foreground">
