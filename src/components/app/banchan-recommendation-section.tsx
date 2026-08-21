@@ -115,7 +115,12 @@ export function BanchanRecommendationSection({
         open={showReminder}
         onEditInfo={() => {
           setShowReminder(false);
-          router.push(surveyHref ?? "/user/survey");
+          // surveyHref가 없으면(보호자 화면인데 그 대상자의 surveyHref를 안 넘긴 경우 등)
+          // "/user/survey"로 기본 이동시키면 안 된다 — 그건 자가등록 이용자 본인 전용
+          // 페이지라, 보호자 계정으로 들어가면 엉뚱한 화면(또는 오류)을 보게 된다.
+          // BanchanRecommendationCalendar의 "생활 정보 입력하기" 버튼도 surveyHref가
+          // 없으면 아예 버튼을 숨기는 것과 같은 원칙 — 갈 곳이 없으면 그냥 닫기만 한다.
+          if (surveyHref) router.push(surveyHref);
         }}
         onProceedAnyway={() => {
           setShowReminder(false);

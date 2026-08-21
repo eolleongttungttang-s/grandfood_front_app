@@ -442,7 +442,17 @@ export function WardDetailView({
           )}
         </div>
 
-        <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/guardian/subscription" />
+        {/* surveyHref — "AI 추천받기" 전 리마인드 팝업(RecommendationReminderModal)의
+            "수정하러 가기"가 이 경로로 이동한다. 안 넘기면 그 버튼이 아무 데도 못 가고
+            (banchan-recommendation-section.tsx 참고), 여긴 보호자 화면이라 대상자 본인
+            전용 페이지(/user/survey)로 잘못 보내면 안 되므로 보호자용 설문 경로를 쓴다
+            (page-client.tsx가 ?id= 쿼리스트링으로 대상자를 받는 것과 동일한 패턴). */}
+        <BanchanRecommendationSection
+          identity={banchanIdentity}
+          state={banchanRecommendation}
+          subscribeHref="/guardian/subscription"
+          surveyHref={`/guardian/wards/detail/survey?id=${ward.id}`}
+        />
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">왜 이 조합인가요</span>
