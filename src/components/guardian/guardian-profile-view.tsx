@@ -89,8 +89,22 @@ export function GuardianProfileView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wardIdsKey]);
 
+  // 이제 실제 백엔드 호출이라(guardian-invite.ts), 대상자 미연동/세션 없음/네트워크 실패
+  // 등으로 실패할 수 있다 — 예전 로컬 목업 버전은 항상 즉시 성공해서 에러 처리가
+  // 없었는데, 그대로 두면 실패 시 아무 안내 없이 조용히 멈춘 것처럼 보인다.
+  const [creatingInvite, setCreatingInvite] = useState(false);
   async function createInvite() {
-    await createGuardianInvite({ wardIds: wards.map((w) => w.id) });
+    setCreatingInvite(true);
+    try {
+      await createGuardianInvite({
+        wardIds: wards.map((w) => w.id),
+        expectedGuardianLoginId: account.loginId,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "초대 코드 발급에 실패했어요.");
+    } finally {
+      setCreatingInvite(false);
+    }
   }
 
   function copyInvite() {
@@ -170,8 +184,14 @@ export function GuardianProfileView({
               </Button>
             </div>
           ) : (
-            <Button variant="outline" size="sm" className="w-fit" onClick={createInvite}>
-              초대 코드 만들기
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-fit"
+              disabled={creatingInvite}
+              onClick={createInvite}
+            >
+              {creatingInvite ? "만드는 중..." : "초대 코드 만들기"}
             </Button>
           )}
         </div>
