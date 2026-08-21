@@ -10,11 +10,15 @@ import {
   resolveCachedBackendWardAccess,
 } from "@/lib/backend-auth";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+import { createLocalStore } from "@/lib/local-store";
+import { deriveMealTones, fetchElderDietHistory } from "@/lib/meal-dashboard";
 
 // "기타"는 백엔드가 지금 두 alert_type(excessive_leftover/nutrition_deficiency) 외의 값을 보내는
 // 경우를 위한 폴백이다 — splitHealthAlertSummary() 참고. 모르는 타입을 그냥 "영양부족"으로
 // 단정하면 실제와 다른 구체적인 건강 정보를 보호자에게 잘못 전달하게 된다.
-export type NotificationType = "SOS" | "잔반이상" | "영양부족" | "안부확인콜" | "기타";
+// "완식"은 백엔드 알림이 아니라 아래 fetchElderStreakNotification()이 프론트에서 직접 만드는
+// 합성 항목이다(guardian 쪽 SOS와 같은 패턴 — notifications-view.tsx 참고).
+export type NotificationType = "SOS" | "잔반이상" | "영양부족" | "안부확인콜" | "완식" | "기타";
 
 export type NotificationItem = {
   id: string;
@@ -30,11 +34,33 @@ const TYPE_STYLE: Record<NotificationType, string> = {
   잔반이상: "bg-risk-high text-risk-high-foreground",
   영양부족: "bg-risk-caution text-risk-caution-foreground",
   안부확인콜: "bg-secondary text-secondary-foreground",
+  완식: "bg-secondary text-secondary-foreground",
   기타: "bg-muted text-muted-foreground",
 };
 
 export function notificationBadgeClass(type: NotificationType) {
   return TYPE_STYLE[type];
+}
+
+// 홈 화면 종 아이콘의 빨간 점 — 한 번 알림 화면에 들어가서 본 항목은 다시 안 뜨게 한다
+// (2026-08-21 피드백, "한 번 보면 꺼져야지 계속 들어가 있으면 자꾸 확인하게 된다"). 서버가
+// 주는 read(이상신호 해결/안부확인콜 응답 여부)와는 별개 개념이라 로컬에 따로 기록한다 —
+// read는 "그 일이 해결됐는지", 이건 "이 기기에서 사람이 목록을 열어봤는지".
+const notificationSeenStore = createLocalStore<Record<string, string[]>>(
+  "grandfood-app-notification-seen-ids",
+  {}
+);
+
+export function getSeenNotificationIds(wardId: string): string[] {
+  return notificationSeenStore.read()[wardId] ?? [];
+}
+
+export function markNotificationsSeen(wardId: string, ids: string[]): void {
+  if (ids.length === 0) return;
+  notificationSeenStore.update((prev) => ({
+    ...prev,
+    [wardId]: [...new Set([...(prev[wardId] ?? []), ...ids])],
+  }));
 }
 
 // AI 도우미(rag-chat.ts)와 같은 이유로 요청이 무한정 매달리지 않게 상한을 둔다.
@@ -176,4 +202,36 @@ export async function fetchElderNotifications(params: { mockWardId: string }): P
     throw new Error(WARD_SESSION_REQUIRED_MESSAGE);
   }
   return [];
+}
+
+// "최근 N일 중 M일 완식하셨어요" — 예전엔 home-view.tsx가 이걸 항상 화면에 카드로 띄웠는데,
+// 배송 예정과 달리 매일 훑어야 하는 정보가 아니라 가끔 보는 격려 문구라 안내 사항과 같이
+// 알림 쪽으로 옮겼다(2026-08-21 피드백). 백엔드에 이 알림 타입 자체가 없어서(범용 공지사항
+// 테이블 없음, 파일 상단 주석 참고) 실제 백엔드 알림처럼 서버에서 오는 게 아니라 여기서
+// diet-history를 직접 조회해 프론트에서 합성한다 — guardian 쪽 SOS(sos-store.ts, 로컬
+// 저장소 기반 합성 알림)와 같은 패턴. 완식이 0일이면 보여줄 내용이 없으므로 null.
+const STREAK_DAYS = 7;
+
+export async function fetchElderStreakNotification(identity: {
+  mockWardId: string;
+  name: string;
+  age: number;
+  address: string;
+}): Promise<NotificationItem | null> {
+  const items = await fetchElderDietHistory(
+    { mockWardId: identity.mockWardId, name: identity.name, age: identity.age, address: identity.address },
+    STREAK_DAYS
+  );
+  if (!items) return null;
+  const completeCount = deriveMealTones(items, STREAK_DAYS).filter((t) => t === "완식").length;
+  if (completeCount === 0) return null;
+  return {
+    // 날짜+횟수를 id에 넣어서, 다음 날 카운트가 바뀌면 "이미 본 항목"이 아니라 새 항목으로
+    // 취급되게 한다(고정 id였다면 한 번 보고 나면 스트릭이 바뀌어도 영영 안 뜬다).
+    id: `streak-${new Date().toISOString().slice(0, 10)}-${completeCount}`,
+    date: formatOccurredAt(new Date().toISOString()),
+    type: "완식",
+    message: `최근 ${STREAK_DAYS}일 중 ${completeCount}일 완식하셨어요. 잘하고 계세요!`,
+    read: false,
+  };
 }
