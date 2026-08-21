@@ -40,6 +40,17 @@ export const MEDICATION_LABEL_TO_BACKEND_FLAG: Record<string, string> = {
 export type FoodSuggestion = {
   food: string;
   reason: string;
+  /** medication.ts 상단 "⚠️ 화면에 반드시 지켜야 할 것" 2번(출처를 같이 보여줄 것) —
+   *  MedicationFoodSuggestionStep.tsx가 이 필드를 reason과 함께 툴팁에 넣어서 보여준다. */
+  source: string;
+};
+
+export type FoodSuggestionResult = {
+  suggestions: FoodSuggestion[];
+  /** medication.ts 상단 "⚠️ 화면에 반드시 지켜야 할 것" 1번(항상 노출) — 약군이
+   *  하나도 없거나(codes.length === 0) 제안이 아예 없으면 null(호출부가 그 경우 카드
+   *  자체를 안 그리므로 보여줄 자리가 없다). */
+  consultNotice: string | null;
 };
 
 /** 선택한 약(한국어 라벨)을 근거로 "조심하면 좋은 음식" 제안 목록을 가져온다.
@@ -48,27 +59,27 @@ export type FoodSuggestion = {
  * 근거 표 자체가 표준화된 약군 코드로만 조회되는 구조라, 자유 텍스트 약 이름으로는
  * 애초에 조회할 방법이 없다(medication/service.py 상단 설명 참고).
  */
-export async function fetchFoodSuggestions(medicationLabels: string[]): Promise<FoodSuggestion[]> {
+export async function fetchFoodSuggestions(medicationLabels: string[]): Promise<FoodSuggestionResult> {
   const codes = medicationLabels
     .map((label) => MEDICATION_LABEL_TO_BACKEND_FLAG[label])
     .filter((code): code is string => code !== undefined);
 
-  if (codes.length === 0) return [];
+  if (codes.length === 0) return { suggestions: [], consultNotice: null };
 
   const advice = await adviseByGroups({ medicationGroups: codes });
-  return dedupeByFood(advice.foodCautions);
+  return { suggestions: dedupeByFood(advice.foodCautions), consultNotice: advice.consultNotice };
 }
 
 // 같은 음식이 여러 약군 근거로 중복 등장할 수 있다(예: 자몽이 혈압약/심장약/수면제 등
 // 여러 근거에서 동시에 나옴) — 화면에 같은 체크박스가 두 번 뜨지 않게 이름 기준으로
-// 한 번만 남긴다. 사유(reason)는 처음 매칭된 약군 것을 대표로 쓴다.
+// 한 번만 남긴다. 사유(reason)/출처(source)는 처음 매칭된 약군 것을 대표로 쓴다.
 function dedupeByFood(cautions: FoodCaution[]): FoodSuggestion[] {
   const seen = new Set<string>();
   const result: FoodSuggestion[] = [];
   for (const c of cautions) {
     if (seen.has(c.food)) continue;
     seen.add(c.food);
-    result.push({ food: c.food, reason: `${c.drugGroupLabel} 관련 주의` });
+    result.push({ food: c.food, reason: `${c.drugGroupLabel} 관련 주의`, source: c.source });
   }
   return result;
 }
