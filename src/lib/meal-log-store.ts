@@ -26,6 +26,19 @@ export function getCurrentMealSlot(): MealSlot {
   return "저녁";
 }
 
+// 백엔드 meal_type(breakfast/lunch/dinner, grandfood_backend의 MEAL_SLOT_TO_TYPE 역방향) —
+// diet-history 응답을 화면 표시용 한글 MealSlot으로 되돌릴 때 쓴다(diet-view.tsx의 오늘
+// 끼니별 완료 여부 판정).
+const MEAL_TYPE_TO_SLOT: Record<string, MealSlot> = {
+  breakfast: "아침",
+  lunch: "점심",
+  dinner: "저녁",
+};
+
+export function mealTypeToSlot(mealType: string): MealSlot | null {
+  return MEAL_TYPE_TO_SLOT[mealType] ?? null;
+}
+
 /** 반찬 하나(칸 하나)의 잔반율. 실제로는 비전 모델이 식전/식후 사진을 비교해 계산한다. */
 export type MealLogCompartment = {
   dishId: string;

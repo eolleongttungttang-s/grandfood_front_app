@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import { Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -19,6 +20,7 @@ export function ButtonSelectGroup<T extends string>({
   value,
   onChange,
   columns = 2,
+  completedValues,
 }: {
   label: string;
   /** 어두운 배경(tone="sidebar" 카드 등) 위에 놓일 때 라벨 글자색을 바꿔야 하는 호출부용 —
@@ -28,6 +30,12 @@ export function ButtonSelectGroup<T extends string>({
   value: T | "";
   onChange: (next: T) => void;
   columns?: 2 | 3;
+  /** "이미 끝난 항목"을 체크마크 배지로 구분 표시(선택은 그대로 가능, 비활성화 아님) —
+   *  diet-view.tsx의 끼니 선택처럼 "완료했지만 다시 눌러볼 수 있어야 하는" 옵션이 있는
+   *  호출부용. opacity로 흐리게 하면 버튼 자체의 disabled 스타일(button.tsx의
+   *  disabled:opacity-50)과 헷갈려 "눌러도 되는 상태"라는 게 안 보이므로, 버튼은 그대로 두고
+   *  배지만 얹는다. 지정 안 하면 기존 동작(전부 outline/default 2가지 상태) 그대로. */
+  completedValues?: readonly T[];
 }) {
   const labelId = useId();
 
@@ -41,18 +49,32 @@ export function ButtonSelectGroup<T extends string>({
         aria-labelledby={labelId}
         className={`grid gap-2 ${columns === 3 ? "grid-cols-3" : "grid-cols-2"}`}
       >
-        {options.map((option) => (
-          <Button
-            key={option.value}
-            type="button"
-            variant={value === option.value ? "default" : "outline"}
-            aria-pressed={value === option.value}
-            className="h-11"
-            onClick={() => onChange(option.value)}
-          >
-            {option.label}
-          </Button>
-        ))}
+        {options.map((option) => {
+          const isSelected = value === option.value;
+          const isCompleted = !isSelected && completedValues?.includes(option.value);
+          return (
+            <div key={option.value} className="relative">
+              <Button
+                type="button"
+                variant={isSelected ? "default" : "outline"}
+                aria-pressed={isSelected}
+                aria-label={isCompleted ? `${option.label} - 오늘 이미 기록함` : undefined}
+                className="h-11 w-full"
+                onClick={() => onChange(option.value)}
+              >
+                {option.label}
+              </Button>
+              {isCompleted && (
+                <span
+                  aria-hidden="true"
+                  className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground ring-2 ring-background"
+                >
+                  <Check className="h-3 w-3" strokeWidth={3} />
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
