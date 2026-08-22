@@ -38,6 +38,19 @@ export type TodayMenu = {
   totalKcal: number;
   totalSodiumMg: number;
   totalProteinG: number;
+  totalCarbsG: number;
+  /** BMR/TDEE+KDRI 기반 "하루" 목표치(banchan-recommendation.ts의 DateRecommendation과 동일) —
+   *  이 메뉴 자체는 한 끼(mealType)만 담고 있어도 목표치는 하루 기준 그대로 넘어온다. 화면
+   *  쪽에서 끼니 수만큼 나눠 "이 끼니의 목표"를 근사해야 한다(diet-view.tsx MEALS_PER_DAY
+   *  참고) — 하루 목표를 한 끼 합계에 그대로 들이대면 항상 30%대로만 보여 의미가 없다.
+   *  온보딩에 성별/키/체중/활동량이 다 있어야 채워지고, 없으면 null(2026-08-21 피드백:
+   *  나트륨/단백질/열량 숫자만 있고 목표 대비 비교가 없어 어르신이 좋고 나쁨을 판단하기
+   *  어렵다는 지적에 대응). 목업(isReal: false) 조합은 실제 건강 프로필에 근거한 값이
+   *  아니므로 항상 null. */
+  targetCalorieKcal: number | null;
+  targetProteinG: number | null;
+  targetSodiumMg: number | null;
+  targetCarbsG: number | null;
   reasons: string[];
   /** true면 실제 AI 반찬 추천, false면 아직 실제 추천이 없어 목업으로 대체된 상태 —
    *  화면이 "대표 반찬 이모지"처럼 목업 카탈로그에만 있는 정보를 쓸지 판단하는 데 쓴다. */
@@ -96,6 +109,11 @@ export function resolveTodayMenu(
       totalKcal: sum(items.map((i) => i.kcal)),
       totalSodiumMg: sum(items.map((i) => i.sodiumMg)),
       totalProteinG: sum(items.map((i) => i.proteinG)),
+      totalCarbsG: sum(real.items.map((i) => i.carbsPer100g)),
+      targetCalorieKcal: real.targetCalorieKcal,
+      targetProteinG: real.targetProteinG,
+      targetSodiumMg: real.targetSodiumMg,
+      targetCarbsG: real.targetCarbsG,
       reasons: [...new Set(real.items.map((i) => i.reason).filter((r): r is string => !!r))],
       isReal: true,
       isGenerating: false,
@@ -108,6 +126,11 @@ export function resolveTodayMenu(
       totalKcal: 0,
       totalSodiumMg: 0,
       totalProteinG: 0,
+      totalCarbsG: 0,
+      targetCalorieKcal: null,
+      targetProteinG: null,
+      targetSodiumMg: null,
+      targetCarbsG: null,
       reasons: [],
       isReal: false,
       isGenerating: true,
@@ -126,6 +149,13 @@ export function resolveTodayMenu(
     totalKcal: combo.totalKcal,
     totalSodiumMg: combo.totalSodiumMg,
     totalProteinG: combo.totalProteinG,
+    totalCarbsG: 0,
+    // 목업 조합은 실제 건강 프로필(BMR/TDEE)에 근거한 게 아니라 목표치 비교 자체가
+    // 성립하지 않는다 — isReal이 아닐 때 호출부는 항상 raw 값만 보여줘야 한다.
+    targetCalorieKcal: null,
+    targetProteinG: null,
+    targetSodiumMg: null,
+    targetCarbsG: null,
     reasons: combo.reasons,
     isReal: false,
     isGenerating: false,
