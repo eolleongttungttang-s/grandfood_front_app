@@ -16,7 +16,7 @@ import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import { fetchElderDietHistory } from "@/lib/meal-dashboard";
 import { fetchElderNotifications, fetchElderStreakNotification, getSeenNotificationIds } from "@/lib/notifications";
-import { BackendMealType, SUITABILITY_CLASS, SUITABILITY_LABEL } from "@/lib/banchan-recommendation";
+import { BackendMealType } from "@/lib/banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
 import {
   applyLeftoverAnalysisResult,
@@ -430,15 +430,11 @@ export function HomeView({
                       >
                         {item.name}
                       </span>
-                      {item.suitability && (
-                        <Badge className={SUITABILITY_CLASS[item.suitability]}>
-                          {SUITABILITY_LABEL[item.suitability]}
-                        </Badge>
-                      )}
                       {/* 취소선만으로는 "예전에 기피 표시한 반찬이 오늘 또 나왔다"가 잘
                           안 보인다는 피드백(2026-08-19) — 글자 배지로 한 번 더 확실히
-                          알려준다. 건강 관련 판정(SUITABILITY_CLASS)이 아니라 개인 취향
-                          표시라 그 색과는 구분되게 outline 배지를 쓴다. */}
+                          알려준다. "추천/주의" 건강 판정 배지는 큰 의미가 없다는 피드백으로
+                          뺐다(2026-08-21) — 이 배지는 그거랑 무관한 개인 취향 표시라 그대로
+                          남긴다. */}
                       {disliked && (
                         <Badge variant="outline" className="shrink-0 text-muted-foreground">
                           기피 표시됨

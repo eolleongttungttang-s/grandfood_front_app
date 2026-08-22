@@ -7,16 +7,13 @@
 // 이전달/다음달로도 넘어갈 수 있다(2026-08-13 추가 피드백) — 지나간 달에 뭘 먹었는지, 다음
 // 달은 아직 생성 전인지를 훑어볼 수 있다.
 //
-// 색 체계는 이 앱이 이미 곳곳에서 쓰는 risk-normal/caution/high 토큰을 그대로 재사용한다
-// (ward-detail-view.tsx의 STATUS_BADGE_CLASS, banchan-recommendation-section.tsx의
-// SUITABILITY_CLASS와 동일) — 이 화면만 새 팔레트를 쓰면 같은 "주의/위험" 의미가 앱 안에서
-// 두 가지 색으로 표현되어 오히려 헷갈린다.
+// "추천/주의/피하기" 배지·날짜 칸 점·범례는 큰 의미가 없다는 피드백으로 뺐다(2026-08-21) —
+// 날짜 칸은 이제 생성 진행 상태(생성중/실패 점)만 표시한다.
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ButtonSelectGroup } from "@/components/app/button-select-group";
 import { ExpandToggle } from "@/components/app/expand-toggle";
@@ -29,25 +26,12 @@ import {
   BackendMealType,
   BanchanRecommendationItem,
   BanchanRecommendationGenerationStatus,
-  BanchanSuitability,
   fetchMonthlyBanchanRecommendation,
   getRecommendationForDate,
   MonthlyBanchanRecommendation,
-  SUITABILITY_CLASS,
-  SUITABILITY_DOT_CLASS,
-  SUITABILITY_LABEL,
   todayDateString,
   WardIdentity,
 } from "@/lib/banchan-recommendation";
-
-// 하루에 반찬이 여럿이면 그중 가장 주의가 필요한 등급 하나로 그날 점 색을 정한다(avoid >
-// caution > recommended) — "이 날은 한 번이라도 조심할 게 있는지"가 달력 한눈에 보기엔
-// 가장 유용한 요약이다.
-const SUITABILITY_SEVERITY: Record<BanchanSuitability, number> = {
-  avoid: 2,
-  caution: 1,
-  recommended: 0,
-};
 
 // diet-view.tsx MEAL_SLOT_OPTIONS/diet-day-detail.tsx MEAL_TYPE_LABEL와 같은 개념인데
 // 타입/용도가 각각 달라(이용자 자가보고 vs AI 추천) export해서 공유하지 않고 여기서도
@@ -69,14 +53,6 @@ function defaultMealTypeForNow(): BackendMealType {
   if (hour < 11) return "breakfast";
   if (hour < 17) return "lunch";
   return "dinner";
-}
-
-function worstSuitability(items: BanchanRecommendationItem[]): BanchanSuitability | null {
-  if (items.length === 0) return null;
-  return items.reduce<BanchanSuitability>(
-    (worst, item) => (SUITABILITY_SEVERITY[item.suitability] > SUITABILITY_SEVERITY[worst] ? item.suitability : worst),
-    items[0].suitability
-  );
 }
 
 type DayCell = {
@@ -122,9 +98,9 @@ function buildDayCells(monthly: MonthlyBanchanRecommendation): DayCell[] {
 // 두드러진다는 피드백(2026-08-19) — 영양소마다 옅은 배경 색조를 줘서 칸을 눈으로 바로
 // 구분할 수 있게 한다. 처음엔 색과 함께 아이콘(불꽃/고기 등)도 같이 썼는데, 어르신
 // 사용자에게는 아이콘 기호보다 글자로 된 라벨이 훨씬 명확하다는 피드백(2026-08-19
-// 추가)을 받아 아이콘은 빼고 색 배경 + 글자 라벨 조합만 남겼다. 색은 이 파일이 이미
-// "주의/피하기" 의미로 쓰고 있는 risk-* 토큰(SUITABILITY_CLASS 등, 파일 상단 주석
-// 참고)은 절대 재사용하지 않는다 — 여긴 "얼마나 위험한지"가 아니라 "무슨 영양소인지"
+// 추가)을 받아 아이콘은 빼고 색 배경 + 글자 라벨 조합만 남겼다. 색은 이 앱이 "주의/위험"
+// 의미로 쓰는 risk-* 토큰(ward-detail-view.tsx의 STATUS_BADGE_CLASS 등)은 절대
+// 재사용하지 않는다 — 여긴 "얼마나 위험한지"가 아니라 "무슨 영양소인지"
 // 구분이라 같은 색을 쓰면 의미가 섞여 보인다. 대신 이 앱 warm 팔레트의
 // primary/accent/chart-2/chart-3만 쓴다. 반찬 카드의 영양성분 칩(NutrientFact)도 같은
 // 표를 그대로 재사용해서 같은 영양소는 화면 전체에서 항상 같은 색으로 보이게 한다.
@@ -168,10 +144,9 @@ function NutrientFact({ nutrient, value }: { nutrient: NutrientKey; value: strin
 function DishCard({ item }: { item: BanchanRecommendationItem }) {
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-lg font-bold text-foreground">{item.name}</span>
-        <Badge className={SUITABILITY_CLASS[item.suitability]}>{SUITABILITY_LABEL[item.suitability]}</Badge>
-      </div>
+      {/* "추천/주의/피하기" 배지는 큰 의미가 없다는 피드백으로 뺐다(2026-08-21) —
+          반찬 이름만 남긴다. */}
+      <span className="text-lg font-bold text-foreground">{item.name}</span>
       <span className="w-fit rounded-full bg-muted px-2.5 py-0.5 text-sm font-medium text-muted-foreground">
         {item.category}
       </span>
@@ -221,7 +196,7 @@ export function BanchanRecommendationCalendar({
   monthly,
   polling,
   surveyHref,
-  onTodayMealTypeChange,
+  onSelectedMealChange,
   todayCompletedMealTypes,
 }: {
   identity: WardIdentity;
@@ -236,11 +211,24 @@ export function BanchanRecommendationCalendar({
    *  정보를 보호자가 대신 입력/수정할 화면이 없어(이 대상자는 자기 계정으로 직접 입력해야
    *  함) undefined를 넘기면 버튼 없이 안내 문구만 보여준다. */
   surveyHref?: string;
-  /** 오늘 날짜를 보고 있는 동안 이 안의 끼니 탭(selectedMealType)이 바뀔 때마다 호출된다 —
-   *  diet-view.tsx가 예전엔 따로 갖고 있던 "끼니 선택" 버튼을 없애고, 이 탭 하나로
-   *  "오늘의 O 추천 반찬 조합" 제목/영양성분까지 같이 바꾸기 위해 씀(2026-08-21, 두
-   *  끼니 선택 UI가 한 화면에 겹쳐 보인다는 피드백). 다른 날짜를 보고 있을 땐 안 부른다. */
-  onTodayMealTypeChange?: (mealType: BackendMealType) => void;
+  /** 지금 보고 있는 날짜 상세의 끼니 탭(selectedMealType)이나 날짜 자체가 바뀔 때마다
+   *  호출된다 — diet-view.tsx가 예전엔 따로 갖고 있던 "끼니 선택" 버튼을 없애고, 이 탭
+   *  하나로 "오늘의 O 추천 반찬 조합" 제목/영양성분까지 같이 바꾸기 위해 씀(2026-08-21,
+   *  두 끼니 선택 UI가 한 화면에 겹쳐 보인다는 피드백). 처음엔 "오늘 날짜를 보는 동안만"
+   *  불렀는데, 그러면 어제/내일 등 다른 날짜로 넘어가거나 그 날짜에서 끼니를 눌러도 위
+   *  카드가 계속 "오늘" 것만 보여줘서 안 바뀌는 것처럼 보였다(2026-08-21 피드백) — 이제
+   *  날짜와 무관하게 항상 부른다.
+   *
+   *  세 번째 인자(monthlyForDate)로 지금 보고 있는 달의 데이터(displayedMonthly)도 같이
+   *  넘긴다 — diet-view.tsx가 자기 monthly prop(마운트 시점 달에 고정, 2026-08-21 코드
+   *  리뷰 지적)으로 resolveTodayMenu를 부르면, 사용자가 여기서 다른 달로 넘어가 실제
+   *  데이터가 있는 날을 봐도 위 카드는 그 달을 몰라 "아직 근거가 없어요"로 잘못 나온다.
+   *  이 컴포넌트가 이미 월별로 캐시해 들고 있는 값을 그대로 전달해 그 문제를 없앤다. */
+  onSelectedMealChange?: (
+    date: string,
+    mealType: BackendMealType,
+    monthlyForDate: MonthlyBanchanRecommendation | null
+  ) => void;
   /** 오늘 이미 식전+식후 사진을 다 올린 끼니 — 오늘 날짜를 보고 있을 때만 탭에 완료 배지로
    *  표시한다(예전엔 diet-view.tsx의 상단 버튼에 있던 표시를 여기로 옮겼다). */
   todayCompletedMealTypes?: readonly BackendMealType[];
@@ -345,11 +333,11 @@ export function BanchanRecommendationCalendar({
     setMealTypeTrackedDate(selected?.date ?? null);
     setSelectedMealType(selected?.date === todayStr ? defaultMealTypeForNow() : "breakfast");
   }
-  // 오늘 날짜를 보는 동안에만 상위(diet-view.tsx)에 지금 고른 끼니를 알려준다 — 다른 날짜를
-  // 보고 있을 땐 "오늘의 O 추천 반찬 조합" 제목이 그 날짜를 따라 바뀌면 안 되므로 안 부른다.
+  // 상위(diet-view.tsx)에 지금 보는 날짜+끼니를 항상 알려준다 — 위 카드가 이 값을 그대로
+  // 받아 그 날짜/끼니 기준으로 제목·영양성분·이유를 계산한다.
   useEffect(() => {
-    if (selected?.date === todayStr) onTodayMealTypeChange?.(selectedMealType);
-  }, [selected?.date, selectedMealType, todayStr, onTodayMealTypeChange]);
+    if (selected?.date) onSelectedMealChange?.(selected.date, selectedMealType, displayedMonthly);
+  }, [selected?.date, selectedMealType, displayedMonthly, onSelectedMealChange]);
 
   // 전날/다음날 버튼이 월 경계를 넘으면(예: 8월 31일 → 9월 1일) selectedDate만 옮기고
   // viewedMonth는 그대로 둬서, 헤더/달력 그리드는 계속 "8월"을 보여주는데 아래 날짜 상세는
@@ -473,7 +461,6 @@ export function BanchanRecommendationCalendar({
                       // 직접 넘겨서 보는 중이면(isViewingCurrentMonth=false) 그 달은 원래 전체가
                       // 과거라 이 처리를 안 하고 평소처럼 다 보여준다.
                       const isPast = isViewingCurrentMonth && day.date <= todayDateString();
-                      const dot = !isPast && day.generationStatus === "done" ? worstSuitability(day.items) : null;
                       const isSelected = day.date === selectedDate;
                       return (
                         <button
@@ -505,7 +492,6 @@ export function BanchanRecommendationCalendar({
                           }`}
                         >
                           <span>{day.dayOfMonth}</span>
-                          {dot && <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS[dot]}`} />}
                           {!isPast && day.generationStatus === "generating" && (
                             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/50" />
                           )}
@@ -517,21 +503,6 @@ export function BanchanRecommendationCalendar({
                     })}
                   </div>
                 ))}
-              </div>
-
-              <div className="flex items-center gap-3 px-1 text-[11px] text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS.recommended}`} />
-                  추천
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS.caution}`} />
-                  주의
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className={`h-1.5 w-1.5 rounded-full ${SUITABILITY_DOT_CLASS.avoid}`} />
-                  피하기
-                </span>
               </div>
             </>
           )}

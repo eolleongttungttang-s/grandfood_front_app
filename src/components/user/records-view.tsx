@@ -6,18 +6,18 @@ import { Pill } from "lucide-react";
 
 import { MealTone, Ward, WardDetail } from "@/lib/wards";
 import {
-  deriveMealTones,
+  DailyLeftover,
+  deriveDailyLeftover,
   dietHistoryForDate,
   DietHistoryEntry,
   fetchElderDietHistory,
   recentDateKeys,
 } from "@/lib/meal-dashboard";
-import { formatMonthDayLabel } from "@/lib/date-format";
 import { computeTodayNutritionSnapshot, getRecommendationForDate, todayDateString } from "@/lib/banchan-recommendation";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { fetchRecipeRecommendations, type RecipeRecommendationItem } from "@/lib/recipe-recommendations";
 import { TopBar } from "@/components/app/top-bar";
-import { MealToneSummary } from "@/components/app/meal-tone-summary";
+import { LeftoverDayGrid, LeftoverLegend } from "@/components/app/leftover-day-grid";
 import { DietDayDetail } from "@/components/app/diet-day-detail";
 import { RecipeRecommendationList } from "@/components/app/recipe-recommendation-list";
 import { NutrientMeter } from "@/components/app/nutrient-meter";
@@ -29,13 +29,18 @@ import {
 } from "@/lib/medication-reminder-store";
 import { useLocalStore } from "@/lib/use-store";
 
-const MEAL_TONE_CLASS: Record<string, string> = {
-  완식: "bg-foreground",
-  소량: "bg-risk-caution-foreground",
-  미응답: "bg-risk-high-foreground",
-};
-
 const RECENT_DAYS = 14;
+
+// detail.mealHistory(seedFromId 기반 목업, ward-registry.ts MealTone)는 여전히 완식/소량/
+// 미응답 3단계다 — 실제 백엔드 기록이 아직 없을 때만 쓰는 대체값이라 그 목업 생성 자체를
+// 새로 만들지 않고, 표시 직전에 근사 잔반율로 한 번 변환해서 쓴다(완식≈5%, 소량≈55%,
+// 미응답=기록 없음).
+function mockMealHistoryToDailyLeftover(mealHistory: MealTone[], dateKeys: string[]): DailyLeftover[] {
+  return mealHistory.map((tone, i) => ({
+    date: dateKeys[i],
+    avgLeftoverPercent: tone === "미응답" ? null : tone === "소량" ? 55 : 5,
+  }));
+}
 
 export function RecordsView({
   ward,
@@ -52,8 +57,16 @@ export function RecordsView({
   // 뭉뚱그린 뒤 원본을 버렸다 — 그리드 칸이 완식/소량/미응답 색만 보여줄 뿐 탭해도 아무 반응이
   // 없었다. 날짜 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를 보여달라는 요청(2026-08-19)을
   // 받아 원본 items도 rawDietHistory에 같이 남겨둔다.
-  const [backendMealTones, setBackendMealTones] = useState<MealTone[] | null>(null);
+  const [backendDailyLeftover, setBackendDailyLeftover] = useState<DailyLeftover[] | null>(null);
   const [rawDietHistory, setRawDietHistory] = useState<DietHistoryEntry[] | null>(null);
+  // recentDateKeys(RECENT_DAYS)를 렌더마다 새로 부르면 "지금" 기준으로 매번 다시 계산되는데,
+  // backendDailyLeftover/rawDietHistory는 아래 useEffect가 도는 시점(대상자 정보가 바뀔 때)에만
+  // 갱신된다 — 자정을 넘겨 화면을 켜둔 채로 있으면 날짜 배열만 하루 밀려서 실제 데이터가
+  // 가리키는 날짜와 어긋난다(코드 리뷰 지적: 그리드 칸 색상·라벨이 서로 다른 날을 가리키게
+  // 됨). 아래 useEffect와 정확히 같은 의존성 배열로 묶어서, 데이터가 갱신될 때만 날짜 배열도
+  // 같이 갱신되게 한다.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- ward.*는 계산에 쓰이는 값이 아니라, 아래 fetch useEffect와 같은 시점에만 재계산되도록 하는 동기화 키로 일부러 넣음
+  const dateKeys = useMemo(() => recentDateKeys(RECENT_DAYS), [ward.id, ward.name, ward.age, ward.address]);
   useEffect(() => {
     let cancelled = false;
     fetchElderDietHistory(
@@ -61,25 +74,15 @@ export function RecordsView({
       RECENT_DAYS
     ).then((items) => {
       if (cancelled || !items) return;
-      setBackendMealTones(deriveMealTones(items, RECENT_DAYS));
+      setBackendDailyLeftover(deriveDailyLeftover(items, dateKeys));
       setRawDietHistory(items);
     });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dateKeys는 위 useMemo가 같은 deps로 이미 동기화해둔 값이라 별도 트리거로 넣지 않는다
   }, [ward.id, ward.name, ward.age, ward.address]);
-  const mealHistory = backendMealTones ?? detail.mealHistory;
-  // deriveMealTones가 만드는 톤 배열과 정확히 같은 순서(과거→오늘)로 날짜를 매겨, 그리드
-  // 칸 인덱스 i를 탭했을 때 그 칸이 어느 날짜인지 알 수 있게 한다.
-  //
-  // recentDateKeys(RECENT_DAYS)를 렌더마다 새로 부르면 "지금" 기준으로 매번 다시 계산되는데,
-  // backendMealTones/rawDietHistory는 위 useEffect가 도는 시점(대상자 정보가 바뀔 때)에만
-  // 갱신된다 — 자정을 넘겨 화면을 켜둔 채로 있으면 날짜 배열만 하루 밀려서 실제 데이터가
-  // 가리키는 날짜와 어긋난다(코드 리뷰 지적: 그리드 칸 색상·라벨이 서로 다른 날을 가리키게
-  // 됨). 위 useEffect와 정확히 같은 의존성 배열로 묶어서, 데이터가 갱신될 때만 날짜 배열도
-  // 같이 갱신되게 한다.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- ward.*는 계산에 쓰이는 값이 아니라, 위 fetch useEffect와 같은 시점에만 재계산되도록 하는 동기화 키로 일부러 넣음
-  const dateKeys = useMemo(() => recentDateKeys(RECENT_DAYS), [ward.id, ward.name, ward.age, ward.address]);
+  const dailyLeftover = backendDailyLeftover ?? mockMealHistoryToDailyLeftover(detail.mealHistory, dateKeys);
   // 기본으로 "오늘"(그리드 맨 끝 칸)을 펼쳐 보여준다 — 진입하자마자 가장 궁금할 날짜를
   // 바로 보여준다.
   const [selectedDate, setSelectedDate] = useState<string | null>(() => dateKeys[dateKeys.length - 1] ?? null);
@@ -89,13 +92,24 @@ export function RecordsView({
   // 안 보이는 대신, 다시 "오늘"(맨 끝 칸)을 고른 것으로 취급한다.
   const effectiveSelectedDate =
     selectedDate && dateKeys.includes(selectedDate) ? selectedDate : (dateKeys[dateKeys.length - 1] ?? null);
+  // 같은 날짜를 다시 누르면 접는다(2026-08-21 피드백: "아침점심저녁 펼쳐지는 게 어수선해서
+  // 다시 터치하면 접히면 좋겠다"). selectedDate 자체를 null로 만들면 위 fallback 때문에
+  // "오늘"이 다시 펼쳐져버려서, 펼침 여부는 별도 state로 관리한다.
+  const [isDetailOpen, setIsDetailOpen] = useState(true);
+  function handleSelectDate(date: string) {
+    if (date === effectiveSelectedDate && isDetailOpen) {
+      setIsDetailOpen(false);
+    } else {
+      setSelectedDate(date);
+      setIsDetailOpen(true);
+    }
+  }
   const selectedDayEntries =
     effectiveSelectedDate && rawDietHistory ? dietHistoryForDate(rawDietHistory, effectiveSelectedDate) : [];
-  const selectedDayTone = effectiveSelectedDate ? mealHistory[dateKeys.indexOf(effectiveSelectedDate)] : undefined;
+  const selectedDayLeftover = effectiveSelectedDate
+    ? (dailyLeftover.find((d) => d.date === effectiveSelectedDate)?.avgLeftoverPercent ?? null)
+    : null;
 
-  const completeCount = mealHistory.filter((m) => m === "완식").length;
-  const smallCount = mealHistory.filter((m) => m === "소량").length;
-  const noResponseCount = mealHistory.filter((m) => m === "미응답").length;
   const reminderEnabled = useLocalStore(medicationReminderStore)[ward.id] ?? false;
   const hasRealMeds = detail.medications[0]?.name !== "특이 복약 없음";
 
@@ -169,38 +183,24 @@ export function RecordsView({
         )}
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
-          <MealToneSummary
-            completeCount={completeCount}
-            smallCount={smallCount}
-            noResponseCount={noResponseCount}
-          />
-          {/* 칸이 title 툴팁(마우스 오버)만으로 하루 상태를 알려줘서 터치 기기에선 사실상
-              정보가 안 보였다 — 칸을 탭하면 그날 상세(끼니별 반찬·잔반율)를 아래에 펼쳐
-              보여주도록 바꿨다(2026-08-19 피드백). */}
-          <div className="grid grid-cols-7 gap-1.5">
-            {mealHistory.map((tone, i) => {
-              const date = dateKeys[i];
-              const isSelected = date === effectiveSelectedDate;
-              return (
-                <button
-                  key={i}
-                  type="button"
-                  aria-label={`${formatMonthDayLabel(date)} ${tone}`}
-                  onClick={() => setSelectedDate(date)}
-                  className={`h-8 rounded-sm ${MEAL_TONE_CLASS[tone]} ${
-                    isSelected ? "ring-2 ring-inset ring-foreground" : ""
-                  }`}
-                />
-              );
-            })}
+          {/* 완식/소량이라는 임의 경계 대신 실제 평균 잔반율 숫자로 보여준다(2026-08-21
+              피드백) — 칸은 색+날짜 숫자만, 정확한 값은 탭했을 때 아래 상세에서 크게
+              보여준다(칸에 둘 다 넣으면 날짜 숫자와 헷갈린다는 피드백을 반영). 범례는
+              제목과 한 줄에 두어야 가시성이 좋다는 피드백에 따라 같은 행에 둔다. */}
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+            <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
+            <LeftoverLegend />
           </div>
+          <LeftoverDayGrid
+            dailyLeftover={dailyLeftover}
+            selectedDate={isDetailOpen ? effectiveSelectedDate : null}
+            onSelectDate={handleSelectDate}
+          />
 
-          {effectiveSelectedDate && selectedDayTone && (
+          {effectiveSelectedDate && isDetailOpen && (
             <DietDayDetail
               date={effectiveSelectedDate}
-              tone={selectedDayTone}
-              toneDotClass={MEAL_TONE_CLASS[selectedDayTone]}
+              leftoverPercent={selectedDayLeftover}
               entries={rawDietHistory === null ? null : selectedDayEntries}
             />
           )}

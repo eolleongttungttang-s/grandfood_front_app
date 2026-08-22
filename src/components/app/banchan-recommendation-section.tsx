@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { BackendMealType, WardIdentity } from "@/lib/banchan-recommendation";
+import { BackendMealType, MonthlyBanchanRecommendation, WardIdentity } from "@/lib/banchan-recommendation";
 import { hasAnyProgress, MonthlyBanchanRecommendationState } from "@/lib/use-monthly-banchan-recommendation";
 import { BanchanRecommendationCalendar } from "@/components/app/banchan-recommendation-calendar";
 import { RecommendationReminderModal } from "@/components/app/RecommendationReminderModal";
@@ -26,7 +26,7 @@ export function BanchanRecommendationSection({
   state,
   subscribeHref,
   surveyHref,
-  onTodayMealTypeChange,
+  onSelectedMealChange,
   todayCompletedMealTypes,
 }: {
   identity: WardIdentity;
@@ -39,8 +39,13 @@ export function BanchanRecommendationSection({
    *  안 보일 때 뜨는 "생활 정보 입력하기" 버튼의 이동 경로. */
   surveyHref?: string;
   /** BanchanRecommendationCalendar로 그대로 전달 — diet-view.tsx만 넘긴다(본인 화면 전용
-   *  "오늘의 O 추천 반찬 조합" 제목 연동). ward-detail-view.tsx는 안 넘겨도 그만이다. */
-  onTodayMealTypeChange?: (mealType: BackendMealType) => void;
+   *  "오늘의 O 추천 반찬 조합" 제목 연동, 지금 보는 날짜+끼니 둘 다). ward-detail-view.tsx는
+   *  안 넘겨도 그만이다. */
+  onSelectedMealChange?: (
+    date: string,
+    mealType: BackendMealType,
+    monthlyForDate: MonthlyBanchanRecommendation | null
+  ) => void;
   todayCompletedMealTypes?: readonly BackendMealType[];
 }) {
   const { month, monthly, loading, requesting, polling, error, hasActiveSubscription, request } = state;
@@ -114,7 +119,7 @@ export function BanchanRecommendationSection({
           monthly={monthly}
           polling={polling}
           surveyHref={surveyHref}
-          onTodayMealTypeChange={onTodayMealTypeChange}
+          onSelectedMealChange={onSelectedMealChange}
           todayCompletedMealTypes={todayCompletedMealTypes}
         />
       )}

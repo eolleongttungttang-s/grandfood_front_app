@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Stethoscope } from "lucide-react";
 
 import { Ward, WardDetail } from "@/lib/wards";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
-import { BackendMealType, todayDateString } from "@/lib/banchan-recommendation";
+import { BackendMealType, MonthlyBanchanRecommendation, todayDateString } from "@/lib/banchan-recommendation";
+import { formatMonthDayLabel } from "@/lib/date-format";
 import { getCurrentMealSlot, MealSlot } from "@/lib/meal-log-store";
+import type { DishCombo } from "@/lib/recommendation";
 import { fetchElderDietHistory } from "@/lib/meal-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,19 +17,7 @@ import { TopBar } from "@/components/app/top-bar";
 import { SpeakableCard } from "@/components/app/speakable-card";
 import { BanchanRecommendationSection } from "@/components/app/banchan-recommendation-section";
 import { ExpandToggle } from "@/components/app/expand-toggle";
-import { NutrientMeter } from "@/components/app/nutrient-meter";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
-
-// 이 화면의 목표 대비 비교는 todayMenu가 이미 한 끼(mealType)로 걸러 놓은 값인데, target*는
-// "하루" 목표치 그대로 넘어온다(today-menu.ts 참고) — 하루 목표를 한 끼 합계에 그대로 들이대면
-// 항상 30%대로만 보여서 의미가 없다. 이 반찬 추천은 항상 아침/점심/저녁 3끼로 배정되므로
-// (BanchanDeliveryScheduler의 FACILITY_MEAL_TYPES 참고) 하루 목표를 3등분한 근사치를 "이 끼니
-// 목표"로 쓴다 — 백엔드가 반찬 배정 자체를 계산할 때 쓰는 것과 같은 3등분 전제다.
-const MEALS_PER_DAY = 3;
-
-function perMealTarget(dailyTarget: number | null): number | null {
-  return dailyTarget == null ? null : dailyTarget / MEALS_PER_DAY;
-}
 
 // meal-log-store.ts의 MealSlot("아침"/"점심"/"저녁")을 백엔드 meal_type("breakfast"/
 // "lunch"/"dinner")으로 — diet-day-detail.tsx의 MEAL_TYPE_LABEL과 반대 방향 매핑. 최초
@@ -42,6 +32,22 @@ const MEAL_SLOT_TO_BACKEND_MEAL_TYPE: Record<MealSlot, BackendMealType> = {
 // 반대로 화면 제목("오늘의 O 추천 반찬 조합")에 쓸 한글 라벨 — banchan-recommendation-
 // calendar.tsx의 MEAL_TYPE_TAB_OPTIONS와 같은 개념인데 이 파일도 각자 따로 두는 관례를
 // 따른다(그 파일 상단 주석 참고).
+// resolveTodayMenu가 real도 없고 combo도 없을 때를 대비해 만드는 게 아니라, 반대로
+// "오늘이 아닌 날짜를 볼 때 오늘자 목업으로 폴백하지 못하게" 일부러 빈 combo를
+// 넘기는 용도다(2026-08-21) — 목업(detail.recommendedCombo)은 애초에 "오늘"에 대한
+// 고정값이라, 다른 날짜에 그걸 보여주면 "이 날짜 것"인 양 오해하게 만든다.
+const EMPTY_DISH_COMBO: DishCombo = {
+  comboId: "",
+  wardId: "",
+  storeId: "",
+  items: [],
+  totalKcal: 0,
+  totalSodiumMg: 0,
+  totalProteinG: 0,
+  reasons: [],
+  matchedAt: "",
+};
+
 const BACKEND_MEAL_TYPE_LABEL: Record<BackendMealType, string> = {
   breakfast: "아침",
   lunch: "점심",
@@ -77,10 +83,32 @@ export function DietView({
   // 버튼이 따로 있었는데, 바로 아래 AI 반찬 추천 달력의 오늘 날짜 상세에도 똑같은 끼니 탭이
   // 있어서 한 화면에 거의 같은 선택 UI가 두 번 겹쳐 보였다(피드백). 이 카드의 버튼은 없애고,
   // 달력 쪽 탭(banchan-recommendation-calendar.tsx)이 대신 이 상태를 갱신하도록 바꿨다 —
-  // onTodayMealTypeChange로 아래에서 연결. 초기값은 지금 시간대 기준으로만 계산해두고, 달력
+  // onSelectedMealChange로 아래에서 연결. 초기값은 지금 시간대 기준으로만 계산해두고, 달력
   // 컴포넌트가 마운트되면 곧바로 같은 값(또는 사용자가 이미 골라둔 값)으로 다시 맞춰준다.
   const [mealType, setMealType] = useState<BackendMealType>(
     MEAL_SLOT_TO_BACKEND_MEAL_TYPE[getCurrentMealSlot()]
+  );
+  // 달력에서 지금 보고 있는 날짜 — 처음엔 이 카드가 항상 "오늘"만 봤는데, 달력에서 다른
+  // 날짜로 넘기거나 그 날짜의 끼니를 눌러도 이 카드가 계속 오늘 것만 보여줘서 안 바뀌는
+  // 것처럼 보였다(2026-08-21 피드백). 이제 달력이 알려주는 날짜를 그대로 따라간다.
+  const [selectedDate, setSelectedDate] = useState<string>(todayDateString());
+  // 달력이 지금 보여주고 있는 달의 데이터 — banchanRecommendation.monthly는 마운트 시점
+  // 달에 고정돼 있어서, 달력에서 다른 달로 넘어가 실제 데이터가 있는 날짜를 봐도 아래
+  // resolveTodayMenu가 그 달을 몰라 "아직 근거가 없어요"로 잘못 나오는 문제가 있었다
+  // (2026-08-21 코드 리뷰 지적). 달력이 이미 월별로 캐시해 들고 있는 값을 그대로 받는다.
+  const [monthlyForSelectedDate, setMonthlyForSelectedDate] = useState<MonthlyBanchanRecommendation | null>(
+    banchanRecommendation.monthly
+  );
+  // 매 렌더마다 새 함수를 만들면 달력의 onSelectedMealChange 이펙트(의존성에 이 함수가
+  // 들어있음)가 부모가 리렌더될 때마다(예: 아래 폴링 4초 간격) 불필요하게 다시 실행된다
+  // (2026-08-21 코드 리뷰 지적) — useCallback으로 참조를 고정한다.
+  const handleSelectedMealChange = useCallback(
+    (date: string, mt: BackendMealType, monthlyForDate: MonthlyBanchanRecommendation | null) => {
+      setSelectedDate(date);
+      setMealType(mt);
+      setMonthlyForSelectedDate(monthlyForDate);
+    },
+    []
   );
 
   // 오늘 이미 식전+식후 사진을 다 올린 끼니(diet-history의 completed) — 달력 쪽 오늘 날짜
@@ -112,27 +140,29 @@ export function DietView({
   // "오늘의 O 추천 반찬 조합"/"왜 이 조합인가요" 카드가 오늘 실제 AI 추천이 있으면 그걸
   // 쓰고, 없으면 목업으로 자연스럽게 폴백한다 — 실제 추천이 생긴 뒤에도 이 카드들이 계속
   // 목업만 보여줘서 바로 아래 AI 반찬 추천 달력과 서로 다른 답을 보여주던 문제(2026-08-13
-  // 피드백, "카드 내용이 안 맞는다")를 여기서 고친다.
-  const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly, mealType);
+  // 피드백, "카드 내용이 안 맞는다")를 여기서 고친다. selectedDate가 오늘이 아니면(달력에서
+  // 다른 날짜를 보는 중) 목업 폴백은 안 쓴다 — 목업은 애초에 "오늘"에 대한 것이라, 다른
+  // 날짜에 그 오늘자 목업을 보여주면 더 헷갈린다. 그 날짜에 실제 데이터가 없으면 그냥
+  // "아직 근거가 없어요"류 빈 상태를 보여준다(resolveTodayMenu가 real도 combo도 없을 때는
+  // 안 만들어주므로, 여기서 combo 자리에 빈 값을 넣어 목업 폴백 자체를 막는다).
+  const isToday = selectedDate === todayDateString();
+  const todayMenu = resolveTodayMenu(
+    isToday ? detail.recommendedCombo : EMPTY_DISH_COMBO,
+    monthlyForSelectedDate,
+    mealType,
+    selectedDate
+  );
 
   // 카드별 TTS(SpeakableCard)가 읽어줄 문장 — 화면에 보이는 값 그대로를 문장으로 풀어 쓴다.
   // isGenerating일 땐 totalSodiumMg 등이 전부 0/items가 빈 배열이라, 그대로 문장을 지으면
   // "나트륨 0mg..." 같은 잘못된 값이나 빈 목록 문장이 화면 문구와 다르게 읽힌다 — 시각 카드와
   // 똑같이 생성 중 안내로 맞춘다.
   const mealTypeLabel = BACKEND_MEAL_TYPE_LABEL[mealType];
-  // 목표치가 있으면 "이 끼니 목표 대비 몇 %"까지 읽어준다 — 숫자만 불러주면 시각 카드와
-  // 마찬가지로 좋은지 나쁜지 판단하기 어렵다는 지적(2026-08-21)이 TTS에도 똑같이 적용된다.
-  const kcalTarget = perMealTarget(todayMenu.targetCalorieKcal);
-  const proteinTarget = perMealTarget(todayMenu.targetProteinG);
-  const sodiumTarget = perMealTarget(todayMenu.targetSodiumMg);
-  const pctOf = (value: number, target: number | null) =>
-    target != null && target > 0 ? `(목표의 ${Math.round((value / target) * 100)}%)` : "";
+  const dateLabel = isToday ? "오늘" : formatMonthDayLabel(selectedDate);
   const recommendedComboSpeech = todayMenu.isGenerating
     ? TODAY_MENU_GENERATING_MESSAGE
-    : `오늘의 ${mealTypeLabel} 추천 반찬 조합이에요. ` +
-      `나트륨 ${todayMenu.totalSodiumMg}mg${pctOf(todayMenu.totalSodiumMg, sodiumTarget)}, ` +
-      `단백질 ${todayMenu.totalProteinG}g${pctOf(todayMenu.totalProteinG, proteinTarget)}, ` +
-      `열량 ${todayMenu.totalKcal}kcal${pctOf(todayMenu.totalKcal, kcalTarget)}입니다.`;
+    : `${dateLabel} ${mealTypeLabel} 추천 반찬 조합이에요. 나트륨 ${todayMenu.totalSodiumMg}mg, ` +
+      `단백질 ${todayMenu.totalProteinG}g, 열량 ${todayMenu.totalKcal}kcal입니다.`;
   const reasonsSpeech = todayMenu.isGenerating
     ? TODAY_MENU_GENERATING_MESSAGE
     : todayMenu.reasons.join(" ");
@@ -164,7 +194,7 @@ export function DietView({
             아직 배정된 식단이 없어요. 아래에서 AI 반찬 추천을 먼저 받아보세요 — 받고 나면 이
             화면에 매일 식단과 잔반 분석, 식사 기록이 순서대로 나타나요.
           </p>
-          <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" surveyHref="/user/survey?returnTo=%2Fuser%2Fdiet" />
+          <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" surveyHref="/user/survey?returnTo=%2Fuser%2Fdiet&section=health" />
         </div>
       </div>
     );
@@ -184,81 +214,26 @@ export function DietView({
           <span className="text-xs font-bold tracking-wide text-sidebar-primary">
             AI 반찬 매칭
           </span>
-          <span className="text-xl font-extrabold">오늘의 {mealTypeLabel} 추천 반찬 조합</span>
-          {/* 끼니 선택 버튼은 여기 없다 — 바로 아래 AI 반찬 추천 달력의 오늘 날짜 상세에 있는
-              끼니 탭이 이 제목/영양성분까지 같이 바꾼다(onTodayMealTypeChange, 2026-08-21). */}
+          <span className="text-xl font-extrabold">{dateLabel} {mealTypeLabel} 추천 반찬 조합</span>
+          {/* 끼니 선택 버튼은 여기 없다 — 바로 아래 AI 반찬 추천 달력의 날짜 상세에 있는 끼니
+              탭이 이 제목/영양성분까지 같이 바꾼다(onSelectedMealChange, 2026-08-21) — 오늘이
+              아닌 날짜를 보는 중이면 제목도 "오늘의"가 아니라 그 날짜로 바뀐다. */}
           {todayMenu.isGenerating ? (
             <p className="text-sm text-sidebar-foreground/80">{TODAY_MENU_GENERATING_MESSAGE}</p>
-          ) : todayMenu.targetCalorieKcal == null ? (
-            // 목표치 미설정(온보딩에 키/체중/활동량 미입력) — 값 자체는 계속 보여주되(기존
-            // 동작 유지), 목표 대비 비교를 보려면 뭘 해야 하는지 바로 옆에 안내한다.
-            // records-view.tsx("오늘 영양성분 분석")는 이 경우 값을 아예 숨기고 CTA만
-            // 보여주는데, 여긴 이미 값이 노출돼 있던 화면이라 정보를 줄이지 않는 쪽을 택했다.
-            <div className="flex flex-col gap-2 pt-1">
-              <div className="flex gap-4 text-xs">
-                <div className="flex flex-col">
-                  <span className="text-sidebar-foreground/60">나트륨</span>
-                  <span className="font-semibold">{todayMenu.totalSodiumMg}mg</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-sidebar-foreground/60">단백질</span>
-                  <span className="font-semibold">{todayMenu.totalProteinG}g</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-sidebar-foreground/60">열량</span>
-                  <span className="font-semibold">{todayMenu.totalKcal}kcal</span>
-                </div>
-              </div>
-              <Link
-                href="/user/profile"
-                className="text-xs font-semibold text-sidebar-primary underline underline-offset-2"
-              >
-                건강 프로필을 입력하면 목표 대비 비교를 볼 수 있어요
-              </Link>
-            </div>
           ) : (
-            // 아래 진입 조건(targetCalorieKcal != null)은 열량 목표만 보장한다 — 단백질/
-            // 나트륨 목표는 이론상 개별적으로 null일 수 있어(records-view.tsx와 동일한
-            // 방어) 각자 없으면 막대 대신 원래 raw 표시로 개별 폴백한다.
-            <div className="flex flex-col gap-2.5 pt-1">
-              {sodiumTarget != null ? (
-                <NutrientMeter
-                  label="나트륨"
-                  value={todayMenu.totalSodiumMg}
-                  target={sodiumTarget}
-                  unit="mg"
-                  tone="sidebar"
-                />
-              ) : (
-                <div className="flex flex-col text-xs">
-                  <span className="text-sidebar-foreground/60">나트륨</span>
-                  <span className="font-semibold">{todayMenu.totalSodiumMg}mg</span>
-                </div>
-              )}
-              {proteinTarget != null ? (
-                <NutrientMeter
-                  label="단백질"
-                  value={todayMenu.totalProteinG}
-                  target={proteinTarget}
-                  unit="g"
-                  tone="sidebar"
-                />
-              ) : (
-                <div className="flex flex-col text-xs">
-                  <span className="text-sidebar-foreground/60">단백질</span>
-                  <span className="font-semibold">{todayMenu.totalProteinG}g</span>
-                </div>
-              )}
-              <NutrientMeter
-                label="열량"
-                value={todayMenu.totalKcal}
-                target={kcalTarget ?? 0}
-                unit="kcal"
-                tone="sidebar"
-              />
-              <p className="text-[11px] text-sidebar-foreground/60">
-                이 끼니 목표는 하루 목표치를 3끼로 나눈 값이에요.
-              </p>
+            <div className="flex gap-4 pt-1 text-xs">
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">나트륨</span>
+                <span className="font-semibold">{todayMenu.totalSodiumMg}mg</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">단백질</span>
+                <span className="font-semibold">{todayMenu.totalProteinG}g</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sidebar-foreground/60">열량</span>
+                <span className="font-semibold">{todayMenu.totalKcal}kcal</span>
+              </div>
             </div>
           )}
         </SpeakableCard>
@@ -267,8 +242,8 @@ export function DietView({
           identity={banchanIdentity}
           state={banchanRecommendation}
           subscribeHref="/user/subscription"
-          surveyHref="/user/survey?returnTo=%2Fuser%2Fdiet"
-          onTodayMealTypeChange={setMealType}
+          surveyHref="/user/survey?returnTo=%2Fuser%2Fdiet&section=health"
+          onSelectedMealChange={handleSelectedMealChange}
           todayCompletedMealTypes={[...todayCompletedMealTypes]}
         />
 

@@ -82,12 +82,20 @@ export const TODAY_MENU_GENERATING_MESSAGE =
 // 변경으로 B2C 매일 배송도 끼니별로 다른 반찬을 받으므로(grandfood_backend
 // BanchanDeliveryScheduler.schedule_daily_deliveries 참고) 이제 실제로 의미가 있다.
 // 안 넘기면(undefined) 예전처럼 그날 전체를 돌려준다.
+//
+// dateStr도 옵션이다 — 기본값(안 넘기면)은 여전히 "오늘"이라 home-view.tsx/
+// ward-detail-view.tsx는 그대로 쓰면 된다. diet-view.tsx만 사용자가 달력에서 다른
+// 날짜를 보고 있을 때 그 날짜를 넘긴다(2026-08-21 피드백 — 달력에서 날짜를 넘기거나 그
+// 날짜의 끼니를 눌러도 "왜 이 조합인가요"가 계속 오늘 것만 보여줘서 안 바뀌는 것처럼
+// 보였다). 목업 폴백(이름/함수 자체는 "오늘"을 뜻하지만) 값은 애초에 날짜 개념이 없어
+// dateStr과 무관하게 항상 같다 — 실제 AI 추천이 있는 날짜에서만 이 인자가 의미가 있다.
 export function resolveTodayMenu(
   combo: DishCombo,
   monthly: MonthlyBanchanRecommendation | null,
-  mealType?: BackendMealType
+  mealType?: BackendMealType,
+  dateStr: string = todayDateString()
 ): TodayMenu {
-  const real = getRecommendationForDate(monthly, todayDateString(), mealType);
+  const real = getRecommendationForDate(monthly, dateStr, mealType);
   // items.length > 0을 조건에 넣지 않는다 — 생성이 끝났는데(done) 오늘 몫이 정말 0개인
   // 극히 드문 경우까지 목업으로 폴백하면, AI 반찬 추천 달력(이 날은 배정된 반찬이
   // 없어요)과 또 서로 다른 답을 보여주게 된다. done이면 items가 비어 있어도 그대로
