@@ -47,6 +47,17 @@ export function newWardDefaults() {
   return NEW_WARD_DEFAULTS;
 }
 
+// 배송 도메인 자체가 백엔드에 없어서(grandfood_backend GET /wards/{id}/deliveries조차
+// "실제 주문/배송 도메인이 없어 목업 값을 채워 넣는다"고 명시함) 이 값은 처음부터 실측이
+// 아니라 대상자 상태값 하나로 대충 고른 자리표시자다. 그래서 홈 화면에 "오늘 점심 배송
+// 예정 · 12:00"처럼 정밀한 시각으로 상시 노출하지 않고(2026-08-24 피드백, "이거 완전
+// 목업이지?"), notifications.ts가 완식 스트릭과 같은 방식(프론트 합성 알림)으로 알림
+// 목록에 하루 한 번만 띄운다 — wards.ts(getWardDetail)와 notifications.ts 둘 다 같은
+// 값을 써야 해서 여기 한 곳에만 둔다.
+export function estimateDeliveryEta(status: WardStatus): string {
+  return status === "확인 필요" ? "12:30" : "12:00";
+}
+
 function readRegisteredWards(): Ward[] {
   if (typeof window === "undefined") return [];
 

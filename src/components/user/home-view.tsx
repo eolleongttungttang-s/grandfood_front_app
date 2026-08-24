@@ -8,16 +8,21 @@ import {
   ChevronRight,
   Images,
   Sparkles,
-  Truck,
 } from "lucide-react";
 
 import { Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import { fetchElderDietHistory } from "@/lib/meal-dashboard";
-import { fetchElderNotifications, fetchElderStreakNotification, getSeenNotificationIds } from "@/lib/notifications";
-import { BackendMealType } from "@/lib/banchan-recommendation";
+import {
+  fetchElderNotifications,
+  fetchElderStreakNotification,
+  getElderDeliveryNotification,
+  getSeenNotificationIds,
+} from "@/lib/notifications";
+import { BackendMealType, computeTodayNutritionSnapshot } from "@/lib/banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
+import { deriveHealthInsight } from "@/lib/health-insights";
 import {
   applyLeftoverAnalysisResult,
   getCurrentMealSlot,
@@ -141,14 +146,14 @@ export function HomeView({
       }).catch(() => null),
     ]).then(([notifications, streak]) => {
       if (cancelled) return;
-      const merged = [...notifications, ...(streak ? [streak] : [])];
+      const merged = [getElderDeliveryNotification(ward.status), ...notifications, ...(streak ? [streak] : [])];
       const seen = new Set(getSeenNotificationIds(ward.id));
       setHasUnreadNotification(merged.some((n) => !seen.has(n.id)));
     });
     return () => {
       cancelled = true;
     };
-  }, [ward.id, ward.name, ward.age, ward.address]);
+  }, [ward.id, ward.name, ward.age, ward.address, ward.status]);
 
   // 오늘 실제 AI 추천이 있으면 그걸, 없으면 목업으로 자연스럽게 폴백한다 — diet-view.tsx와
   // 같은 이유(2026-08-13 피드백, "오늘의 추천 반찬 조합" 카드와 AI 반찬 추천 달력이 서로
@@ -158,6 +163,12 @@ export function HomeView({
   const currentMealType = currentBackendMealType();
   const todayMenu = resolveTodayMenu(detail.recommendedCombo, banchanRecommendation.monthly, currentMealType);
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
+  // 영양 팁 카드 — records-view.tsx("오늘 영양성분 분석")와 같은 기준(오늘 배정 반찬의
+  // 영양가 합 vs 실제 목표치)으로 결핍을 판단한다. 여기서는 문구 하나만 고르면 돼서
+  // 잔반 재료 추천 등 deriveHealthInsight의 나머지 계산은 안 쓰므로 recentMealLogs는
+  // 빈 배열로 넘긴다 — deficiencies 계산 자체는 그 인자와 무관하다.
+  const todayNutrition = computeTodayNutritionSnapshot(banchanRecommendation.monthly);
+  const healthInsight = deriveHealthInsight(ward, todayNutrition, []);
   // isGenerating일 때도 목업 이모지를 그대로 두면 "생성 중" 문구 옆에 무관한 목업 반찬
   // 이모지가 남는다 — diet-view.tsx와 동일하게 그때도 기본 이모지를 쓴다.
   const menuEmoji =
@@ -170,11 +181,10 @@ export function HomeView({
     : `오늘의 ${currentMealLabel} 추천 반찬 조합이에요. ${partnerStore?.name ?? "담당 반찬가게"}에서 준비했어요. ${todayMenu.items
         .map((item) => (isDisliked(item) ? `${item.name}, 기피 표시됨` : item.name))
         .join(", ")}입니다.`;
-  const deliverySpeech = `오늘 점심 배송이 ${detail.deliveryEta}에 예정되어 있어요.`;
   // 영양 팁 문장이 카드 폭에 거의 딱 맞게 들어가 있어서, SpeakableCard의 기본(우상단 오버레이)
   // 아이콘이 문장 끝과 겹친다. 이 카드는 원래도 맨 앞에 이모지(💬)가 있으니, 그 자리를 스피커
   // 아이콘으로 "교체"하는 variant="leading"을 쓴다 — 카드 높이/줄바꿈에 영향 없음.
-  const nutritionTipSpeech = `영양 팁이에요. ${getNutritionTip(detail)}`;
+  const nutritionTipSpeech = `영양 팁이에요. ${getNutritionTip(healthInsight.deficiencies)}`;
 
   // "식사하셨으면 알려주세요"(완식/남김 버튼, 목업 상태 기반)는 뺐다 — 어차피 식전/식후
   // 사진으로 실제 잔반을 확인할 수 있는데 자가 신고 버튼까지 같이 두면 중복이다(2026-08-14
@@ -371,20 +381,11 @@ export function HomeView({
       />
 
       <div className="flex flex-col gap-4 px-5">
-        <SpeakableCard
-          id="home-delivery-eta"
-          text={deliverySpeech}
-          className="flex items-center gap-2 rounded-xl bg-muted px-4 py-2.5 text-sm text-foreground"
-        >
-          <Truck className="h-4 w-4 shrink-0 text-accent" />
-          오늘 점심 배송 예정 · <span className="font-semibold">{detail.deliveryEta}</span>
-        </SpeakableCard>
-
-        {/* 완식 스트릭 격려 배너는 뺐다 — /user/notifications로 옮김(위 참고). */}
-
-        {/* 배송 알림 바로 아래에 둔다 — 배송예정/영양팁 둘 다 "오늘의 짧은 공지"라 시각적으로
-            묶이는 게 자연스럽다. 각자 별도 SpeakableCard라 text가 안 합쳐지므로, TTS는
-            눌렀을 때 이 카드 내용만 읽는다(배송 정보와 안 섞임). */}
+        {/* 완식 스트릭 격려 배너에 이어, "오늘 점심 배송 예정 · 12:00" 배너도 뺐다 — 그
+            시각 자체가 실제 배송 스케줄이 아니라 대상자 상태값으로 고른 자리표시자였다
+            (estimateDeliveryEta, ward-registry.ts 참고). 정밀한 척하는 가짜 시각을 매일
+            눈에 띄는 홈 배너로 상시 노출하는 대신, 완식과 같은 방식으로 /user/notifications로
+            옮겼다(2026-08-24 피드백, getElderDeliveryNotification). */}
         <SpeakableCard
           id="home-nutrition-tip"
           text={nutritionTipSpeech}
@@ -392,7 +393,7 @@ export function HomeView({
           variant="leading"
           className="rounded-2xl bg-sidebar p-4 text-sm text-sidebar-foreground shadow-sm"
         >
-          {getNutritionTip(detail)}
+          {getNutritionTip(healthInsight.deficiencies)}
         </SpeakableCard>
 
         <SpeakableCard

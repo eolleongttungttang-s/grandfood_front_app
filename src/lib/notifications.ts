@@ -12,13 +12,15 @@ import {
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { createLocalStore } from "@/lib/local-store";
 import { deriveDailyLeftover, fetchElderDietHistory, recentDateKeys } from "@/lib/meal-dashboard";
+import { estimateDeliveryEta, type WardStatus } from "@/lib/ward-registry";
 
 // "기타"는 백엔드가 지금 두 alert_type(excessive_leftover/nutrition_deficiency) 외의 값을 보내는
 // 경우를 위한 폴백이다 — splitHealthAlertSummary() 참고. 모르는 타입을 그냥 "영양부족"으로
 // 단정하면 실제와 다른 구체적인 건강 정보를 보호자에게 잘못 전달하게 된다.
-// "완식"은 백엔드 알림이 아니라 아래 fetchElderStreakNotification()이 프론트에서 직접 만드는
-// 합성 항목이다(guardian 쪽 SOS와 같은 패턴 — notifications-view.tsx 참고).
-export type NotificationType = "SOS" | "잔반이상" | "영양부족" | "안부확인콜" | "완식" | "기타";
+// "완식"/"배송"은 백엔드 알림이 아니라 아래 fetchElderStreakNotification()/
+// getElderDeliveryNotification()이 프론트에서 직접 만드는 합성 항목이다(guardian 쪽
+// SOS와 같은 패턴 — notifications-view.tsx 참고).
+export type NotificationType = "SOS" | "잔반이상" | "영양부족" | "안부확인콜" | "완식" | "배송" | "기타";
 
 export type NotificationItem = {
   id: string;
@@ -35,6 +37,7 @@ const TYPE_STYLE: Record<NotificationType, string> = {
   영양부족: "bg-risk-caution text-risk-caution-foreground",
   안부확인콜: "bg-secondary text-secondary-foreground",
   완식: "bg-secondary text-secondary-foreground",
+  배송: "bg-secondary text-secondary-foreground",
   기타: "bg-muted text-muted-foreground",
 };
 
@@ -241,6 +244,28 @@ export async function fetchElderStreakNotification(identity: {
     date: formatOccurredAt(new Date().toISOString()),
     type: "완식",
     message: `최근 ${STREAK_DAYS}일 중 ${completeCount}일 완식하셨어요. 잘하고 계세요!`,
+    read: false,
+  };
+}
+
+// "오늘 점심 배송 예정" — 예전엔 home-view.tsx가 이걸 정밀한 시각(12:00 등)으로 상시
+// 배너에 띄웠는데, 그 시각 자체가 실제 배송 스케줄이 아니라 대상자 상태값 하나로 고른
+// 자리표시자였다(estimateDeliveryEta, ward-registry.ts 참고 — 백엔드에 배송 도메인
+// 자체가 없다). 정밀한 척하는 가짜 시각을 매일 눈에 띄는 홈 배너로 보여주는 대신,
+// 완식 스트릭과 같은 방식(프론트 합성 알림)으로 격을 낮춰 알림 목록에서만 보여준다
+// (2026-08-24 피드백). fetchElderStreakNotification과 달리 diet-history 조회가 필요 없어
+// 동기 함수다 — status 하나만 있으면 계산되는 값이라 async로 감쌀 이유가 없다. Ward
+// 객체 전체가 아니라 status만 받는 이유 — 호출부(home-view.tsx)의 useEffect가 정확히
+// 이 값에만 의존한다는 걸 dependency 배열에 그대로 드러낼 수 있다(react-hooks/exhaustive-deps).
+export function getElderDeliveryNotification(status: WardStatus): NotificationItem {
+  const eta = estimateDeliveryEta(status);
+  return {
+    // 완식과 같은 이유로 날짜를 id에 넣는다 — 매일 "오늘"에 대한 새 안내이므로, 어제
+    // 이미 봤어도 오늘 것은 다시 안 읽은 상태로 뜨는 게 맞다.
+    id: `delivery-${new Date().toISOString().slice(0, 10)}`,
+    date: formatOccurredAt(new Date().toISOString()),
+    type: "배송",
+    message: `오늘 점심 배송이 ${eta}에 예정되어 있어요.`,
     read: false,
   };
 }
