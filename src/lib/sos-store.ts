@@ -60,6 +60,14 @@ export const sosAckStore = createLocalStore<SosAcknowledgment[]>("grandfood-app-
 // 그대로 dismiss 키로 쓴다 — 같은 알림이면 같은 입력으로 같은 id가 나온다.
 export const dismissedSosStore = createLocalStore<string[]>("grandfood-app-sos-dismissed", []);
 
+// 보호자가 "확인했어요"를 누르면 어르신 쪽에 sos-ack 알림이 생기는데(getElderSosAcknowledgment,
+// notifications.ts), 예전엔 알림 화면에 직접 들어가서 카드를 눌러야만 소리로 들을 수 있었다 —
+// SOS 상황에서는 어르신이 알림함을 스스로 열어볼 거라 기대하기 어렵다(2026-08-24 피드백,
+// "확인했어요를 누르면... 자동으로 안내가 나가면 좋겠다"). home-view.tsx가 홈 화면에 들어올
+// 때마다(또는 sosAckStore가 바뀔 때마다) 이 알림의 id가 여기 없으면 speakUrgent로 자동 재생하고
+// 여기 추가한다 — 같은 알림을 화면 재방문/재렌더마다 반복 재생하지 않기 위한 기록용.
+export const spokenSosAckStore = createLocalStore<string[]>("grandfood-app-sos-ack-spoken", []);
+
 export function acknowledgeSosNotification(
   itemId: string,
   backendElderId: string,

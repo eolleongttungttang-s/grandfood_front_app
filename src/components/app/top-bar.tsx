@@ -17,7 +17,7 @@ export function TopBar({
   onBack?: () => void;
 }) {
   return (
-    <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-5 py-4">
+    <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-5 py-2.5">
       <div className="flex items-center gap-3">
         {onBack && (
           <button

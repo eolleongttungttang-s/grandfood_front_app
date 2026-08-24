@@ -196,8 +196,19 @@ async function fetchNotificationItems(
       throw new Error(`알림을 불러오지 못했어요 (status ${response.status})`);
     }
     const data: { items: BackendNotificationItem[] } = await response.json();
-    return data.items.map((item, index) =>
-      mapBackendItem(item, `${item.type}-${item.occurred_at}-${index}`, viewer)
+    // 예전엔 배열 인덱스를 id에 섞어 썼는데(`${type}-${occurred_at}-${index}`), 새 알림이
+    // 맨 앞에 추가되면 그 뒤 기존 항목들은 전부 index가 하나씩 밀려서 id가 바뀌었다 —
+    // 그러면 dismissedSosStore(sos-store.ts)에 저장해둔 "이미 확인한 알림" id가 더 이상
+    // 어떤 항목과도 안 맞아서, 새 SOS를 하나 더 보내면 예전에 이미 확인 처리한 SOS까지
+    // 전부 "안 읽음"으로 되살아났다(2026-08-24 재현 버그). elder_id는 보호자용 응답에만
+    // 있어서(위 BackendNotificationItem 주석 참고) 어르신 자신의 알림함에선 항상 비어있다 —
+    // elder_id만으로는 어르신 쪽 id가 전부 동일한 자리표시자로 뭉개져서, 같은 시각에 같은
+    // 종류의 알림이 두 개 이상 오면(배치로 한 번에 여러 건 생성되는 등) 서로 다른 알림이
+    // 하나로 합쳐져 버린다(2026-08-24 코드 리뷰 지적) — summary(알림 본문)까지 더해서
+    // 그 경우에도 서로 다른 값이 나오게 한다. 셋 다 배열 위치와 무관한, 알림 자체에 속한
+    // 값이라 목록 순서/길이가 바뀌어도 같은 알림이면 항상 같은 id가 나온다.
+    return data.items.map((item) =>
+      mapBackendItem(item, `${item.type}-${item.elder_id ?? "self"}-${item.occurred_at}-${item.summary}`, viewer)
     );
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {

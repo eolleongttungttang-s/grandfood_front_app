@@ -9,6 +9,7 @@ import {
   Images,
   Sparkles,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
@@ -21,7 +22,8 @@ import {
   getElderSosAcknowledgment,
   getSeenNotificationIds,
 } from "@/lib/notifications";
-import { sosAckStore } from "@/lib/sos-store";
+import { sosAckStore, spokenSosAckStore } from "@/lib/sos-store";
+import { speakUrgent } from "@/lib/accessibility";
 import { BackendMealType, computeTodayNutritionSnapshot } from "@/lib/banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
 import { deriveHealthInsight } from "@/lib/health-insights";
@@ -156,6 +158,21 @@ export function HomeView({
   // 보호자가 "확인했어요"를 누르면(같은 브라우저 데모 한정) sosAckStore가 바뀐다 — 그걸
   // 감지해서 아래 effect를 다시 돌려 배지에 반영한다(notifications-view.tsx와 같은 이유).
   const sosAck = useLocalStore(sosAckStore);
+
+  // 보호자가 확인하면 어르신이 알림함을 직접 열어보지 않아도 바로 음성으로 들리도록,
+  // 홈 화면에 있을 때 자동 재생한다(2026-08-24 피드백) — spokenSosAckStore에 없는
+  // (아직 이 브라우저에서 한 번도 안 읽어준) sos-ack만 골라서 재생하고 바로 기록해
+  // 재렌더/재방문마다 반복 재생되지 않게 한다. 토스트도 같이 띄운다 — 사용자 조작 없이
+  // useEffect에서 바로 부르는 음성이라 일부 브라우저의 자동재생 정책에 조용히 막힐 수
+  // 있는데(2026-08-24 코드 리뷰 지적), 그래도 눈으로는 반드시 확인할 수 있게 하기 위함.
+  useEffect(() => {
+    const ackItem = getElderSosAcknowledgment(ward.id);
+    if (!ackItem) return;
+    if (spokenSosAckStore.read().includes(ackItem.id)) return;
+    speakUrgent(ackItem.message);
+    toast.info(ackItem.message);
+    spokenSosAckStore.update((prev) => [...prev, ackItem.id]);
+  }, [ward.id, sosAck]);
 
   useEffect(() => {
     let cancelled = false;
@@ -430,13 +447,13 @@ export function HomeView({
           text={`${recommendedComboSpeech} ${mealCheckinSpeech}`}
           className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
-          <div className="flex items-center gap-3">
-            <span className="text-4xl">{menuEmoji}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">{menuEmoji}</span>
             <div className="flex flex-col">
               <span className="text-xs font-semibold text-muted-foreground">
                 오늘의 추천 반찬 조합
               </span>
-              <span className="text-lg font-extrabold text-foreground">
+              <span className="text-base font-extrabold text-foreground">
                 {partnerStore?.name ?? "담당 반찬가게"}
               </span>
             </div>
@@ -685,7 +702,7 @@ export function HomeView({
         ) : (
           medicationAdvice && (
             <Link
-              href="/user/survey?section=care&returnTo=/user/home"
+              href="/user/survey?section=care&step=medication&returnTo=/user/home"
               className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3"
             >
               <span className="text-sm font-semibold text-foreground">
