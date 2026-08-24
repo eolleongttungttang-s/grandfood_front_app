@@ -6,6 +6,7 @@ import {
   NotificationItem,
   fetchElderNotifications,
   fetchElderStreakNotification,
+  getElderDeliveryNotification,
   markNotificationsSeen,
   notificationBadgeClass,
 } from "@/lib/notifications";
@@ -52,7 +53,8 @@ export function NotificationsView({ ward }: { ward: Ward }) {
   }, [ward.id, ward.name, ward.age, ward.address]);
 
   const loading = items === null && !error;
-  const merged = [...(streak ? [streak] : []), ...(items ?? [])];
+  const delivery = getElderDeliveryNotification(ward.status);
+  const merged = [delivery, ...(streak ? [streak] : []), ...(items ?? [])];
 
   // 이 화면을 열어서 목록을 실제로 본 시점에, 지금까지 온 항목을 전부 "본 것"으로 기록한다
   // — home-view.tsx의 종 아이콘 배지가 이 기록을 기준으로 켜지므로, 여기 한 번 들어오면

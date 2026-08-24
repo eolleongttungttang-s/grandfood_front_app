@@ -22,6 +22,7 @@ import {
   addWard,
   updateWard,
   newWardDefaults,
+  estimateDeliveryEta,
   type Ward,
   type WardStatus,
   type MealTone,
@@ -277,7 +278,7 @@ export function getWardDetail(ward: Ward): WardDetail {
     }
   }
 
-  const deliveryEta = ward.status === "확인 필요" ? "12:30" : "12:00";
+  const deliveryEta = estimateDeliveryEta(ward.status);
 
   const leftoverPercent =
     ward.lastMeal.tone === "미응답" ? 100 : ward.lastMeal.tone === "소량" ? 55 : 5;
