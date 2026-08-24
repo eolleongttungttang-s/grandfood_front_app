@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
+  CalendarDays,
   ChevronLeft,
   ClipboardEdit,
   ClipboardList,
@@ -12,7 +13,6 @@ import {
   MessageCircle,
   PhoneCall,
   Send,
-  Stethoscope,
   Truck,
   Users,
   Video,
@@ -584,6 +584,20 @@ export function WardDetailView({
               {ward.name}님이 아직 생활 정보를 입력하지 않으셨어요.
             </p>
           )}
+          {/* 이용자 본인 화면(profile-view.tsx)은 "생활 정보"/"건강 프로필"을 각자 따로
+              수정할 수 있는데(2026-08-21 피드백으로 분리), 보호자 화면은 이 카드에 수정
+              버튼이 아예 없어서 보호자가 대신 입력해줄 방법이 없었다(2026-08-22 피드백) —
+              같은 survey 라우트가 이미 section=care를 지원하므로(guardian/wards/detail/
+              survey/page-client.tsx) 버튼만 추가한다. */}
+          <Button
+            variant="outline"
+            className="mt-1 w-full justify-center"
+            nativeButton={false}
+            render={<Link href={`/guardian/wards/detail/survey?id=${ward.id}&section=care`} />}
+          >
+            <ClipboardEdit />
+            {careProfile ? "생활 정보 다시 입력하기" : "생활 정보 입력하기"}
+          </Button>
         </div>
 
         <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card p-5 shadow-sm">
@@ -623,7 +637,7 @@ export function WardDetailView({
             variant="outline"
             className="mt-3 w-full justify-center"
             nativeButton={false}
-            render={<Link href={`/guardian/wards/detail/survey?id=${ward.id}`} />}
+            render={<Link href={`/guardian/wards/detail/survey?id=${ward.id}&section=health`} />}
           >
             <ClipboardEdit />
             건강 프로필 수정하기
@@ -734,8 +748,8 @@ export function WardDetailView({
             nativeButton={false}
             render={<Link href={`/guardian/wards/detail/nutritionist?id=${ward.id}`} />}
           >
-            <Stethoscope className="h-5 w-5 text-accent" />
-            <span className="text-sm">영양사 상담 이력</span>
+            <CalendarDays className="h-5 w-5 text-accent" />
+            <span className="text-sm">월간 식단표</span>
           </Button>
         </div>
         </>

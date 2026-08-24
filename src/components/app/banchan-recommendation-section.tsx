@@ -83,22 +83,27 @@ export function BanchanRecommendationSection({
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex flex-col">
+      <div className="flex flex-col gap-1">
+        {/* 버튼("다시 추천받기" 등)이 월 텍스트("2026-08 월 배송 추천")와 한 줄에서 폭을
+            나눠 가지면, 좁은 모바일 화면에서 버튼 폭에 밀려 월 텍스트가 두 줄로 꺾여
+            보였다(2026-08-22 피드백, "PC에선 깔끔한데 모바일에선 지저분") — 버튼은 짧은
+            라벨("AI 반찬 추천")과만 한 줄에 두고, 월 텍스트는 카드 폭 전체를 혼자 쓰는
+            별도 줄로 내려서 버튼과 폭을 다투지 않게 한다. */}
+        <div className="flex items-center justify-between gap-3">
           <span className="text-xs font-bold text-sidebar-primary">AI 반찬 추천</span>
-          <span className="text-base font-bold text-foreground">{month} 월 배송 추천</span>
+          {needsSubscription ? (
+            <Button size="sm" nativeButton={false} render={<Link href={subscribeHref} />}>
+              <Sparkles />
+              구독하러 가기
+            </Button>
+          ) : (
+            <Button size="sm" onClick={handleRequestClick} disabled={requesting || loading || hasActiveSubscription == null}>
+              <Sparkles />
+              {requesting ? "요청하는 중..." : hasProgress ? "다시 추천받기" : "AI 추천받기"}
+            </Button>
+          )}
         </div>
-        {needsSubscription ? (
-          <Button size="sm" nativeButton={false} render={<Link href={subscribeHref} />}>
-            <Sparkles />
-            구독하러 가기
-          </Button>
-        ) : (
-          <Button size="sm" onClick={handleRequestClick} disabled={requesting || loading || hasActiveSubscription == null}>
-            <Sparkles />
-            {requesting ? "요청하는 중..." : hasProgress ? "다시 추천받기" : "AI 추천받기"}
-          </Button>
-        )}
+        <span className="text-base font-bold text-foreground">{month} 월 배송 추천</span>
       </div>
 
       {error && <p className="text-xs text-destructive">{error}</p>}

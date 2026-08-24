@@ -116,9 +116,13 @@ const NUTRIENT_META: Record<NutrientKey, { label: string; tileClass: string }> =
 function TargetStat({ nutrient, value }: { nutrient: NutrientKey; value: string }) {
   const { label, tileClass } = NUTRIENT_META[nutrient];
   return (
-    <div className={`flex flex-col gap-1 rounded-lg p-3 ${tileClass}`}>
+    // min-w-0 — 그리드 칸도 flex 칸과 같은 기본 min-width:auto 제약이 있어, 안 그러면 이 칸이
+    // 자기 내용(숫자+단위)보다 좁아지지 못하고 카드 밖으로 밀려난다(2026-08-22 피드백, 모바일
+    // 화면에서 "나의 하루 목표" 숫자가 튀어나와 보임). break-words로 숫자+단위가 한 덩어리로
+    // 붙어 있어도 칸 너비에 맞춰 줄바꿈되게 한다.
+    <div className={`flex min-w-0 flex-col gap-1 rounded-lg p-3 ${tileClass}`}>
       <span className="text-sm font-medium text-foreground/70">{label}</span>
-      <span className="text-xl font-extrabold text-foreground">{value}</span>
+      <span className="break-words text-xl font-extrabold text-foreground">{value}</span>
     </div>
   );
 }
@@ -396,11 +400,15 @@ export function BanchanRecommendationCalendar({
 
       {/* 날짜 칸은 못 줄이니, 평소엔 이 버튼 하나로 접어두고 필요할 때만 달력 전체를
           펼친다 — 라벨에 "월 배송"을 그대로 남겨서 접혀있어도 이게 월 단위 배송이라는
-          맥락은 계속 보인다. */}
+          맥락은 계속 보인다. 예전엔 여기에도 formatMonthLabel(viewedMonth)를 붙였는데,
+          접힌 상태에선 viewedMonth가 항상 바로 위 "AI 반찬 추천" 헤더의 월과 같아서(달력을
+          펼쳐 다른 달로 넘기기 전엔 달라질 수 없음) 같은 월 표시가 줄만 바꿔 두 번
+          반복되는 것으로만 보였다(2026-08-22 피드백) — 펼쳤을 때 나오는 아래 ◀ 월 ▶
+          탐색줄이 "지금 보는 달"을 이미 보여주므로, 여기서는 뺀다. */}
       <ExpandToggle
         expanded={calendarExpanded}
         onToggle={() => setCalendarExpanded((v) => !v)}
-        label={`${formatMonthLabel(viewedMonth)} 월 배송 달력`}
+        label="월 배송 달력"
         expandLabel="달력 보기"
       />
 

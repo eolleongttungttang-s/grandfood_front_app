@@ -5,7 +5,7 @@ import Link from "next/link";
 
 import { useSession } from "@/lib/session";
 import { getWard } from "@/lib/wards";
-import { NutritionistHistoryView } from "@/components/guardian/nutritionist-history-view";
+import { MonthlyDietTableView } from "@/components/guardian/monthly-diet-table-view";
 
 export function GuardianWardNutritionistPageClient() {
   const id = useSearchParams().get("id");
@@ -29,5 +29,5 @@ export function GuardianWardNutritionistPageClient() {
     );
   }
 
-  return <NutritionistHistoryView ward={ward} />;
+  return <MonthlyDietTableView ward={ward} />;
 }
