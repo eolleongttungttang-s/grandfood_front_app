@@ -12,7 +12,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ButtonSelectGroup } from "@/components/app/button-select-group";
@@ -392,11 +392,31 @@ export function BanchanRecommendationCalendar({
     // (2026-08-14 피드백, ATM 벤치마킹 방침). 컨테이너 gap 3→2, 요일 줄과 날짜 그리드 사이
     // 여백도 같이 좁힌다.
     <div className="flex flex-col gap-2">
-      {polling && isViewingCurrentMonth && (
-        <p className="text-xs text-muted-foreground">
-          반찬을 고르고 있어요. 완료되는 대로 달력에 자동으로 표시돼요...
-        </p>
-      )}
+      {/* 예전엔 이 자리에 text-xs 회색 한 줄("생성 중이에요...")뿐이라 눈에 잘 안 띄고,
+          정말 몇 주 남았는지도 안 보였다(2026-08-24 피드백, "글자가 너무 작고 게이지
+          같은 게 있으면 좋겠다"). 처음엔 설명 문장 + NutrientMeter(라벨/분수/퍼센트
+          전부 표시)로 만들었는데, PC에선 괜찮아도 좁은 모바일 화면·70·80대 사용자
+          기준으론 한 번에 읽을 게 너무 많다는 피드백(2026-08-24, "계속 어르신이 보는
+          거라고 생각해야 돼") — "완료되는 대로 자동 표시" 같은 부연 설명은 빼고, 딱
+          지금 상태(고르는 중, 몇 주 남았는지)만 짧은 한 줄 + 막대 하나로 줄인다. */}
+      {polling && isViewingCurrentMonth && (() => {
+        const totalWeeks = monthly.weeks.length;
+        const doneWeeks = monthly.weeks.filter((w) => w.generationStatus === "done").length;
+        const pct = totalWeeks > 0 ? Math.min(Math.max((doneWeeks / totalWeeks) * 100, 0), 100) : 0;
+        return (
+          <div className="flex flex-col gap-2 rounded-xl bg-muted/60 px-3.5 py-3">
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" aria-hidden="true" />
+              <span className="text-sm font-semibold text-foreground">
+                반찬 고르는 중 · {doneWeeks}/{totalWeeks}주 완료
+              </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 날짜 칸은 못 줄이니, 평소엔 이 버튼 하나로 접어두고 필요할 때만 달력 전체를
           펼친다 — 라벨에 "월 배송"을 그대로 남겨서 접혀있어도 이게 월 단위 배송이라는
@@ -568,7 +588,16 @@ export function BanchanRecommendationCalendar({
             <p className="text-xs text-muted-foreground">아직 생성을 요청하지 않았어요.</p>
           )}
           {selected.generationStatus === "generating" && (
-            <p className="text-xs text-muted-foreground">생성 중이에요...</p>
+            // "생성 중이에요..."/"잠시만 기다려주세요"를 한 줄에 이어붙이면 좁은 화면에서
+            // 줄바꿈되는 지점이 매번 달라져 읽기 불편하다는 피드백(2026-08-24) — 두 문장을
+            // 아예 각자 줄로 고정하고 글자도 키운다(text-sm → text-base).
+            <div className="flex items-center gap-2 text-base font-medium text-foreground">
+              <Loader2 className="h-5 w-5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
+              <div className="flex flex-col">
+                <span>생성 중이에요...</span>
+                <span>완료가 될 때까지 잠시만 기다려주세요.</span>
+              </div>
+            </div>
           )}
           {selected.generationStatus === "failed" && (
             <p className="text-xs text-destructive">{selected.error ?? "추천 생성에 실패했어요."}</p>

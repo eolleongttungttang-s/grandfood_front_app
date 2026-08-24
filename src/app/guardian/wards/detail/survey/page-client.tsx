@@ -3,13 +3,26 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { useEffect, useState } from "react";
 
 import { useSession } from "@/lib/session";
 import { getWard } from "@/lib/wards";
 import { careProfileStore, getCareProfile, registerCareProfile, skipCareProfile } from "@/lib/care-profile";
-import { healthProfileStore, registerHealthProfile, toBackendActivityLevel } from "@/lib/health-profile";
+import {
+  fromBackendActivityLevel,
+  healthProfileStore,
+  HealthProfileView,
+  registerHealthProfile,
+  toBackendActivityLevel,
+} from "@/lib/health-profile";
 import { CareSurveySection, CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
-import { getBackendConditionFlags, getBackendMedicationFlags, submitSelfHealthProfileBackend } from "@/lib/backend-auth";
+import {
+  BackendUserProfile,
+  fetchBackendWardProfile,
+  getBackendConditionFlags,
+  getBackendMedicationFlags,
+  submitSelfHealthProfileBackend,
+} from "@/lib/backend-auth";
 import { syncMedicationFoodRestrictions } from "@/lib/medication-food-restrictions";
 import { TopBar } from "@/components/app/top-bar";
 import { useLocalStore } from "@/lib/use-store";
@@ -36,6 +49,23 @@ function GuardianWardSurveyPageClient() {
   useLocalStore(careProfileStore);
   const healthProfiles = useLocalStore(healthProfileStore);
 
+  // user/survey/page.tsx와 같은 이유 — "저장 시 이어받기" 기준을 로컬 저장소만이 아니라
+  // 백엔드 값 우선으로 바꾼다(2026-08-24 버그 리포트: 복용약만 추가해도 이미 저장돼 있던
+  // 키/체중/활동수준/혈압/공복혈당이 새 스냅샷 행에서 null로 덮어써지던 문제).
+  const [backendProfile, setBackendProfile] = useState<BackendUserProfile | null>(null);
+  useEffect(() => {
+    if (!ward) return;
+    let cancelled = false;
+    fetchBackendWardProfile({ mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address }).then(
+      (result) => {
+        if (!cancelled) setBackendProfile(result);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [ward?.id, ward?.name, ward?.age, ward?.address]);
+
   if (!account || !wardId || !ward || !canView) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
@@ -50,7 +80,24 @@ function GuardianWardSurveyPageClient() {
   }
 
   const existing = getCareProfile(wardId);
-  const existingHealth = healthProfiles[wardId];
+  const localExistingHealth = healthProfiles[wardId];
+  const existingHealth: HealthProfileView | undefined =
+    backendProfile || localExistingHealth
+      ? {
+          wardId,
+          source: localExistingHealth?.source ?? "self_reported",
+          systolicBP: backendProfile?.bloodPressureSystolic ?? localExistingHealth?.systolicBP,
+          diastolicBP: backendProfile?.bloodPressureDiastolic ?? localExistingHealth?.diastolicBP,
+          fastingGlucose: backendProfile?.fastingGlucoseMgDl ?? localExistingHealth?.fastingGlucose,
+          heightCm: backendProfile?.heightCm ?? localExistingHealth?.heightCm,
+          weightKg: backendProfile?.weightKg ?? localExistingHealth?.weightKg,
+          activityLevel: backendProfile?.activityLevel
+            ? fromBackendActivityLevel(backendProfile.activityLevel)
+            : localExistingHealth?.activityLevel,
+          hba1c: localExistingHealth?.hba1c ?? 0,
+          updatedAt: localExistingHealth?.updatedAt ?? new Date(0).toISOString(),
+        }
+      : undefined;
   const afterCompleteHref = `/guardian/wards/detail?id=${wardId}`;
   // user/survey/page.tsx와 동일 — ?section 없이 들어오면 예전 그대로 15문항 통합 흐름.
   const sectionParam = searchParams.get("section");
@@ -79,6 +126,9 @@ function GuardianWardSurveyPageClient() {
     const heightCm = health.heightCm ?? existingHealth?.heightCm;
     const weightKg = health.weightKg ?? existingHealth?.weightKg;
     const activityLevel = health.activityLevel ?? existingHealth?.activityLevel;
+    const systolicBP = health.systolicBP ?? existingHealth?.systolicBP;
+    const diastolicBP = health.diastolicBP ?? existingHealth?.diastolicBP;
+    const fastingGlucose = health.fastingGlucose ?? existingHealth?.fastingGlucose;
     const result = await submitSelfHealthProfileBackend({
       mockWardId: ward.id,
       name: ward.name,
@@ -91,6 +141,9 @@ function GuardianWardSurveyPageClient() {
       heightCm,
       weightKg,
       activityLevel: activityLevel ? toBackendActivityLevel(activityLevel) : undefined,
+      bloodPressureSystolic: systolicBP,
+      bloodPressureDiastolic: diastolicBP,
+      fastingGlucoseMgDl: fastingGlucose,
     });
     if ("error" in result) {
       toast.info("일부 기능은 나중에 다시 로그인하면 활성화돼요.");

@@ -23,7 +23,8 @@ import { Ward, WardDetail, WardStatus } from "@/lib/wards";
 import { HISTORY_DAYS, WardMealDashboard, recentKstDateKeys } from "@/lib/ward-meal-dashboard";
 import { dietHistoryForDate } from "@/lib/meal-dashboard";
 import { LeftoverDayGrid, LeftoverLegend } from "@/components/app/leftover-day-grid";
-import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
+import { ACTIVITY_LEVEL_LABEL, fromBackendActivityLevel } from "@/lib/health-profile";
+import type { BackendUserProfile } from "@/lib/backend-auth";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import {
@@ -98,6 +99,7 @@ export function WardDetailView({
   detail,
   guardianName,
   mealDashboard,
+  backendProfile,
 }: {
   ward: Ward;
   detail: WardDetail;
@@ -105,6 +107,10 @@ export function WardDetailView({
   /** null = 아직 실제 백엔드 조회 응답 전(로딩 중). "오늘 잔반율"/"최근 14일 섭취 기록" 두 카드만
    *  이 값으로 채운다 — 나머지(추천 반찬/건강 프로필 등)는 여전히 detail의 목업값을 쓴다. */
   mealDashboard: WardMealDashboard | null;
+  /** null = 아직 응답 전이거나 이 대상자가 실제 백엔드에 한 번도 연동된 적 없음 — 그 경우
+   *  아래 "건강 프로필" 카드는 detail.healthProfile(로컬 목업)로 폴백한다(2026-08-24,
+   *  GET /users/{id}가 PR#95부터 이 필드들을 실제로 돌려주면서 연결). */
+  backendProfile: BackendUserProfile | null;
 }) {
   // "오늘"을 포함한 14일 전체의 원탭 자가 보고 반영은 ward-meal-dashboard.ts의
   // fetchWardMealDashboard가 diet-history 응답의 quick_check_status로 이미 처리해서
@@ -164,6 +170,18 @@ export function WardDetailView({
   const representativeDish = getRepresentativeDish(detail.recommendedCombo);
   useLocalStore(careProfileStore);
   const careProfile = getCareProfile(ward.id);
+  // 건강 프로필 6개 필드 — profile-view.tsx(이용자 본인 마이 화면)와 동일한 이유로
+  // GET /users/{id}가 실제로 돌려주는 값(PR#95)을 로컬 목업(detail.healthProfile)보다
+  // 우선한다. backendProfile이 null이면(응답 전이거나 이 대상자가 실제 백엔드에 한 번도
+  // 연동된 적 없음) 로컬 값 그대로 폴백.
+  const systolicBP = backendProfile?.bloodPressureSystolic ?? detail.healthProfile.systolicBP;
+  const diastolicBP = backendProfile?.bloodPressureDiastolic ?? detail.healthProfile.diastolicBP;
+  const fastingGlucose = backendProfile?.fastingGlucoseMgDl ?? detail.healthProfile.fastingGlucose;
+  const heightCm = backendProfile?.heightCm ?? detail.healthProfile.heightCm;
+  const weightKg = backendProfile?.weightKg ?? detail.healthProfile.weightKg;
+  const activityLevel = backendProfile?.activityLevel
+    ? fromBackendActivityLevel(backendProfile.activityLevel)
+    : detail.healthProfile.activityLevel;
   const banchanIdentity = {
     wardId: ward.id,
     wardName: ward.name,
@@ -608,30 +626,18 @@ export function WardDetailView({
             </span>
           </div>
           <DetailRow label="혈압 위쪽 숫자 (수축기)">
-            {detail.healthProfile.systolicBP != null
-              ? `${detail.healthProfile.systolicBP} mmHg`
-              : "미입력"}
+            {systolicBP != null ? `${systolicBP} mmHg` : "미입력"}
           </DetailRow>
           <DetailRow label="혈압 아래쪽 숫자 (이완기)">
-            {detail.healthProfile.diastolicBP != null
-              ? `${detail.healthProfile.diastolicBP} mmHg`
-              : "미입력"}
+            {diastolicBP != null ? `${diastolicBP} mmHg` : "미입력"}
           </DetailRow>
           <DetailRow label="공복혈당">
-            {detail.healthProfile.fastingGlucose != null
-              ? `${detail.healthProfile.fastingGlucose} mg/dL`
-              : "미입력"}
+            {fastingGlucose != null ? `${fastingGlucose} mg/dL` : "미입력"}
           </DetailRow>
-          <DetailRow label="키">
-            {detail.healthProfile.heightCm != null ? `${detail.healthProfile.heightCm} cm` : "미입력"}
-          </DetailRow>
-          <DetailRow label="체중">
-            {detail.healthProfile.weightKg != null ? `${detail.healthProfile.weightKg} kg` : "미입력"}
-          </DetailRow>
+          <DetailRow label="키">{heightCm != null ? `${heightCm} cm` : "미입력"}</DetailRow>
+          <DetailRow label="체중">{weightKg != null ? `${weightKg} kg` : "미입력"}</DetailRow>
           <DetailRow label="활동 수준">
-            {detail.healthProfile.activityLevel
-              ? ACTIVITY_LEVEL_LABEL[detail.healthProfile.activityLevel]
-              : "미입력"}
+            {activityLevel ? ACTIVITY_LEVEL_LABEL[activityLevel] : "미입력"}
           </DetailRow>
           <Button
             variant="outline"
