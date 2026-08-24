@@ -553,8 +553,21 @@ export function CareSurveyView({
         setStep(CARE_SURVEY_STEP.medicationFoodAvoidance);
         return;
       }
+      // 예전엔 여기서 목록 화면으로만 돌아가고, 실제 저장은 그 목록의 별도 "완료" 버튼을
+      // 한 번 더 눌러야 일어났다 — "지금 드시고 있는 약이 있으세요?"에서 약을 고르고
+      // "확인"을 누르면 사용자는 그걸로 끝났다고 여기기 쉬운데, 실제로는 목록 화면에서
+      // 한 번 더 눌러야 서버에 반영되는 함정이었다(2026-08-24 피드백, "완료까지 누르지
+      // 않아도 확인만 되면 저장하는 구조로"). 그래서 목록에서 들어온 단일 항목 편집은
+      // "확인" 자체가 그대로 저장(완료와 동일한 onComplete 호출)까지 끝내도록 바꾼다 —
+      // 최초 15문항 온보딩 흐름(엔터드프롬오버뷰 아님)은 그대로 "완료"에서만 저장된다.
       setEnteredFromOverview(false);
-      setMode("overview");
+      if (submitting) return;
+      setSubmitting(true);
+      try {
+        await onComplete(form, healthForm);
+      } finally {
+        setSubmitting(false);
+      }
       return;
     }
     if (!isLast) {

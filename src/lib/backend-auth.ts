@@ -37,6 +37,13 @@ const CONDITION_LABEL_TO_BACKEND_FLAG: Record<(typeof CONDITION_POOL)[number], s
   관절염: "arthritis",
 };
 
+// 마이페이지가 GET /users/me·GET /users/{id}의 condition_flags(코드)를 화면에 보여줄 때
+// 쓰는 역방향 매핑 — 위 표를 그대로 뒤집은 것이다. medication-food-suggestions.ts의
+// BACKEND_MEDICATION_FLAG_TO_LABEL과 같은 이유·같은 패턴.
+export const BACKEND_CONDITION_FLAG_TO_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(CONDITION_LABEL_TO_BACKEND_FLAG).map(([label, flag]) => [flag, label])
+);
+
 // 로컬 요금제(subscription.ts PLANS: "basic"/"standard")를 백엔드 PlanType
 // ("base"/"premium" 2종, domains/account/schemas.py Literal)으로 좁힌다. 이 매핑 없이
 // "basic"을 그대로 보내면 UserOnboardingRequest가 422(Unprocessable Content)로 거부한다 —
@@ -51,15 +58,34 @@ function toBackendPlanType(planType: string): "base" | "premium" {
   return planType === "standard" ? "premium" : "base";
 }
 
-// invite/survey/page.tsx도 register-elder-from-invite 호출 시 같은 매핑이 필요해서 export한다.
-export function getBackendConditionFlags(mockWardId: string): string[] {
+// 한국어 라벨 배열 -> 백엔드 코드 배열. user/survey/page.tsx(재방문 수정)가 onComplete가
+// 돌려주는 폼 값(cmd.conditions)을 바로 변환할 때 wardId 없이 쓸 수 있도록 순수 함수로
+// 뺐다 — wardId로 로컬 저장소를 다시 읽으면, 방금 사용자가 화면에서 고친 값이 아니라
+// 아직 store에 반영 안 된(또는 다른 기기라 아예 없는) 값을 읽어올 위험이 있다.
+export function conditionLabelsToBackendFlags(conditions: string[]): string[] {
   // conditions는 설문 자유 응답이라 타입상 string[]이지 CONDITION_POOL 리터럴로 좁혀지진 않는다
   // (UI는 CONDITION_POOL만 고르게 하지만 타입까지 강제하진 않음) — 위 매핑표의 타입 안전성은
   // "표 자체가 CONDITION_POOL을 다 커버하는지"를 잡아주는 용도라, 여기 조회는 느슨하게 한다.
   const lookup = CONDITION_LABEL_TO_BACKEND_FLAG as Record<string, string | undefined>;
-  const conditions = getCareProfile(mockWardId)?.conditions ?? [];
-  return conditions
-    .map((c) => lookup[c])
+  return conditions.map((c) => lookup[c]).filter((flag): flag is string => flag !== undefined);
+}
+
+// invite/survey/page.tsx도 register-elder-from-invite 호출 시 같은 매핑이 필요해서 export한다.
+export function getBackendConditionFlags(mockWardId: string): string[] {
+  return conditionLabelsToBackendFlags(getCareProfile(mockWardId)?.conditions ?? []);
+}
+
+// medicationLabelsToBackendFlags와 같은 이유(순수 함수 버전) — care-survey-view.tsx의
+// MedicationEntry[] 형태(name/timings/products)를 그대로 받아 이름만 뽑아 변환한다.
+export function medicationEntriesToBackendFlags(
+  takesMedication: boolean,
+  medications: { name: string }[],
+  customMedications: { name: string }[]
+): string[] {
+  if (!takesMedication) return [];
+  const names = [...medications, ...customMedications].map((m) => m.name);
+  return names
+    .map((name) => MEDICATION_LABEL_TO_BACKEND_FLAG[name])
     .filter((flag): flag is string => flag !== undefined);
 }
 
@@ -68,11 +94,11 @@ export function getBackendConditionFlags(mockWardId: string): string[] {
 // 매핑이 필요해서 export한다.
 export function getBackendMedicationFlags(mockWardId: string): string[] {
   const profile = getCareProfile(mockWardId);
-  if (!profile?.takesMedication) return [];
-  const names = [...profile.medications, ...profile.customMedications].map((m) => m.name);
-  return names
-    .map((name) => MEDICATION_LABEL_TO_BACKEND_FLAG[name])
-    .filter((flag): flag is string => flag !== undefined);
+  return medicationEntriesToBackendFlags(
+    profile?.takesMedication ?? false,
+    profile?.medications ?? [],
+    profile?.customMedications ?? []
+  );
 }
 
 // 초대(QR)로 등록되는 어르신 본인 로그인 비밀번호 — 전화번호 뒷자리 4자리. 프론트

@@ -3,35 +3,24 @@
 import { useEffect, useState } from "react";
 
 import { NotificationItem, fetchGuardianNotifications, notificationBadgeClass } from "@/lib/notifications";
-import { acknowledgeSos, sosStore } from "@/lib/sos-store";
+import { acknowledgeSosNotification, dismissedSosStore } from "@/lib/sos-store";
 import { useLocalStore } from "@/lib/use-store";
 import { useSession } from "@/lib/session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TopBar } from "@/components/app/top-bar";
 
-function formatTime(timestamp: number) {
-  const d = new Date(timestamp);
-  return `${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")} ${String(
-    d.getHours()
-  ).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
 export function NotificationsView() {
   const { account } = useSession();
-  const sosEvents = useLocalStore(sosStore);
   // items가 null이면 "아직 응답 안 옴"(로딩 중)이고, 응답이 오면 빈 배열이든 아니든 배열로
   // 바뀐다 — report-view.tsx의 비동기 조회와 같은 패턴(로딩 상태를 별도 boolean으로 안 두고
-  // null 여부로 판단).
+  // null 여부로 판단). SOS도 이제 이 목록에 그대로 섞여서 온다(POST /app/elder/{id}/sos로
+  // 만들어진 health_alerts 행을 fetchGuardianNotifications가 다른 이상신호와 똑같이
+  // 읽어온다) — 예전처럼 로컬 sos-store.ts를 따로 합칠 필요가 없다(2026-08-24, SOS
+  // 백엔드 PR#102 연동).
   const [items, setItems] = useState<NotificationItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  // SOS는 여전히 로컬 전역 저장소(sos-store.ts)라 여기서 이 보호자의 대상자(wardIds) 것만
-  // 걸러서 보여준다. 이상신호/안부확인콜 알림은 이제 실제 백엔드가 로그인한 보호자 토큰으로
-  // 이미 본인 대상자 것만 걸러서 주기 때문에(app/guardian/notifications), 클라이언트에서
-  // 다시 거를 필요가 없다.
-  const guardianWardIds = account?.wardIds ?? [];
-  const scopedSosEvents = sosEvents.filter((e) => guardianWardIds.includes(e.wardId));
+  const dismissedSosIds = useLocalStore(dismissedSosStore);
 
   useEffect(() => {
     if (!account) return;
@@ -56,18 +45,10 @@ export function NotificationsView() {
     };
   }, [account]);
 
-  const sosItems: (NotificationItem & { sosId?: string })[] = scopedSosEvents.map((e) => ({
-    id: e.id,
-    sosId: e.id,
-    date: formatTime(e.timestamp),
-    type: "SOS",
-    targetName: e.wardName,
-    message: `${e.wardName}님이 SOS 버튼을 눌렀어요. 바로 확인해 주세요.`,
-    read: e.acknowledged,
-  }));
-
   const loading = items === null && !error;
-  const merged = [...sosItems, ...(items ?? [])];
+  // 확인한 SOS는 이 브라우저에서 다시 안 보이게 감춘다(sos-store.ts 상단 주석 참고 —
+  // 백엔드 상태를 못 바꾸니 로컬로만 처리).
+  const notifications = (items ?? []).filter((n) => !dismissedSosIds.includes(n.id));
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -80,10 +61,10 @@ export function NotificationsView() {
         {!loading && error && (
           <p className="rounded-xl bg-muted px-4 py-3 text-sm text-destructive">{error}</p>
         )}
-        {!loading && !error && merged.length === 0 && (
+        {!loading && !error && notifications.length === 0 && (
           <p className="py-6 text-center text-sm text-muted-foreground">아직 알림이 없어요.</p>
         )}
-        {merged.map((n) => (
+        {notifications.map((n) => (
           <div
             key={n.id}
             className={`flex gap-3 rounded-2xl border p-4 shadow-sm ${
@@ -106,11 +87,11 @@ export function NotificationsView() {
               </div>
               <p className="text-sm text-foreground">{n.message}</p>
               <span className="text-xs text-muted-foreground">{n.date}</span>
-              {n.type === "SOS" && !n.read && (
+              {n.type === "SOS" && !n.read && n.elderId && account && (
                 <Button
                   size="sm"
                   className="mt-1 w-fit"
-                  onClick={() => acknowledgeSos(n.id)}
+                  onClick={() => acknowledgeSosNotification(n.id, n.elderId!, account.name)}
                 >
                   확인했어요
                 </Button>

@@ -8,8 +8,11 @@ import { useSession } from "@/lib/session";
 import { getWard } from "@/lib/wards";
 import {
   careProfileStore,
+  EMPTY_CARE_PROFILE_COMMAND,
   getCareProfile,
+  MedicationEntry,
   registerCareProfile,
+  RegisterCareProfileCommand,
   skipCareProfile,
 } from "@/lib/care-profile";
 import {
@@ -21,12 +24,14 @@ import {
 } from "@/lib/health-profile";
 import { CareSurveySection, CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
 import {
+  BACKEND_CONDITION_FLAG_TO_LABEL,
   BackendUserProfile,
+  conditionLabelsToBackendFlags,
   fetchBackendWardProfile,
-  getBackendConditionFlags,
-  getBackendMedicationFlags,
+  medicationEntriesToBackendFlags,
   submitSelfHealthProfileBackend,
 } from "@/lib/backend-auth";
+import { BACKEND_MEDICATION_FLAG_TO_LABEL } from "@/lib/medication-food-suggestions";
 import { syncMedicationFoodRestrictions } from "@/lib/medication-food-restrictions";
 import { TopBar } from "@/components/app/top-bar";
 import { useLocalStore } from "@/lib/use-store";
@@ -68,12 +73,23 @@ function UserSurveyPageContent() {
   // 덮어써졌다(마이 화면 PR#95로 "표시"는 백엔드 우선으로 고쳤지만 "저장 시 이어받기"는
   // 안 고쳐서 재발 — 2026-08-24 버그 리포트).
   const [backendProfile, setBackendProfile] = useState<BackendUserProfile | null>(null);
+  // CareSurveyView는 initialValues를 마운트 시점에 딱 한 번만 자기 내부 useState 초깃값으로
+  // 쓰고, 그 뒤로 부모가 새 값을 내려줘도(=이 fetch가 늦게 끝나서 existing이 바뀌어도)
+  // 다시 안 읽는다 — 그래서 fetch가 끝나기 전에 CareSurveyView부터 그려버리면, 사용자가
+  // 진단 질환/복용 중인 약 단계를 그냥 지나치기만 해도 "아직 안 불러온 빈 값"이 그대로
+  // 저장돼 버린다(2026-08-24, 이 파일의 backendProfile 우선 로직을 추가하자마자 실제로
+  // 재현됨 — 로컬 저장소가 비어있는 새 기기/브라우저에서 저장할 때마다 매번 재발할 수
+  // 있는 경쟁 상태였다). 그래서 이 fetch가 끝날 때까지(성공/실패 무관) CareSurveyView
+  // 자체를 그리지 않고 기다린다.
+  const [backendProfileLoaded, setBackendProfileLoaded] = useState(false);
   useEffect(() => {
     if (!wardId || !ward) return;
     let cancelled = false;
     fetchBackendWardProfile({ mockWardId: wardId, name: ward.name, age: ward.age, address: ward.address }).then(
       (result) => {
-        if (!cancelled) setBackendProfile(result);
+        if (cancelled) return;
+        setBackendProfile(result);
+        setBackendProfileLoaded(true);
       }
     );
     return () => {
@@ -83,7 +99,26 @@ function UserSurveyPageContent() {
 
   if (!account || !wardId || !ward) return null;
 
-  const existing = getCareProfile(wardId);
+  const localExisting = getCareProfile(wardId);
+  // 진단 받은 질환 / 복용 중인 약도 위 건강 프로필(existingHealth) 6개 필드와 똑같은 문제가
+  // 있었다 — 이어받는 기준이 getCareProfile(wardId), 즉 이 브라우저 로컬 저장소뿐이었다.
+  // "생활 정보"만 다시 저장해도(예: 질환 하나 추가) 로컬에 없는 복용약이 백엔드 최신
+  // 스냅샷에서 통째로 사라지는 버그로 실제 재발했다(2026-08-24, "복용 중인 약물... 계속
+  // 생활 정보 수정 뜨는데 이게 제일 시급") — getBackendMedicationFlags(wardId)가 로컬
+  // takesMedication만 보고 백엔드 값은 전혀 안 봤던 게 원인. backendProfile이 있으면
+  // 그 medication_flags/condition_flags를 우선해서 이 폼의 시작값을 만든다 — 로컬에 같은
+  // 이름의 항목이 있으면 timings/products(백엔드가 안 주는 정보)는 그대로 보존한다.
+  const existing: RegisterCareProfileCommand | undefined = backendProfile
+    ? {
+        ...(localExisting ?? { ...EMPTY_CARE_PROFILE_COMMAND, wardId }),
+        takesMedication: backendProfile.medicationFlags.length > 0,
+        medications: backendProfile.medicationFlags.map((flag): MedicationEntry => {
+          const name = BACKEND_MEDICATION_FLAG_TO_LABEL[flag] ?? flag;
+          return localExisting?.medications.find((m) => m.name === name) ?? { name, timings: [], products: [] };
+        }),
+        conditions: backendProfile.conditionFlags.map((flag) => BACKEND_CONDITION_FLAG_TO_LABEL[flag] ?? flag),
+      }
+    : localExisting;
   const localExistingHealth = healthProfiles[wardId];
   // 필드 단위로 백엔드 값을 우선하고, 백엔드에 없는 값(hba1c 등 로컬 전용 필드 포함)만
   // 로컬 저장값으로 채운다.
@@ -109,7 +144,15 @@ function UserSurveyPageContent() {
   // invite/survey/page.tsx와 같은 이유(개별 필드 단위로, 값이 하나도 없으면 0이 아니라
   // undefined 그대로 유지)로 병합해서 저장한다 — 다만 여기는 재방문(마이 화면)이라 실제
   // 백엔드 User 등록은 이미 끝나 있으므로 그건 안 한다.
-  async function saveHealthMetrics(health: HealthMetricsForm) {
+  //
+  // careCmd(질환/복약 플래그의 출처)는 CareSurveyView가 onComplete/onSkip으로 돌려주는
+  // "지금 이 폼의 전체 상태"를 그대로 받는다 — wardId로 로컬 저장소를 다시 읽지 않는다.
+  // getCareProfile(wardId)를 다시 읽으면 (a) section="health"에선 애초에 이번에 안
+  // 건드린 값이라 여전히 옛 로컬값이고, (b) section="care"/"both"라도 registerCareProfile이
+  // 아직 store에 반영되기 전 시점을 읽을 수도 있어 타이밍에 취약하다. cmd/partial은
+  // initialValues(= 위 backendProfile 우선 병합값)로 시작해서 사용자가 실제로 고친
+  // 부분만 바뀐 "확정된 최종값"이라 항상 정확하다.
+  async function saveHealthMetrics(health: HealthMetricsForm, careCmd: RegisterCareProfileCommand) {
     if (!wardId || !ward) return;
     // 로컬 저장은 실제로 입력된(또는 예전에 입력된) 값이 있을 때만 한다 — 값이 하나도
     // 없는데 저장하면 healthProfileStore에 전부 undefined인 빈 레코드가 생긴다.
@@ -146,9 +189,13 @@ function UserSurveyPageContent() {
       name: ward.name,
       age: ward.age,
       address: ward.address,
-      conditionFlags: getBackendConditionFlags(wardId),
-      medicationFlags: getBackendMedicationFlags(wardId),
-      conditionsNote: getCareProfile(wardId)?.conditionsNote || undefined,
+      conditionFlags: conditionLabelsToBackendFlags(careCmd.conditions),
+      medicationFlags: medicationEntriesToBackendFlags(
+        careCmd.takesMedication,
+        careCmd.medications,
+        careCmd.customMedications
+      ),
+      conditionsNote: careCmd.conditionsNote || undefined,
       gender: ward.gender === "여" ? "female" : "male",
       heightCm,
       weightKg,
@@ -165,7 +212,7 @@ function UserSurveyPageContent() {
     // 약물표 제안 중 확정한 음식들 — 설문에서 고른 값을 그대로 전체 목록으로 보낸다
     // (홈 화면에 별도 "제한 음식" 토글 UI가 없어 기존 값과 합칠 필요가 없음, dislikes와
     // 다른 점).
-    const avoidances = getCareProfile(wardId)?.medicationFoodAvoidances ?? [];
+    const avoidances = careCmd.medicationFoodAvoidances;
     if (avoidances.length > 0) {
       await syncMedicationFoodRestrictions(
         { mockWardId: wardId, name: ward.name, age: ward.age, address: ward.address },
@@ -175,6 +222,19 @@ function UserSurveyPageContent() {
   }
 
   const sectionLabel = section === "health" ? "건강 프로필" : "생활 정보";
+  if (!backendProfileLoaded) {
+    // 위 backendProfileLoaded 주석 참고 — 이 fetch가 끝나기 전엔 CareSurveyView를 아예
+    // 그리지 않는다. 보통 순식간에 끝나서 이 화면이 실제로 보이는 일은 드물다.
+    return (
+      <div className="flex flex-1 flex-col">
+        <TopBar
+          title={isFirstTime ? "생활 정보 입력" : `${sectionLabel} 수정`}
+          subtitle={isFirstTime ? "더 꼭 맞는 식단을 위해 몇 가지만 여쭤볼게요" : "언제든 다시 입력하실 수 있어요"}
+        />
+        <p className="px-5 py-6 text-sm text-muted-foreground">불러오는 중이에요...</p>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-1 flex-col">
       <TopBar
@@ -193,13 +253,13 @@ function UserSurveyPageContent() {
           // 물어본 생활 정보 문항까지 EMPTY_CARE_PROFILE_COMMAND 기본값 그대로
           // completed:true로 확정돼버린다(2026-08-21, 분리하며 발견).
           if (section !== "health") await registerCareProfile(cmd);
-          await saveHealthMetrics(health);
+          await saveHealthMetrics(health, cmd);
           toast.success("입력해주셔서 감사해요!");
           router.push(afterCompleteHref);
         }}
         onSkip={async (partial, answeredStep, health) => {
           if (section !== "health") await skipCareProfile(wardId, partial, answeredStep);
-          await saveHealthMetrics(health);
+          await saveHealthMetrics(health, partial);
           router.push(afterCompleteHref);
         }}
       />
