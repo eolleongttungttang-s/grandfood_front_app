@@ -9,7 +9,12 @@
 import { useState } from "react";
 
 import { API_BASE_URL } from "@/lib/api-config";
-import { fetchBackendWardProfile, resolveCachedBackendWardAccess } from "@/lib/backend-auth";
+import {
+  fetchBackendWardProfile,
+  getBackendConditionFlags,
+  getBackendMedicationFlags,
+  resolveCachedBackendWardAccess,
+} from "@/lib/backend-auth";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -93,9 +98,25 @@ export function useRecommendationReadiness() {
         ),
       ]);
 
+      // profile이 null이면 대부분 자가등록(보호자 없음) 케이스다 — fetchBackendWardProfile이
+      // 부르는 GET /users/{id}가 보호자 토큰만 받아서(get_current_guardian), 이 이용자가
+      // "생활 정보" 화면에서 질환/복약을 입력해 POST /users/{id}/health-profile로 백엔드
+      // 저장까지 이미 마쳤어도 이 리마인드는 그 사실을 절대 확인 못 하고 매번 "미입력"으로
+      // 오판했다(2026-08-24 발견 — 자가등록 계정은 질환/복약을 아무리 입력해도 리마인드가
+      // 안 꺼짐). 그 저장 요청을 보낼 때 쓴 것과 같은 로컬 원본(getBackendConditionFlags/
+      // getBackendMedicationFlags, care-profile.ts 기반)을 대신 확인한다 — 이미 백엔드로
+      // 보낸 값과 동일한 값이라 이걸로 판단해도 틀릴 이유가 없다. profile을 정상적으로
+      // 읽어온 경우(보호자 세션 있음)는 그쪽 값이 최신 진실이므로 그대로 우선한다.
+      const hasConditions =
+        (profile?.conditionFlags ?? []).length > 0 ||
+        getBackendConditionFlags(identity.mockWardId).length > 0;
+      const hasMedications =
+        (profile?.medicationFlags ?? []).length > 0 ||
+        getBackendMedicationFlags(identity.mockWardId).length > 0;
+
       return {
-        hasConditions: (profile?.conditionFlags ?? []).length > 0,
-        hasMedications: (profile?.medicationFlags ?? []).length > 0,
+        hasConditions,
+        hasMedications,
         hasFoodRules:
           (dislikes.item_names ?? []).length > 0 || (restrictions.item_names ?? []).length > 0,
       };
