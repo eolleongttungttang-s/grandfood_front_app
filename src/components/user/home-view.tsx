@@ -23,6 +23,7 @@ import {
 import { BackendMealType, computeTodayNutritionSnapshot } from "@/lib/banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
 import { deriveHealthInsight } from "@/lib/health-insights";
+import { adviseForWard, MedicationAdvice } from "@/lib/medication";
 import {
   applyLeftoverAnalysisResult,
   getCurrentMealSlot,
@@ -111,6 +112,23 @@ export function HomeView({
   function isDisliked(item: { id: string; name: string }): boolean {
     return dislikes.includes(item.id) || (backendDislikedNames?.has(item.name) ?? false);
   }
+
+  // 복약 안내 — 온보딩 때 받은 복용약 정보가 홈 화면 어디에도 안 보인다는 팀장 피드백
+  // (2026-08-24)으로 추가. 실패하면(세션 없음/서버 오류) 조용히 카드를 숨긴다 — 이 앱의
+  // 다른 보조 fetch들(예: 위 backendDislikedNames)과 같은 관례.
+  const [medicationAdvice, setMedicationAdvice] = useState<MedicationAdvice | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    adviseForWard({ wardId: ward.id, wardName: ward.name, wardAge: ward.age, wardAddress: ward.address })
+      .then((advice) => {
+        if (!cancelled) setMedicationAdvice(advice);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ward.id, ward.name, ward.age, ward.address]);
+
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   // diet-view.tsx와 같은 이유로 신규 회원(AI 반찬 추천을 한 번도 받은 적 없음)인지 본다 —
   // 여기 있는 카드들도 대부분 오늘의 추천 반찬 조합(목업)에서 파생된 값이라, 아직 실제 추천을
@@ -637,6 +655,35 @@ export function HomeView({
           <span className="text-sm font-semibold text-foreground">식단 상세 보기</span>
           <ChevronRight className="h-4 w-4 text-muted-foreground" />
         </Link>
+
+        {/* medicationAdvice가 null이면(요청 실패 — 세션 없음 등) 아직 판단할 근거가 없으니
+            아무것도 안 보여준다. 응답은 왔는데 medications가 빈 배열이면("복용 중인 약이
+            있으세요?"에 아니오로 답했거나 아직 안 답함) — 가이드 문서 권장대로 카드를
+            완전히 숨기지 않고 "등록하면 안내를 받을 수 있다"는 짧은 유도 문구를 준다.
+            "식단 상세 보기"와 같은 얇은 진입 행 패턴을 재사용해서 홈 화면 길이는 그대로
+            유지한다(2026-08-24 피드백, 모바일에서 카드가 길면 안 됨). 실제 내용(근거
+            문장·상담 안내 등)은 전부 /user/medication에서만 보여준다. */}
+        {medicationAdvice && medicationAdvice.medications.length > 0 ? (
+          <Link
+            href="/user/medication"
+            className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3"
+          >
+            <span className="text-sm font-semibold text-foreground">복약 안내 보기</span>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </Link>
+        ) : (
+          medicationAdvice && (
+            <Link
+              href="/user/survey?section=care&returnTo=/user/home"
+              className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3"
+            >
+              <span className="text-sm font-semibold text-foreground">
+                복용 중인 약을 등록하면 맞춤 복약 안내를 받을 수 있어요
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </Link>
+          )
+        )}
       </div>
     </div>
   );

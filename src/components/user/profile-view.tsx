@@ -10,7 +10,7 @@ import { Account, updateAccountTtsCallConsent } from "@/lib/auth";
 import { BackendUserProfile, fetchBackendWardProfile, updateBackendWardTtsConsent } from "@/lib/backend-auth";
 import { calculateAge, Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
-import { ACTIVITY_LEVEL_LABEL } from "@/lib/health-profile";
+import { ACTIVITY_LEVEL_LABEL, fromBackendActivityLevel } from "@/lib/health-profile";
 import {
   CARE_SURVEY_STEP,
   careProfileStore,
@@ -18,6 +18,7 @@ import {
   isCareProfileStepAnswered,
   LIVING_ARRANGEMENT_LABEL,
 } from "@/lib/care-profile";
+import { BACKEND_MEDICATION_FLAG_TO_LABEL } from "@/lib/medication-food-suggestions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,18 +56,6 @@ export function ProfileView({
   const partnerStore = getPartnerStore(ward.partnerStoreId);
   useLocalStore(careProfileStore);
   const careProfile = getCareProfile(ward.id);
-  // "건강 프로필 다시 입력하기" 버튼 문구 — 생활 정보 쪽(careProfile 존재 여부)과 같은
-  // 패턴이다. 건강 프로필은 completed 같은 별도 추적이 없어서(값 전부가 선택 항목이라
-  // care-survey-view.tsx도 이 카드 진입 시 answeredHealth 여부를 존재 유무로만 판단한다),
-  // 여기도 6개 필드 중 하나라도 값이 있으면 "이미 입력한 적 있음"으로 본다.
-  const hasHealthProfileData =
-    detail.healthProfile.systolicBP != null ||
-    detail.healthProfile.diastolicBP != null ||
-    detail.healthProfile.fastingGlucose != null ||
-    detail.healthProfile.heightCm != null ||
-    detail.healthProfile.weightKg != null ||
-    detail.healthProfile.activityLevel != null;
-
   // 서버에 실제로 조회할 수 있는 프로필이 있으면(보호자가 관리하는 대상자를 이 브라우저에서
   // 보호자로도 로그인해본 적 있는 경우 — backend-auth.ts의 fetchBackendWardProfile 주석
   // 참고) 나이/거주지/안부확인콜 동의를 로컬 mock 대신 그 값으로 덮어써서 보여준다. 실패하면
@@ -84,6 +73,43 @@ export function ProfileView({
       cancelled = true;
     };
   }, [ward.id, ward.name, ward.age, ward.address]);
+
+  // 건강 프로필 6개 필드 — PR#95부터 GET /users/{id}가 이 값들을 실제로 돌려주므로
+  // (backend-auth.ts BackendUserProfile 참고), 로컬 저장소(detail.healthProfile,
+  // 새 기기/브라우저에선 항상 비어있음)보다 서버 값을 우선한다. backendProfile이
+  // 없으면(자가등록 본인 등 — 위 useEffect 주석 참고) 로컬 값 그대로 폴백.
+  const systolicBP = backendProfile?.bloodPressureSystolic ?? detail.healthProfile.systolicBP;
+  const diastolicBP = backendProfile?.bloodPressureDiastolic ?? detail.healthProfile.diastolicBP;
+  const fastingGlucose = backendProfile?.fastingGlucoseMgDl ?? detail.healthProfile.fastingGlucose;
+  const heightCm = backendProfile?.heightCm ?? detail.healthProfile.heightCm;
+  const weightKg = backendProfile?.weightKg ?? detail.healthProfile.weightKg;
+  const activityLevel = backendProfile?.activityLevel
+    ? fromBackendActivityLevel(backendProfile.activityLevel)
+    : detail.healthProfile.activityLevel;
+
+  // 복용 중인 약 — 지금까지 마이페이지 어디에도 안 보였다(2026-08-24 피드백: "약 새로
+  // 먹기 시작하면 이미 등록했는지 헷갈릴 것 같다"). DB상 medication_flags는 height_cm
+  // 등과 같은 health_profiles 테이블 컬럼이라 개념적으로 "건강 프로필"에 속하지만, 입력
+  // 문항 자체는 여전히 "생활 정보" 설문(care-survey-view.tsx)에 있다 — 그 설문 구조를
+  // 옮기는 건 별도 작업이라, 여기선 표시만 건강 프로필 카드에 둔다. backendProfile이
+  // 없으면(자가등록 본인 등) 로컬 생활정보 답변으로 폴백 — 위 6개 필드와 같은 패턴이다.
+  const medicationLabels = backendProfile
+    ? backendProfile.medicationFlags.map((flag) => BACKEND_MEDICATION_FLAG_TO_LABEL[flag] ?? flag)
+    : careProfile?.takesMedication
+      ? [...careProfile.medications, ...careProfile.customMedications].map((m) => m.name).filter(Boolean)
+      : [];
+
+  // "건강 프로필 다시 입력하기" 버튼 문구 — 생활 정보 쪽(careProfile 존재 여부)과 같은
+  // 패턴이다. 건강 프로필은 completed 같은 별도 추적이 없어서(값 전부가 선택 항목이라
+  // care-survey-view.tsx도 이 카드 진입 시 answeredHealth 여부를 존재 유무로만 판단한다),
+  // 여기도 6개 필드 중 하나라도 값이 있으면 "이미 입력한 적 있음"으로 본다.
+  const hasHealthProfileData =
+    systolicBP != null ||
+    diastolicBP != null ||
+    fastingGlucose != null ||
+    heightCm != null ||
+    weightKg != null ||
+    activityLevel != null;
 
   return (
     <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -193,49 +219,32 @@ export function ProfileView({
             </span>
           </div>
           <InfoRow
+            label="복용 중인 약"
+            value={medicationLabels.length > 0 ? medicationLabels.join(", ") : "없음"}
+          />
+          <Separator />
+          <InfoRow
             label="혈압 위쪽 숫자 (수축기)"
-            value={
-              detail.healthProfile.systolicBP != null
-                ? `${detail.healthProfile.systolicBP} mmHg`
-                : "미입력"
-            }
+            value={systolicBP != null ? `${systolicBP} mmHg` : "미입력"}
           />
           <Separator />
           <InfoRow
             label="혈압 아래쪽 숫자 (이완기)"
-            value={
-              detail.healthProfile.diastolicBP != null
-                ? `${detail.healthProfile.diastolicBP} mmHg`
-                : "미입력"
-            }
+            value={diastolicBP != null ? `${diastolicBP} mmHg` : "미입력"}
           />
           <Separator />
           <InfoRow
             label="공복혈당"
-            value={
-              detail.healthProfile.fastingGlucose != null
-                ? `${detail.healthProfile.fastingGlucose} mg/dL`
-                : "미입력"
-            }
+            value={fastingGlucose != null ? `${fastingGlucose} mg/dL` : "미입력"}
           />
           <Separator />
-          <InfoRow
-            label="키"
-            value={detail.healthProfile.heightCm != null ? `${detail.healthProfile.heightCm} cm` : "미입력"}
-          />
+          <InfoRow label="키" value={heightCm != null ? `${heightCm} cm` : "미입력"} />
           <Separator />
-          <InfoRow
-            label="체중"
-            value={detail.healthProfile.weightKg != null ? `${detail.healthProfile.weightKg} kg` : "미입력"}
-          />
+          <InfoRow label="체중" value={weightKg != null ? `${weightKg} kg` : "미입력"} />
           <Separator />
           <InfoRow
             label="활동 수준"
-            value={
-              detail.healthProfile.activityLevel
-                ? ACTIVITY_LEVEL_LABEL[detail.healthProfile.activityLevel]
-                : "미입력"
-            }
+            value={activityLevel ? ACTIVITY_LEVEL_LABEL[activityLevel] : "미입력"}
           />
           <Button
             variant="outline"

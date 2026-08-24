@@ -37,6 +37,12 @@ export const MEDICATION_LABEL_TO_BACKEND_FLAG: Record<string, string> = {
   "치매약": "dementia",
 };
 
+// 마이페이지에 GET /users/{id}의 medication_flags(코드)를 화면에 보여줄 때 쓰는 역방향
+// 매핑 — 위 표를 그대로 뒤집은 것이다. profile-view.tsx가 이걸 쓴다.
+export const BACKEND_MEDICATION_FLAG_TO_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(MEDICATION_LABEL_TO_BACKEND_FLAG).map(([label, flag]) => [flag, label])
+);
+
 export type FoodSuggestion = {
   food: string;
   reason: string;

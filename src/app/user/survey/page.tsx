@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
@@ -13,12 +13,20 @@ import {
   skipCareProfile,
 } from "@/lib/care-profile";
 import {
+  fromBackendActivityLevel,
   healthProfileStore,
+  HealthProfileView,
   registerHealthProfile,
   toBackendActivityLevel,
 } from "@/lib/health-profile";
 import { CareSurveySection, CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
-import { getBackendConditionFlags, getBackendMedicationFlags, submitSelfHealthProfileBackend } from "@/lib/backend-auth";
+import {
+  BackendUserProfile,
+  fetchBackendWardProfile,
+  getBackendConditionFlags,
+  getBackendMedicationFlags,
+  submitSelfHealthProfileBackend,
+} from "@/lib/backend-auth";
 import { syncMedicationFoodRestrictions } from "@/lib/medication-food-restrictions";
 import { TopBar } from "@/components/app/top-bar";
 import { useLocalStore } from "@/lib/use-store";
@@ -53,10 +61,49 @@ function UserSurveyPageContent() {
   useLocalStore(careProfileStore);
   const healthProfiles = useLocalStore(healthProfileStore);
 
+  // 이 화면(재방문 "생활 정보"/"건강 프로필" 수정)이 값을 이어받는 기준이 지금까지
+  // healthProfileStore(로컬 브라우저 저장소)뿐이었다 — 다른 기기/세션에서 입력한 값은
+  // 이 브라우저 로컬엔 없으니, 여기서 아무 항목이나 다시 저장하면(예: 복용약만 추가)
+  // 백엔드에 실제로 있던 키/체중/활동수준/혈압/공복혈당까지 새 스냅샷 행에서 null로
+  // 덮어써졌다(마이 화면 PR#95로 "표시"는 백엔드 우선으로 고쳤지만 "저장 시 이어받기"는
+  // 안 고쳐서 재발 — 2026-08-24 버그 리포트).
+  const [backendProfile, setBackendProfile] = useState<BackendUserProfile | null>(null);
+  useEffect(() => {
+    if (!wardId || !ward) return;
+    let cancelled = false;
+    fetchBackendWardProfile({ mockWardId: wardId, name: ward.name, age: ward.age, address: ward.address }).then(
+      (result) => {
+        if (!cancelled) setBackendProfile(result);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [wardId, ward?.name, ward?.age, ward?.address]);
+
   if (!account || !wardId || !ward) return null;
 
   const existing = getCareProfile(wardId);
-  const existingHealth = healthProfiles[wardId];
+  const localExistingHealth = healthProfiles[wardId];
+  // 필드 단위로 백엔드 값을 우선하고, 백엔드에 없는 값(hba1c 등 로컬 전용 필드 포함)만
+  // 로컬 저장값으로 채운다.
+  const existingHealth: HealthProfileView | undefined =
+    backendProfile || localExistingHealth
+      ? {
+          wardId,
+          source: localExistingHealth?.source ?? "self_reported",
+          systolicBP: backendProfile?.bloodPressureSystolic ?? localExistingHealth?.systolicBP,
+          diastolicBP: backendProfile?.bloodPressureDiastolic ?? localExistingHealth?.diastolicBP,
+          fastingGlucose: backendProfile?.fastingGlucoseMgDl ?? localExistingHealth?.fastingGlucose,
+          heightCm: backendProfile?.heightCm ?? localExistingHealth?.heightCm,
+          weightKg: backendProfile?.weightKg ?? localExistingHealth?.weightKg,
+          activityLevel: backendProfile?.activityLevel
+            ? fromBackendActivityLevel(backendProfile.activityLevel)
+            : localExistingHealth?.activityLevel,
+          hba1c: localExistingHealth?.hba1c ?? 0,
+          updatedAt: localExistingHealth?.updatedAt ?? new Date(0).toISOString(),
+        }
+      : undefined;
   const afterCompleteHref = returnTo || (isFirstTime ? "/user/home" : "/user/profile");
 
   // invite/survey/page.tsx와 같은 이유(개별 필드 단위로, 값이 하나도 없으면 0이 아니라
@@ -91,6 +138,9 @@ function UserSurveyPageContent() {
     const heightCm = health.heightCm ?? existingHealth?.heightCm;
     const weightKg = health.weightKg ?? existingHealth?.weightKg;
     const activityLevel = health.activityLevel ?? existingHealth?.activityLevel;
+    const systolicBP = health.systolicBP ?? existingHealth?.systolicBP;
+    const diastolicBP = health.diastolicBP ?? existingHealth?.diastolicBP;
+    const fastingGlucose = health.fastingGlucose ?? existingHealth?.fastingGlucose;
     const result = await submitSelfHealthProfileBackend({
       mockWardId: wardId,
       name: ward.name,
@@ -103,6 +153,9 @@ function UserSurveyPageContent() {
       heightCm,
       weightKg,
       activityLevel: activityLevel ? toBackendActivityLevel(activityLevel) : undefined,
+      bloodPressureSystolic: systolicBP,
+      bloodPressureDiastolic: diastolicBP,
+      fastingGlucoseMgDl: fastingGlucose,
     });
     if ("error" in result) {
       toast.info("일부 기능은 나중에 이 계정으로 다시 로그인하면 활성화돼요.");
