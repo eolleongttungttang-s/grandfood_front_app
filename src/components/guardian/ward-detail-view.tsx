@@ -24,7 +24,8 @@ import { HISTORY_DAYS, WardMealDashboard, recentKstDateKeys } from "@/lib/ward-m
 import { dietHistoryForDate } from "@/lib/meal-dashboard";
 import { LeftoverDayGrid, LeftoverLegend } from "@/components/app/leftover-day-grid";
 import { ACTIVITY_LEVEL_LABEL, fromBackendActivityLevel } from "@/lib/health-profile";
-import type { BackendUserProfile } from "@/lib/backend-auth";
+import { BACKEND_CONDITION_FLAG_TO_LABEL, type BackendUserProfile } from "@/lib/backend-auth";
+import { BACKEND_MEDICATION_FLAG_TO_LABEL } from "@/lib/medication-food-suggestions";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import {
@@ -182,6 +183,19 @@ export function WardDetailView({
   const activityLevel = backendProfile?.activityLevel
     ? fromBackendActivityLevel(backendProfile.activityLevel)
     : detail.healthProfile.activityLevel;
+  // 진단 받은 질환 / 복용 중인 약 — profile-view.tsx(이용자 본인 마이 화면)와 같은 이유로
+  // 여기도 추가한다(2026-08-24 피드백: 화면 위쪽의 "질환 · 알레르기 · 복약" 카드가
+  // detail.conditions/detail.medications라는 옛 목업 데이터를 그대로 보여주고 있어서,
+  // 실제로 답한 값(careProfile)이나 백엔드 값과 안 맞을 수 있었다 — "생활 정보" 카드에는
+  // 반대로 이 두 항목 자체가 아예 없어서, 정작 수정 버튼 옆엔 지금 값이 안 보였다).
+  const medicationLabels = backendProfile
+    ? backendProfile.medicationFlags.map((flag) => BACKEND_MEDICATION_FLAG_TO_LABEL[flag] ?? flag)
+    : careProfile?.takesMedication
+      ? [...careProfile.medications, ...careProfile.customMedications].map((m) => m.name).filter(Boolean)
+      : [];
+  const conditionLabels = backendProfile
+    ? backendProfile.conditionFlags.map((flag) => BACKEND_CONDITION_FLAG_TO_LABEL[flag] ?? flag)
+    : (careProfile?.conditions ?? []);
   const banchanIdentity = {
     wardId: ward.id,
     wardName: ward.name,
@@ -506,14 +520,27 @@ export function WardDetailView({
         <>
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">질환 · 알레르기 · 복약</span>
+          {/* 진단 질환/복약은 2026-08-24까지 detail.conditions/detail.medications(예전
+              목업 데이터)를 그대로 보여주고 있었다 — 실제로 답한 값(careProfile)이나
+              백엔드 값과 안 맞을 수 있었고, 그렇다고 이 카드에 수정 버튼도 없어서
+              보호자가 고칠 방법도 안 보였다(피드백: "이걸 보호자가 직접 수정하는 칸이
+              없나보네?"). profile-view.tsx(이용자 본인 마이 화면)와 같은 기준
+              (medicationLabels/conditionLabels)으로 바꾸고, 아래에 수정 버튼도 단다. */}
           <div className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold text-muted-foreground">진단 질환</span>
             <div className="flex flex-wrap gap-1.5">
-              {detail.conditions.map((c) => (
-                <Badge key={c} variant="secondary">
-                  {c}
-                </Badge>
-              ))}
+              {conditionLabels.length > 0 ? (
+                conditionLabels.map((c) => (
+                  <Badge key={c} variant="secondary">
+                    {c}
+                  </Badge>
+                ))
+              ) : (
+                <span className="text-sm text-muted-foreground">없음</span>
+              )}
+              {careProfile?.conditionsNote && (
+                <Badge variant="secondary">{careProfile.conditionsNote}</Badge>
+              )}
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
@@ -530,20 +557,29 @@ export function WardDetailView({
               )}
             </div>
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold text-muted-foreground">복약</span>
-            {detail.medications.map((m) => (
-              <div key={m.name} className="flex flex-col gap-0.5">
-                <div className="flex justify-between text-sm">
-                  <span className="text-foreground">{m.name}</span>
-                  <span className="text-muted-foreground">{m.schedule}</span>
-                </div>
-                {m.products.length > 0 && (
-                  <span className="text-xs text-muted-foreground">{m.products.join(", ")}</span>
-                )}
-              </div>
-            ))}
+            <div className="flex flex-wrap gap-1.5">
+              {medicationLabels.length > 0 ? (
+                medicationLabels.map((m, i) => (
+                  <Badge key={`${m}-${i}`} variant="secondary">
+                    {m}
+                  </Badge>
+                ))
+              ) : (
+                <span className="text-sm text-muted-foreground">없음</span>
+              )}
+            </div>
           </div>
+          <Button
+            variant="outline"
+            className="mt-1 w-full justify-center"
+            nativeButton={false}
+            render={<Link href={`/guardian/wards/detail/survey?id=${ward.id}&section=care`} />}
+          >
+            <ClipboardEdit />
+            질환 · 복약 수정하기
+          </Button>
         </div>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">

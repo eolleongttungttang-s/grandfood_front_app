@@ -7,7 +7,12 @@ import { ChevronRight, ClipboardEdit, LogOut, Phone, Volume2, Wallet } from "luc
 import { toast } from "sonner";
 
 import { Account, updateAccountTtsCallConsent } from "@/lib/auth";
-import { BackendUserProfile, fetchBackendWardProfile, updateBackendWardTtsConsent } from "@/lib/backend-auth";
+import {
+  BACKEND_CONDITION_FLAG_TO_LABEL,
+  BackendUserProfile,
+  fetchBackendWardProfile,
+  updateBackendWardTtsConsent,
+} from "@/lib/backend-auth";
 import { calculateAge, Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { ACTIVITY_LEVEL_LABEL, fromBackendActivityLevel } from "@/lib/health-profile";
@@ -30,8 +35,11 @@ import { accessibilityStore, speak, updateAccessibility } from "@/lib/accessibil
 import { useLocalStore } from "@/lib/use-store";
 
 function InfoRow({ label, value }: { label: string; value: string }) {
+  // py-2.5였다가 py-1.5로 줄임 — "고혈압"/"당뇨약"처럼 한 단어짜리 값도 다른 행과 같은
+  // 세로 간격을 그대로 써서 칸이 실제 내용보다 커 보였다(2026-08-24 피드백). 이 컴포넌트를
+  // 쓰는 모든 행(기본 정보/생활 정보/건강 프로필)에 똑같이 적용돼서 일관성은 유지된다.
   return (
-    <div className="flex items-center justify-between py-2.5 text-sm">
+    <div className="flex items-center justify-between py-1.5 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-semibold text-foreground">{value}</span>
     </div>
@@ -87,17 +95,19 @@ export function ProfileView({
     ? fromBackendActivityLevel(backendProfile.activityLevel)
     : detail.healthProfile.activityLevel;
 
-  // 복용 중인 약 — 지금까지 마이페이지 어디에도 안 보였다(2026-08-24 피드백: "약 새로
-  // 먹기 시작하면 이미 등록했는지 헷갈릴 것 같다"). DB상 medication_flags는 height_cm
-  // 등과 같은 health_profiles 테이블 컬럼이라 개념적으로 "건강 프로필"에 속하지만, 입력
-  // 문항 자체는 여전히 "생활 정보" 설문(care-survey-view.tsx)에 있다 — 그 설문 구조를
-  // 옮기는 건 별도 작업이라, 여기선 표시만 건강 프로필 카드에 둔다. backendProfile이
-  // 없으면(자가등록 본인 등) 로컬 생활정보 답변으로 폴백 — 위 6개 필드와 같은 패턴이다.
+  // 복용 중인 약 / 진단 받은 질환 — 지금까지 마이페이지 어디에도 안 보였다(2026-08-24
+  // 피드백: "약 새로 먹기 시작하면 이미 등록했는지 헷갈릴 것 같다"). 둘 다 DB상
+  // health_profiles 테이블 컬럼이지만, 입력 문항은 "생활 정보" 설문(care-survey-view.tsx)에
+  // 있고 그 수정 버튼도 이 카드에 있어서 — 여기(생활 정보 카드)에 표시한다. backendProfile이
+  // 없으면(자가등록 본인 등) 로컬 생활정보 답변으로 폴백 — 위 6개 건강 프로필 필드와 같은 패턴.
   const medicationLabels = backendProfile
     ? backendProfile.medicationFlags.map((flag) => BACKEND_MEDICATION_FLAG_TO_LABEL[flag] ?? flag)
     : careProfile?.takesMedication
       ? [...careProfile.medications, ...careProfile.customMedications].map((m) => m.name).filter(Boolean)
       : [];
+  const conditionLabels = backendProfile
+    ? backendProfile.conditionFlags.map((flag) => BACKEND_CONDITION_FLAG_TO_LABEL[flag] ?? flag)
+    : (careProfile?.conditions ?? []);
 
   // "건강 프로필 다시 입력하기" 버튼 문구 — 생활 정보 쪽(careProfile 존재 여부)과 같은
   // 패턴이다. 건강 프로필은 completed 같은 별도 추적이 없어서(값 전부가 선택 항목이라
@@ -160,36 +170,67 @@ export function ProfileView({
               <Badge className="bg-risk-caution text-risk-caution-foreground">입력 중단됨</Badge>
             )}
           </div>
-          {careProfile ? (
-            <div className="flex flex-col gap-0.5">
-              <InfoRow
-                label="하루 식사 횟수"
-                value={
-                  isCareProfileStepAnswered(careProfile, CARE_SURVEY_STEP.mealsPerDay)
-                    ? `${careProfile.mealsPerDay}회`
-                    : "미입력"
-                }
-              />
-              <Separator />
-              <InfoRow
-                label="동거 형태"
-                value={
-                  isCareProfileStepAnswered(careProfile, CARE_SURVEY_STEP.livingArrangement)
-                    ? LIVING_ARRANGEMENT_LABEL[careProfile.livingArrangement]
-                    : "미입력"
-                }
-              />
-              <Separator />
-              <InfoRow
-                label="비상연락처"
-                value={
-                  careProfile.emergencyContactPhone
-                    ? `${careProfile.emergencyContactName}(${careProfile.emergencyContactRelation}) ${careProfile.emergencyContactPhone}`
-                    : "미입력"
-                }
-              />
-            </div>
-          ) : (
+          {/* 복용 중인 약/진단 받은 질환은 health_profiles 테이블 컬럼이라 개념적으로는
+              "건강 프로필"에 가깝지만, 실제로 고치는 입력 문항은 둘 다 여전히 이 "생활
+              정보" 설문(care-survey-view.tsx의 CARE_SURVEY_STEP.medication/conditions)에
+              있다 — 아래 "생활 정보 다시 입력하기" 버튼이 그리로 데려간다. 건강 프로필
+              카드에 두면 그 카드의 "건강 프로필 다시 입력하기"(section=health) 버튼을
+              눌러도 이 문항들은 안 나와서 헷갈린다는 피드백(2026-08-24)으로 이 카드에
+              둔다. careProfile 존재 여부와 무관하게 항상 보여준다 — 로컬 생활정보 답변이
+              없어도(새 기기 등) backendProfile에서 값이 올 수 있다. 아래 "건강 프로필"
+              카드의 InfoRow(라벨 왼쪽 · 값 오른쪽 한 줄)와 같은 폭/스타일로 맞춘다
+              (2026-08-24 피드백 — 뱃지로 바꿨다가 다시 되돌림). */}
+          {/* 이 카드(생활 정보)의 바깥 컨테이너는 gap-3(12px)다 — 아래 모든 행을 여기
+              직계 자식으로 두면 InfoRow 자체 패딩과 별개로 행마다 12px가 더 붙어서
+              "건강 프로필" 카드보다 훨씬 헐렁해 보였다(2026-08-24 피드백, "복용 중인
+              약이 아직도 더 큰데?" — 처음엔 새로 넣은 두 행만 따로 감쌌더니 그 경계에서
+              똑같은 문제가 재발했다). "건강 프로필" 카드처럼 이 카드에 있는 행 전부를
+              gap-0.5(2px) 래퍼 하나에 몰아넣어 균일하게 촘촘히 만든다 — 질환/복약
+              두 행은 careProfile 여부와 무관하게 항상 보여주고, 나머지 세 행은
+              careProfile이 있을 때만 같은 래퍼 안에 이어붙인다. */}
+          <div className="flex flex-col gap-0.5">
+            <InfoRow
+              label="진단 받은 질환"
+              value={[...conditionLabels, careProfile?.conditionsNote].filter(Boolean).join(", ") || "없음"}
+            />
+            <Separator />
+            <InfoRow
+              label="복용 중인 약"
+              value={medicationLabels.length > 0 ? medicationLabels.join(", ") : "없음"}
+            />
+            {careProfile && (
+              <>
+                <Separator />
+                <InfoRow
+                  label="하루 식사 횟수"
+                  value={
+                    isCareProfileStepAnswered(careProfile, CARE_SURVEY_STEP.mealsPerDay)
+                      ? `${careProfile.mealsPerDay}회`
+                      : "미입력"
+                  }
+                />
+                <Separator />
+                <InfoRow
+                  label="동거 형태"
+                  value={
+                    isCareProfileStepAnswered(careProfile, CARE_SURVEY_STEP.livingArrangement)
+                      ? LIVING_ARRANGEMENT_LABEL[careProfile.livingArrangement]
+                      : "미입력"
+                  }
+                />
+                <Separator />
+                <InfoRow
+                  label="비상연락처"
+                  value={
+                    careProfile.emergencyContactPhone
+                      ? `${careProfile.emergencyContactName}(${careProfile.emergencyContactRelation}) ${careProfile.emergencyContactPhone}`
+                      : "미입력"
+                  }
+                />
+              </>
+            )}
+          </div>
+          {!careProfile && (
             <p className="text-sm text-muted-foreground">
               아직 생활 정보를 입력하지 않으셨어요.
             </p>
@@ -218,11 +259,6 @@ export function ProfileView({
               {detail.healthProfile.source === "mydata_linked" ? "마이데이터 연동" : "자가 입력"}
             </span>
           </div>
-          <InfoRow
-            label="복용 중인 약"
-            value={medicationLabels.length > 0 ? medicationLabels.join(", ") : "없음"}
-          />
-          <Separator />
           <InfoRow
             label="혈압 위쪽 숫자 (수축기)"
             value={systolicBP != null ? `${systolicBP} mmHg` : "미입력"}
