@@ -36,6 +36,22 @@ export function toBackendActivityLevel(level: ActivityLevel): BackendActivityLev
   }
 }
 
+// backend-auth.ts의 BackendUserProfile.activityLevel(GET /users/{id} 응답, PR#95부터
+// 노출됨)을 화면 표시용 ActivityLevel/ACTIVITY_LEVEL_LABEL로 되돌리는 역방향 매핑 —
+// toBackendActivityLevel과 정확히 반대다.
+export function fromBackendActivityLevel(level: BackendActivityLevel): ActivityLevel {
+  switch (level) {
+    case "sedentary":
+      return "inactive";
+    case "low_active":
+      return "light";
+    case "active":
+      return "active";
+    case "very_active":
+      return "very_active";
+  }
+}
+
 export type RegisterHealthProfileCommand = {
   wardId: string;
   source: HealthProfileSource;

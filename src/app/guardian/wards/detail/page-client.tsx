@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useSession } from "@/lib/session";
 import { getWard, getWardDetail } from "@/lib/wards";
 import { fetchWardMealDashboard, WardMealDashboard } from "@/lib/ward-meal-dashboard";
+import { BackendUserProfile, fetchBackendWardProfile } from "@/lib/backend-auth";
 import { WardDetailView } from "@/components/guardian/ward-detail-view";
 
 export function GuardianWardDetailPageClient() {
@@ -45,6 +46,34 @@ export function GuardianWardDetailPageClient() {
   // null이면 "아직 응답 안 옴"(로딩 중) — notifications-view.tsx와 같은 패턴.
   const mealDashboard = mealDashboardState?.id === id ? mealDashboardState.dashboard : null;
 
+  // 건강 프로필 6개 필드(키/몸무게/활동수준/혈압/공복혈당) — GET /users/{id}가 이제
+  // 이 값들을 실제로 돌려주므로(PR#95), profile-view.tsx(이용자 본인 마이 화면)와 같은
+  // 방식으로 여기서도 로컬 목업(detail.healthProfile) 대신 서버 값을 우선한다. 보호자는
+  // 항상 실제 세션이 있어(자가등록 이용자와 달리 fetchBackendWardProfile이 막힐 이유가
+  // 없음) 이 대상자가 실제 백엔드에 한 번이라도 등록된 적 있으면 정상적으로 값이 온다.
+  const [backendProfileState, setBackendProfileState] = useState<{
+    id: string;
+    profile: BackendUserProfile | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!id || !canView) return;
+    let cancelled = false;
+    fetchBackendWardProfile({
+      mockWardId: id,
+      name: ward?.name ?? "",
+      age: ward?.age ?? 0,
+      address: ward?.address ?? "",
+    }).then((result) => {
+      if (!cancelled) setBackendProfileState({ id, profile: result });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, canView, ward?.name, ward?.age, ward?.address]);
+
+  const backendProfile = backendProfileState?.id === id ? backendProfileState.profile : null;
+
   if (!account) return null;
 
   if (!ward || !canView) {
@@ -67,6 +96,7 @@ export function GuardianWardDetailPageClient() {
       detail={detail}
       guardianName={account.name}
       mealDashboard={mealDashboard}
+      backendProfile={backendProfile}
     />
   );
 }

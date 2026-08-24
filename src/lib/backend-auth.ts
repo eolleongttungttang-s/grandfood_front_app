@@ -797,6 +797,13 @@ export async function submitSelfHealthProfileBackend(params: {
   heightCm?: number;
   weightKg?: number;
   activityLevel?: BackendActivityLevel;
+  // 2026-08-24까지 이 함수는 SelfHealthProfileRequest가 이미 받는
+  // blood_pressure_systolic/diastolic/fasting_glucose_mg_dl을 아예 안 보내고 있었다 —
+  // 그래서 이 엔드포인트를 호출할 때마다(매번 새 스냅샷 행이 생김) 이전에 저장된 혈압/
+  // 공복혈당이 새 행에서 null로 덮어써졌다(마이 화면 "미입력" 재발 버그).
+  bloodPressureSystolic?: number;
+  bloodPressureDiastolic?: number;
+  fastingGlucoseMgDl?: number;
 }): Promise<{ userId: string } | { error: string }> {
   const access = await resolveBackendWardAccess({
     mockWardId: params.mockWardId,
@@ -824,6 +831,9 @@ export async function submitSelfHealthProfileBackend(params: {
         height_cm: params.heightCm,
         weight_kg: params.weightKg,
         activity_level: params.activityLevel,
+        blood_pressure_systolic: params.bloodPressureSystolic,
+        blood_pressure_diastolic: params.bloodPressureDiastolic,
+        fasting_glucose_mg_dl: params.fastingGlucoseMgDl,
       }),
     },
     REQUEST_TIMEOUT_MS
@@ -968,6 +978,17 @@ export type BackendUserProfile = {
   // useRecommendationReadiness.ts가 "복약 정보 입력됐는지" 판단에 필요해서 추가한다.
   medicationFlags: string[];
   ttsCallConsent: boolean;
+  // health_profiles의 체크업 시점 스냅샷 필드 — grandfood_backend PR#95부터 UserResponse에
+  // 노출됨(그 전엔 온보딩/자가입력 요청엔 받으면서 응답으론 절대 안 돌려줘서, 프론트가
+  // 로컬 저장소(health-profile.ts healthProfileStore)로만 흉내내고 있었다 — issue #80).
+  // 건강 프로필 자체가 없으면(healthProfileId가 null) 전부 null.
+  gender: "male" | "female" | null;
+  heightCm: number | null;
+  weightKg: number | null;
+  activityLevel: BackendActivityLevel | null;
+  bloodPressureSystolic: number | null;
+  bloodPressureDiastolic: number | null;
+  fastingGlucoseMgDl: number | null;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -984,17 +1005,28 @@ function parseUserProfile(data: any): BackendUserProfile {
     conditionFlags: data.condition_flags ?? [],
     medicationFlags: data.medication_flags ?? [],
     ttsCallConsent: data.tts_call_consent ?? false,
+    gender: data.gender ?? null,
+    heightCm: data.height_cm ?? null,
+    weightKg: data.weight_kg ?? null,
+    activityLevel: data.activity_level ?? null,
+    bloodPressureSystolic: data.blood_pressure_systolic ?? null,
+    bloodPressureDiastolic: data.blood_pressure_diastolic ?? null,
+    fastingGlucoseMgDl: data.fasting_glucose_mg_dl ?? null,
   };
 }
 
-// GET /users/{user_id} — 마이페이지(이용자 본인)가 로컬 mock 대신 실제 백엔드 프로필을
-// 보여줄 때 쓴다. 주의: 이 엔드포인트는 보호자 토큰만 받는다(account/router.py의
-// read_user가 Depends(get_current_guardian)) — 그래서 resolveBackendWardAccess가
-// 자가등록 본인 세션으로 해석한 경우(guardian 세션이 없는 경우)엔 백엔드가 거부해 항상
-// null이 된다. 보호자가 관리하는 대상자를 이 브라우저에서 보호자로도 로그인해본 적
-// 있을 때만(이 앱의 "한 브라우저에서 역할 전환" 데모 구조, backend-auth.ts 상단 주석
-// 참고) 성공한다 — 그 외엔 조회 실패를 에러로 보여줄 것 없이 조용히 null로 돌아가고
-// 화면은 기존 로컬 값을 그대로 보여주면 된다.
+// GET /users/{user_id} 또는 GET /users/me — 마이페이지(이용자 본인)가 로컬 mock 대신
+// 실제 백엔드 프로필을 보여줄 때 쓴다.
+//
+// 2026-08-24까지 이 함수는 GET /users/{id}(보호자 토큰만 받음, account/router.py의
+// read_user가 Depends(get_current_guardian))만 호출했다 — 그래서 이 브라우저에 이
+// 대상자를 관리하는 보호자 세션이 있을 때만 성공했고, 자가등록(보호자 없는) 이용자가
+// 본인 계정으로 로그인한 경우엔 그 세션이 있어도 항상 null이었다(조용히 로컬 값으로만
+// 폴백 — 8814님 계정처럼 이용자 본인 로그인만 쓰는 테스트 계정에서 "건강 프로필 다시
+// 입력하기" 이후에도 화면이 다른 기기/세션 값을 못 따라잡던 원인). 그런데 백엔드엔
+// 처음부터 자가등록 이용자 전용 GET /users/me(Depends(get_current_user))가 있었다 —
+// 이 함수가 안 쓰고 있었을 뿐. 보호자 세션이 있으면 기존대로 /users/{id}를, 없고
+// 이용자 본인 세션만 있으면 /users/me를 부르도록 분기한다.
 //
 // resolveBackendWardAccess가 아니라 resolveCachedBackendWardAccess를 쓴다 — 이건
 // 마이페이지 진입 시 자동으로 도는 순수 조회라, PR #8에서 고쳤던 "화면 진입만으로 더미
@@ -1005,22 +1037,25 @@ export async function fetchBackendWardProfile(params: {
   age: number;
   address: string;
 }): Promise<BackendUserProfile | null> {
-  // 이 브라우저에 보호자 세션이 없으면(자가등록 본인 세션만 있거나 아예 없으면) 이 호출은
-  // 100% 실패할 게 이미 확정이다(바로 위 주석 참고, GET /users/{id}는 보호자 토큰만 받음).
-  // resolveCachedBackendWardAccess까지 가면 이용자 본인 세션으로 폴백해서 기어이 401을
-  // 받아오는데, 그 401엔 code(만료 여부 구분값)가 안 실려서 fetch-with-timeout.ts의 전역
-  // 401 핸들러가 진짜 세션 만료와 구분을 못 한다(2026-08-14 코드리뷰 지적, grandfood_backend
-  // 쪽 get_current_guardian이 이 케이스를 403으로 안 내려주는 게 근본 원인이지만, 백엔드
-  // 수정 전까지는 프론트가 애초에 안 부르는 쪽으로 막는다). 그래서 여기서 미리 걸러
-  // 호출 자체를 안 보낸다.
-  if (!getBackendGuardianSessionForWard(params.mockWardId)) return null;
+  const hasGuardianSession = getBackendGuardianSessionForWard(params.mockWardId) !== null;
+  const userSession = hasGuardianSession ? null : getBackendUserSessionForWard(params.mockWardId);
+  if (!hasGuardianSession && !userSession) return null;
 
-  const access = resolveCachedBackendWardAccess(params.mockWardId);
-  if (!access) return null;
+  let url: string;
+  let accessToken: string;
+  if (hasGuardianSession) {
+    const access = resolveCachedBackendWardAccess(params.mockWardId);
+    if (!access) return null;
+    url = `${API_BASE_URL}/users/${access.backendWardId}`;
+    accessToken = access.accessToken;
+  } else {
+    url = `${API_BASE_URL}/users/me`;
+    accessToken = userSession!.accessToken;
+  }
 
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
-    `${API_BASE_URL}/users/${access.backendWardId}`,
-    { headers: { Authorization: `Bearer ${access.accessToken}` } },
+    url,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
     REQUEST_TIMEOUT_MS
   );
   try {
