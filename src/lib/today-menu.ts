@@ -78,6 +78,20 @@ function sum(values: (number | null)[]): number {
 export const TODAY_MENU_GENERATING_MESSAGE =
   "AI가 오늘 반찬을 고르고 있어요. 완료되면 자동으로 채워져요.";
 
+// 반찬별 reason은 LLM이 만든 문장이고, 가이드라인 자료를 근거로 판단했을 때 문장 끝에
+// "(출처: <원본 파일명>)"을 그대로 붙인다(grandfood_backend health/service.py 프롬프트
+// 규칙 7번 — 예: "(출처: 5대_만성질환_맞춤_식이관리_가이드.pdf)"). 어르신에게 기술적인
+// 파일명을 그대로 보여주면 안 되니(2026-08-24 피드백), 인용이 있었다는 사실만 남기고
+// 파일명 부분만 고정 문구로 바꾼다. 가이드라인을 인용하지 않은 reason(프롬프트 규칙 7번:
+// 관련 자료가 없으면 출처를 안 붙임)은 이 패턴 자체가 없어 그대로 통과한다.
+const SOURCE_CITATION_PATTERN = /\s*\(출처\s*[:：]\s*[^)]*\)\s*$/;
+
+function replaceSourceCitation(reason: string): string {
+  return SOURCE_CITATION_PATTERN.test(reason)
+    ? reason.replace(SOURCE_CITATION_PATTERN, " (건강정보 자료를 참고했어요)")
+    : reason;
+}
+
 // mealType을 넘기면 오늘 그 끼니(아침/점심/저녁)의 반찬만 돌려준다 — 2026-08-19 정책
 // 변경으로 B2C 매일 배송도 끼니별로 다른 반찬을 받으므로(grandfood_backend
 // BanchanDeliveryScheduler.schedule_daily_deliveries 참고) 이제 실제로 의미가 있다.
@@ -122,7 +136,14 @@ export function resolveTodayMenu(
       targetProteinG: real.targetProteinG,
       targetSodiumMg: real.targetSodiumMg,
       targetCarbsG: real.targetCarbsG,
-      reasons: [...new Set(real.items.map((i) => i.reason).filter((r): r is string => !!r))],
+      reasons: [
+        ...new Set(
+          real.items
+            .map((i) => i.reason)
+            .filter((r): r is string => !!r)
+            .map(replaceSourceCitation)
+        ),
+      ],
       isReal: true,
       isGenerating: false,
     };
