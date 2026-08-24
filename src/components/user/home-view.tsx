@@ -18,8 +18,10 @@ import {
   fetchElderNotifications,
   fetchElderStreakNotification,
   getElderDeliveryNotification,
+  getElderSosAcknowledgment,
   getSeenNotificationIds,
 } from "@/lib/notifications";
+import { sosAckStore } from "@/lib/sos-store";
 import { BackendMealType, computeTodayNutritionSnapshot } from "@/lib/banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
 import { deriveHealthInsight } from "@/lib/health-insights";
@@ -151,6 +153,9 @@ export function HomeView({
   // "안 본 것"으로 친다 — 한 번 목록을 열어보면 그때까지 있던 항목은 다시는 배지를 안 켠다
   // (2026-08-21 피드백, "한 번 보면 꺼져야지 계속 켜져 있으면 자꾸 확인하게 된다").
   const [hasUnreadNotification, setHasUnreadNotification] = useState(false);
+  // 보호자가 "확인했어요"를 누르면(같은 브라우저 데모 한정) sosAckStore가 바뀐다 — 그걸
+  // 감지해서 아래 effect를 다시 돌려 배지에 반영한다(notifications-view.tsx와 같은 이유).
+  const sosAck = useLocalStore(sosAckStore);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,14 +169,20 @@ export function HomeView({
       }).catch(() => null),
     ]).then(([notifications, streak]) => {
       if (cancelled) return;
-      const merged = [getElderDeliveryNotification(ward.status), ...notifications, ...(streak ? [streak] : [])];
+      const sosAckItem = getElderSosAcknowledgment(ward.id);
+      const merged = [
+        getElderDeliveryNotification(ward.status),
+        ...(sosAckItem ? [sosAckItem] : []),
+        ...notifications,
+        ...(streak ? [streak] : []),
+      ];
       const seen = new Set(getSeenNotificationIds(ward.id));
       setHasUnreadNotification(merged.some((n) => !seen.has(n.id)));
     });
     return () => {
       cancelled = true;
     };
-  }, [ward.id, ward.name, ward.age, ward.address, ward.status]);
+  }, [ward.id, ward.name, ward.age, ward.address, ward.status, sosAck]);
 
   // 오늘 실제 AI 추천이 있으면 그걸, 없으면 목업으로 자연스럽게 폴백한다 — diet-view.tsx와
   // 같은 이유(2026-08-13 피드백, "오늘의 추천 반찬 조합" 카드와 AI 반찬 추천 달력이 서로

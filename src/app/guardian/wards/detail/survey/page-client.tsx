@@ -7,7 +7,15 @@ import { useEffect, useState } from "react";
 
 import { useSession } from "@/lib/session";
 import { getWard } from "@/lib/wards";
-import { careProfileStore, getCareProfile, registerCareProfile, skipCareProfile } from "@/lib/care-profile";
+import {
+  careProfileStore,
+  EMPTY_CARE_PROFILE_COMMAND,
+  getCareProfile,
+  MedicationEntry,
+  registerCareProfile,
+  RegisterCareProfileCommand,
+  skipCareProfile,
+} from "@/lib/care-profile";
 import {
   fromBackendActivityLevel,
   healthProfileStore,
@@ -17,12 +25,14 @@ import {
 } from "@/lib/health-profile";
 import { CareSurveySection, CareSurveyView, HealthMetricsForm } from "@/components/invite/care-survey-view";
 import {
+  BACKEND_CONDITION_FLAG_TO_LABEL,
   BackendUserProfile,
+  conditionLabelsToBackendFlags,
   fetchBackendWardProfile,
-  getBackendConditionFlags,
-  getBackendMedicationFlags,
+  medicationEntriesToBackendFlags,
   submitSelfHealthProfileBackend,
 } from "@/lib/backend-auth";
+import { BACKEND_MEDICATION_FLAG_TO_LABEL } from "@/lib/medication-food-suggestions";
 import { syncMedicationFoodRestrictions } from "@/lib/medication-food-restrictions";
 import { TopBar } from "@/components/app/top-bar";
 import { useLocalStore } from "@/lib/use-store";
@@ -53,12 +63,18 @@ function GuardianWardSurveyPageClient() {
   // 백엔드 값 우선으로 바꾼다(2026-08-24 버그 리포트: 복용약만 추가해도 이미 저장돼 있던
   // 키/체중/활동수준/혈압/공복혈당이 새 스냅샷 행에서 null로 덮어써지던 문제).
   const [backendProfile, setBackendProfile] = useState<BackendUserProfile | null>(null);
+  // user/survey/page.tsx의 backendProfileLoaded와 같은 이유 — CareSurveyView는 initialValues를
+  // 마운트 시점에 딱 한 번만 읽어서, 이 fetch가 끝나기 전에 그려버리면 진단 질환/복용 중인 약을
+  // 그냥 지나치기만 해도 "아직 안 불러온 빈 값"이 저장된다(2026-08-24 재현됨).
+  const [backendProfileLoaded, setBackendProfileLoaded] = useState(false);
   useEffect(() => {
     if (!ward) return;
     let cancelled = false;
     fetchBackendWardProfile({ mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address }).then(
       (result) => {
-        if (!cancelled) setBackendProfile(result);
+        if (cancelled) return;
+        setBackendProfile(result);
+        setBackendProfileLoaded(true);
       }
     );
     return () => {
@@ -79,7 +95,20 @@ function GuardianWardSurveyPageClient() {
     );
   }
 
-  const existing = getCareProfile(wardId);
+  const localExisting = getCareProfile(wardId);
+  // 진단 받은 질환 / 복용 중인 약 — user/survey/page.tsx와 같은 이유로 backendProfile을
+  // 우선한다(2026-08-24 재발 버그: "복용 중인 약물... 계속 생활 정보 수정 뜨는데").
+  const existing: RegisterCareProfileCommand | undefined = backendProfile
+    ? {
+        ...(localExisting ?? { ...EMPTY_CARE_PROFILE_COMMAND, wardId }),
+        takesMedication: backendProfile.medicationFlags.length > 0,
+        medications: backendProfile.medicationFlags.map((flag): MedicationEntry => {
+          const name = BACKEND_MEDICATION_FLAG_TO_LABEL[flag] ?? flag;
+          return localExisting?.medications.find((m) => m.name === name) ?? { name, timings: [], products: [] };
+        }),
+        conditions: backendProfile.conditionFlags.map((flag) => BACKEND_CONDITION_FLAG_TO_LABEL[flag] ?? flag),
+      }
+    : localExisting;
   const localExistingHealth = healthProfiles[wardId];
   const existingHealth: HealthProfileView | undefined =
     backendProfile || localExistingHealth
@@ -106,7 +135,7 @@ function GuardianWardSurveyPageClient() {
 
   // user/survey/page.tsx의 saveHealthMetrics와 같은 이유(개별 필드 단위로 병합, 신체 수치를
   // 하나도 안 넣어도 condition_flags는 항상 백엔드로 보내야 함)로 거의 동일하게 구성했다.
-  async function saveHealthMetrics(health: HealthMetricsForm) {
+  async function saveHealthMetrics(health: HealthMetricsForm, careCmd: RegisterCareProfileCommand) {
     if (!ward) return;
     const hasAnyValue = Object.values(health).some((v) => v !== undefined);
     if (existingHealth || hasAnyValue) {
@@ -134,9 +163,13 @@ function GuardianWardSurveyPageClient() {
       name: ward.name,
       age: ward.age,
       address: ward.address,
-      conditionFlags: getBackendConditionFlags(ward.id),
-      medicationFlags: getBackendMedicationFlags(ward.id),
-      conditionsNote: getCareProfile(ward.id)?.conditionsNote || undefined,
+      conditionFlags: conditionLabelsToBackendFlags(careCmd.conditions),
+      medicationFlags: medicationEntriesToBackendFlags(
+        careCmd.takesMedication,
+        careCmd.medications,
+        careCmd.customMedications
+      ),
+      conditionsNote: careCmd.conditionsNote || undefined,
       gender: ward.gender === "여" ? "female" : "male",
       heightCm,
       weightKg,
@@ -150,7 +183,7 @@ function GuardianWardSurveyPageClient() {
       return;
     }
 
-    const avoidances = getCareProfile(ward.id)?.medicationFoodAvoidances ?? [];
+    const avoidances = careCmd.medicationFoodAvoidances;
     if (avoidances.length > 0) {
       await syncMedicationFoodRestrictions(
         { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address },
@@ -160,6 +193,14 @@ function GuardianWardSurveyPageClient() {
   }
 
   const sectionLabel = section === "health" ? "건강 프로필" : "생활 정보";
+  if (!backendProfileLoaded) {
+    return (
+      <div className="flex flex-1 flex-col">
+        <TopBar title={`${ward.name}님 ${sectionLabel} 수정`} subtitle="언제든 다시 입력하실 수 있어요" />
+        <p className="px-5 py-6 text-sm text-muted-foreground">불러오는 중이에요...</p>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-1 flex-col">
       <TopBar title={`${ward.name}님 ${sectionLabel} 수정`} subtitle="언제든 다시 입력하실 수 있어요" />
@@ -173,13 +214,13 @@ function GuardianWardSurveyPageClient() {
           // user/survey/page.tsx와 같은 이유 — 건강 프로필만 고치는 흐름에선 생활 정보를
           // completed:true로 확정하면 안 된다.
           if (section !== "health") await registerCareProfile(cmd);
-          await saveHealthMetrics(health);
+          await saveHealthMetrics(health, cmd);
           toast.success("입력해주셔서 감사해요!");
           router.push(afterCompleteHref);
         }}
         onSkip={async (partial, answeredStep, health) => {
           if (section !== "health") await skipCareProfile(ward.id, partial, answeredStep);
-          await saveHealthMetrics(health);
+          await saveHealthMetrics(health, partial);
           router.push(afterCompleteHref);
         }}
       />

@@ -12,6 +12,7 @@ import {
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { createLocalStore } from "@/lib/local-store";
 import { deriveDailyLeftover, fetchElderDietHistory, recentDateKeys } from "@/lib/meal-dashboard";
+import { sosAckStore } from "@/lib/sos-store";
 import { estimateDeliveryEta, type WardStatus } from "@/lib/ward-registry";
 
 // "기타"는 백엔드가 지금 두 alert_type(excessive_leftover/nutrition_deficiency) 외의 값을 보내는
@@ -29,6 +30,10 @@ export type NotificationItem = {
   targetName?: string;
   message: string;
   read: boolean;
+  /** 보호자용 응답에만 있음(item.elder_id) — SOS "확인했어요"가 어느 대상자 것인지
+   *  구분해야 해서 실어둔다. 백엔드 실제 user_id라 로컬 mockWardId와는 다르다(sos-store.ts
+   *  acknowledgeSosNotification 주석 참고). */
+  elderId?: string;
 };
 
 const TYPE_STYLE: Record<NotificationType, string> = {
@@ -103,18 +108,36 @@ function formatOccurredAt(iso: string): string {
 // "기타"로 남겨서, 모르는 걸 아는 것처럼 잘못 라벨링하지 않는다.
 function splitHealthAlertSummary(
   summary: string
-): { badgeType: "잔반이상" | "영양부족" | "기타"; reason?: string } {
+): { badgeType: "SOS" | "잔반이상" | "영양부족" | "기타"; reason?: string } {
   const separatorIndex = summary.indexOf(" — ");
   const reason = separatorIndex === -1 ? undefined : summary.slice(separatorIndex + 3);
+  // alert_type이 "sos"로 시작하는 건 alerts_service.py의 AlertType.SOS("sos") 하나뿐이라
+  // (excessive_leftover/nutrition_deficiency와 겹칠 일이 없다), 다른 둘과 같은 방식으로
+  // 안전하게 구분된다.
+  if (summary.startsWith("sos")) return { badgeType: "SOS", reason };
   if (summary.startsWith("excessive_leftover")) return { badgeType: "잔반이상", reason };
   if (summary.startsWith("nutrition_deficiency")) return { badgeType: "영양부족", reason };
   return { badgeType: "기타", reason };
 }
 
-const HEALTH_ALERT_LEAD: Record<"잔반이상" | "영양부족" | "기타", string> = {
-  잔반이상: "잔반이 많이 남았어요.",
-  영양부족: "최근 영양 섭취가 부족해요.",
-  기타: "확인이 필요한 이상신호가 있어요.",
+// SOS만 보는 사람에 따라 문구가 달라진다 — 보호자에겐 "왔다"(어르신이 보낸 걸 받는
+// 입장)지만, 어르신 본인 알림함에 그대로 "긴급 호출이 왔어요!"를 쓰면 마치 남이 자기한테
+// 긴급 호출을 한 것처럼 읽혀 헷갈린다(2026-08-24 피드백) — 본인 입장에선 "했어요"가 맞다.
+// 나머지 타입(잔반이상 등)은 관찰된 상태를 그대로 서술하는 문장이라 누가 보든 똑같이 읽혀서
+// 안 나눈다.
+const HEALTH_ALERT_LEAD: Record<"guardian" | "elder", Record<"SOS" | "잔반이상" | "영양부족" | "기타", string>> = {
+  guardian: {
+    SOS: "긴급 호출이 왔어요!",
+    잔반이상: "잔반이 많이 남았어요.",
+    영양부족: "최근 영양 섭취가 부족해요.",
+    기타: "확인이 필요한 이상신호가 있어요.",
+  },
+  elder: {
+    SOS: "긴급 호출을 했어요!",
+    잔반이상: "잔반이 많이 남았어요.",
+    영양부족: "최근 영양 섭취가 부족해요.",
+    기타: "확인이 필요한 이상신호가 있어요.",
+  },
 };
 
 const TTS_CALL_STATUS_LABEL: Record<string, string> = {
@@ -123,19 +146,27 @@ const TTS_CALL_STATUS_LABEL: Record<string, string> = {
   no_answer: "응답 없음",
 };
 
-function mapBackendItem(item: BackendNotificationItem, id: string): NotificationItem {
+function mapBackendItem(item: BackendNotificationItem, id: string, viewer: "guardian" | "elder"): NotificationItem {
   const date = formatOccurredAt(item.occurred_at);
   const targetName = item.elder_name ?? undefined;
 
   if (item.type === "health_alert") {
     const { badgeType, reason } = splitHealthAlertSummary(item.summary);
+    // SOS는 reason이 항상 "SOS 긴급 호출"(+선택적으로 " — 위치: 위도,경도")로 와서
+    // (alerts_service.py trigger_sos_alert), HEALTH_ALERT_LEAD 문구와 그대로 이어붙이면
+    // "긴급 호출이 왔어요! SOS 긴급 호출"처럼 같은 말이 겹친다 — 그 고정 접두어만 떼고
+    // 위치 등 실제 추가 정보가 있을 때만 이어붙인다.
+    const extraReason =
+      badgeType === "SOS" ? reason?.replace(/^SOS 긴급 호출\s*(—\s*)?/, "") || undefined : reason;
+    const lead = HEALTH_ALERT_LEAD[viewer][badgeType];
     return {
       id,
       date,
       type: badgeType,
       targetName,
-      message: reason ? `${HEALTH_ALERT_LEAD[badgeType]} ${reason}` : HEALTH_ALERT_LEAD[badgeType],
+      message: extraReason ? `${lead} ${extraReason}` : lead,
       read: item.status === "resolved",
+      elderId: item.elder_id,
     };
   }
 
@@ -149,7 +180,11 @@ function mapBackendItem(item: BackendNotificationItem, id: string): Notification
   };
 }
 
-async function fetchNotificationItems(url: string, accessToken: string): Promise<NotificationItem[]> {
+async function fetchNotificationItems(
+  url: string,
+  accessToken: string,
+  viewer: "guardian" | "elder"
+): Promise<NotificationItem[]> {
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
     url,
     { headers: { Authorization: `Bearer ${accessToken}` } },
@@ -161,7 +196,9 @@ async function fetchNotificationItems(url: string, accessToken: string): Promise
       throw new Error(`알림을 불러오지 못했어요 (status ${response.status})`);
     }
     const data: { items: BackendNotificationItem[] } = await response.json();
-    return data.items.map((item, index) => mapBackendItem(item, `${item.type}-${item.occurred_at}-${index}`));
+    return data.items.map((item, index) =>
+      mapBackendItem(item, `${item.type}-${item.occurred_at}-${index}`, viewer)
+    );
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new Error("알림을 불러오는 데 시간이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.");
@@ -180,7 +217,7 @@ export async function fetchGuardianNotifications(guardianLoginId: string): Promi
   if (!session) {
     throw new Error(GUARDIAN_SESSION_REQUIRED_MESSAGE);
   }
-  return fetchNotificationItems(`${API_BASE_URL}/app/guardian/notifications`, session.accessToken);
+  return fetchNotificationItems(`${API_BASE_URL}/app/guardian/notifications`, session.accessToken, "guardian");
 }
 
 // GET /app/elder/{id}/notifications — 어르신 본인 화면(홈)에서 본인 알림만. 이 대상자를
@@ -197,7 +234,8 @@ export async function fetchElderNotifications(params: { mockWardId: string }): P
   if (access) {
     return fetchNotificationItems(
       `${API_BASE_URL}/app/elder/${access.backendWardId}/notifications`,
-      access.accessToken
+      access.accessToken,
+      "elder"
     );
   }
 
@@ -266,6 +304,28 @@ export function getElderDeliveryNotification(status: WardStatus): NotificationIt
     date: formatOccurredAt(new Date().toISOString()),
     type: "배송",
     message: `오늘 점심 배송이 ${eta}에 예정되어 있어요.`,
+    read: false,
+  };
+}
+
+// 보호자가 "확인했어요"를 누르면(sos-store.ts acknowledgeSosNotification) 이 대상자
+// 본인에게 "보호자가 SOS를 확인했어요"를 알려준다 — 완식/배송과 같은 프론트 합성
+// 알림이다. sosAckStore는 백엔드 user_id(backendElderId) 기준으로 쌓이는데, 호출부
+// (user/notifications-view.tsx, home-view.tsx)는 로컬 mockWardId만 아니까, 이 함수
+// 안에서 resolveCachedBackendWardAccess로 그 대상자 자신의 backendElderId를 알아내서
+// 대조한다 — 세션이 아직 없거나(캐시에 없음) 확인 기록이 없으면 null.
+export function getElderSosAcknowledgment(mockWardId: string): NotificationItem | null {
+  const backendElderId = resolveCachedBackendWardAccess(mockWardId)?.backendWardId;
+  if (!backendElderId) return null;
+
+  const ack = sosAckStore.read().find((a) => a.backendElderId === backendElderId);
+  if (!ack) return null;
+
+  return {
+    id: `sos-ack-${ack.timestamp}`,
+    date: formatOccurredAt(new Date(ack.timestamp).toISOString()),
+    type: "SOS",
+    message: `${ack.guardianName}님이 SOS를 확인했어요. 곧 연락드릴게요.`,
     read: false,
   };
 }
