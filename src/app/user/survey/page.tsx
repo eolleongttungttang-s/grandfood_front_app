@@ -8,6 +8,7 @@ import { useSession } from "@/lib/session";
 import { getWard } from "@/lib/wards";
 import {
   careProfileStore,
+  CARE_SURVEY_STEP,
   EMPTY_CARE_PROFILE_COMMAND,
   getCareProfile,
   MedicationEntry,
@@ -60,6 +61,10 @@ function UserSurveyPageContent() {
   const sectionParam = searchParams.get("section");
   const section: CareSurveySection =
     sectionParam === "care" || sectionParam === "health" ? sectionParam : "both";
+  // 홈 화면의 "복용 중인 약을 등록하면 맞춤 복약 안내를 받을 수 있어요" 카드에서 들어온
+  // 경우, 생활 정보 흐름 맨 앞이 아니라 "복용 중인 약" 질문으로 바로 들어가야 한다
+  // (2026-08-24 피드백 — 그 링크를 눌렀는데 생활정보 수정 화면이 뜨는 게 어색함).
+  const startStep = searchParams.get("step") === "medication" ? CARE_SURVEY_STEP.medication : undefined;
   const { account } = useSession();
   const wardId = account?.selfWardId;
   const ward = wardId ? getWard(wardId) : undefined;
@@ -247,6 +252,7 @@ function UserSurveyPageContent() {
         section={section}
         initialValues={existing}
         initialHealthValues={existingHealth}
+        startStep={startStep}
         onComplete={async (cmd, health) => {
           // "건강 프로필"만 고치는 흐름에선 생활 정보(care-profile) 쪽은 이번에 전혀 안
           // 건드렸으니 registerCareProfile을 호출하면 안 된다 — 그러면 아직 한 번도 안

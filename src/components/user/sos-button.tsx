@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 import { ConfirmOverlay } from "@/components/app/confirm-overlay";
 import { raiseSos, reportSosToBackend } from "@/lib/sos-store";
-import { speakUrgent } from "@/lib/accessibility";
+import { speakOnDemand } from "@/lib/accessibility";
 import { getWard } from "@/lib/wards";
 
 export function SosButton({ wardId, wardName }: { wardId: string; wardName: string }) {
@@ -33,8 +33,12 @@ export function SosButton({ wardId, wardName }: { wardId: string; wardName: stri
           raiseSos(wardId, wardName);
           setOpen(false);
           toast.success("보호자에게 SOS를 보냈어요.");
-          // 응급 확인 안내라 네트워크 TTS를 기다리지 않고 즉시 재생한다 (speakUrgent 참고).
-          speakUrgent("보호자에게 에스오에스를 보냈어요.");
+          // 더 자연스러운 Azure 음성으로 안내한다(2026-08-24 피드백) — speakOnDemand는
+          // accessibility.ts의 speakRaw를 거쳐 백엔드 Azure Speech로 먼저 시도하고,
+          // 실패/시간초과(10초)면 자동으로 브라우저 내장 음성으로 폴백하므로 무음이 되진
+          // 않는다. 다만 브라우저 음성만 쓰던 speakUrgent보다는 최악의 경우 응답이
+          // 늦어질 수 있다는 트레이드오프는 감수한다.
+          speakOnDemand("보호자에게 에스오에스를 보냈어요.");
           // 실제 발송(POST /app/elder/{id}/sos)은 위 로컬 반응이 끝난 뒤 background로 보낸다 —
           // await 안 함(reportSosToBackend 자체가 실패를 조용히 삼킨다, sos-store.ts 참고).
           const ward = getWard(wardId);

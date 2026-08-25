@@ -703,16 +703,12 @@ export function BanchanRecommendationCalendar({
                 </div>
               )}
 
-              {recommendation && recommendation.referenceGuidelines.length > 0 && (
-                <div className="flex flex-col gap-1 border-t border-border pt-2">
-                  <span className="text-[11px] font-semibold text-muted-foreground">이번 주 참고 자료</span>
-                  {recommendation.referenceGuidelines.map((g, i) => (
-                    <span key={i} className="text-[11px] text-muted-foreground">
-                      · {g.title}
-                    </span>
-                  ))}
-                </div>
-              )}
+              {/* 예전엔 여기에 recommendation.referenceGuidelines(당뇨병.csv 등 RAG 원본
+                  파일명)를 "이번 주 참고 자료"로 그대로 나열했다 — 내부 자료 파일명이 어르신
+                  화면에 그대로 노출되는 문제라 화면 표시를 없앴다(2026-08-24 피드백). 다만
+                  이건 프론트 표시만 없앤 것이고, 백엔드 응답(reference_guidelines 필드) 자체는
+                  여전히 원본 파일명을 그대로 내려준다 — banchan-recommendation.ts의
+                  referenceGuidelines 타입/파싱은 남겨뒀지만 화면에 쓰는 곳은 없다. */}
             </>
           )}
         </div>

@@ -256,6 +256,7 @@ export function CareSurveyView({
   section = "both",
   initialValues,
   initialHealthValues,
+  startStep,
   onComplete,
   onSkip,
 }: {
@@ -267,6 +268,11 @@ export function CareSurveyView({
   // 이 컴포넌트가 필요한 만큼만 타입에 요구한다.
   initialValues?: RegisterCareProfileCommand & { completed?: boolean; answeredStep?: number };
   initialHealthValues?: HealthMetricsForm;
+  // 홈 화면의 "복용 중인 약을 등록하면 맞춤 복약 안내를 받을 수 있어요" 카드처럼, 특정
+  // 질문 하나 때문에 이 화면에 들어온 경우 목록/순서 진행을 다 건너뛰고 그 질문으로 바로
+  // 떨어뜨린다 — jumpToStep과 동일하게 동작(확인=즉시 저장, 이전 버튼 없음, 뒤로가면 목록).
+  // 지정하지 않으면 기존처럼 완료 여부에 따라 목록/순서 진행을 그대로 따른다(2026-08-24 피드백).
+  startStep?: number;
   onComplete: (cmd: RegisterCareProfileCommand, health: HealthMetricsForm) => void | Promise<void>;
   onSkip: (
     partial: RegisterCareProfileCommand,
@@ -318,11 +324,21 @@ export function CareSurveyView({
     section === "health"
       ? isHealthComplete
       : initialValues?.completed === true || (section === "care" && careFullyAnswered);
-  const [mode, setMode] = useState<"overview" | "wizard">(isEditMode ? "overview" : "wizard");
+  // startStep은 isEditMode(진짜로 다 답한 완성된 프로필)일 때만 "곧장 그 질문으로 점프 +
+  // 확인=즉시저장" 취급한다 — isEditMode가 아닌데도 이 취급을 하면, 아직 한 번도 안 물어본
+  // 다른 문항들이 EMPTY_CARE_PROFILE_COMMAND 기본값(예: "알레르기 없음", "혼자 잘 걸어다님")을
+  // 진짜 답한 것처럼 목록에 보여주다가 그대로 확인/완료로 저장돼 완전히 확정(completed:true)
+  // 되어버리는 사고가 날 수 있다(2026-08-24 코드 리뷰 지적 — 한 번도 설문을 안 한 어르신이
+  // 홈 화면 "복용 중인 약 등록" 카드로 들어온 경우 재현됨). isEditMode가 아니면 startStep을
+  // 그냥 무시하고 기존처럼 firstUnansweredStep부터 순서대로 진행시킨다.
+  const jumpToStartStep = startStep != null && isEditMode;
+  const [mode, setMode] = useState<"overview" | "wizard">(
+    jumpToStartStep ? "wizard" : isEditMode ? "overview" : "wizard"
+  );
   // 목록 화면에서 특정 단계로 바로 들어온 경우, 그 단계를 확인하고 나면 다음 단계로
   // 넘어가는 게 아니라 목록으로 돌아가야 한다 — 순서대로 진행 중인 것과 버튼 동작이
-  // 달라야 해서 이 값으로 구분한다.
-  const [enteredFromOverview, setEnteredFromOverview] = useState(false);
+  // 달라야 해서 이 값으로 구분한다. startStep으로 곧장 들어온 경우도 동일하게 취급한다.
+  const [enteredFromOverview, setEnteredFromOverview] = useState(jumpToStartStep);
 
   // 위저드 모드(isEditMode=false)로 들어오면 항상 맨 처음(0번)부터 다시 물었었다 — 예전에
   // "나중에 할게요"로 몇 문항 답하고 건너뛴 적 있어도 다시 1번부터였다(2026-08-21 피드백,
@@ -347,14 +363,15 @@ export function CareSurveyView({
     if (section === "both" && careFullyAnswered) return HEALTH_STEP_OFFSET;
     return Math.min(initialValues?.answeredStep ?? 0, CARE_SURVEY_TOTAL_STEPS - 1);
   }
-  const [step, setStep] = useState(firstUnansweredStep);
+  const [step, setStep] = useState(jumpToStartStep ? startStep! : firstUnansweredStep());
   // EMPTY_CARE_PROFILE_COMMAND를 먼저 펼치고 그 위에 initialValues를 덮어쓴다 — 그냥
   // initialValues를 통째로 쓰면, 이 설문에 필드가 새로 추가된 뒤(예: medications 체크리스트)
   // 그 필드가 생기기 전에 저장된 옛 localStorage 데이터엔 새 필드 자체가 없어서
   // undefined가 되고, 그 필드를 쓰는 화면이 그대로 죽는다(실제로 겪은 크래시).
-  const [form, setForm] = useState<RegisterCareProfileCommand>(
-    initialValues ? { ...EMPTY_CARE_PROFILE_COMMAND, ...initialValues } : { ...EMPTY_CARE_PROFILE_COMMAND, wardId }
-  );
+  const initialForm: RegisterCareProfileCommand = initialValues
+    ? { ...EMPTY_CARE_PROFILE_COMMAND, ...initialValues }
+    : { ...EMPTY_CARE_PROFILE_COMMAND, wardId };
+  const [form, setForm] = useState<RegisterCareProfileCommand>(initialForm);
   const [healthForm, setHealthForm] = useState<HealthMetricsForm>(
     initialHealthValues ?? EMPTY_HEALTH_METRICS_FORM
   );
@@ -366,7 +383,9 @@ export function CareSurveyView({
   // 모른 채 저장하고 끝나는 문제(2026-08-21 피드백). 이 단계에 들어온 시점의 약 목록을
   // 스냅샷으로 남겨뒀다가, 확인 시점에 실제로 바뀌었을 때만 목록으로 안 돌아가고 그
   // 다음 단계로 한 번 더 이어준다 — 안 바꿨으면(그냥 확인만) 예전처럼 바로 돌아간다.
-  const [medicationSnapshotOnEnter, setMedicationSnapshotOnEnter] = useState<string | null>(null);
+  const [medicationSnapshotOnEnter, setMedicationSnapshotOnEnter] = useState<string | null>(
+    jumpToStartStep && startStep === CARE_SURVEY_STEP.medication ? medicationKey(initialForm) : null
+  );
 
   function medicationKey(f: RegisterCareProfileCommand): string {
     return f.takesMedication

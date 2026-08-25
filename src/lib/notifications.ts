@@ -12,7 +12,7 @@ import {
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { createLocalStore } from "@/lib/local-store";
 import { deriveDailyLeftover, fetchElderDietHistory, recentDateKeys } from "@/lib/meal-dashboard";
-import { sosAckStore } from "@/lib/sos-store";
+import { dismissedSosStore, sosAckStore } from "@/lib/sos-store";
 import { estimateDeliveryEta, type WardStatus } from "@/lib/ward-registry";
 
 // "기타"는 백엔드가 지금 두 alert_type(excessive_leftover/nutrition_deficiency) 외의 값을 보내는
@@ -180,10 +180,45 @@ function mapBackendItem(item: BackendNotificationItem, id: string, viewer: "guar
   };
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// 배포 전까지 쓰던 구버전 id(`${type}-${occurred_at}-${index}`)와 매칭하기 위한 패턴 —
+// index는 목록 내 위치라 새 알림이 추가되면 값이 바뀌므로, type+occurred_at만 보고 그
+// 뒤에 숫자가 붙어 있으면 "같은 알림의 예전 id"로 간주한다. 아주 드물게 같은 type+occurred_at을
+// 가진 서로 다른 알림이 있었다면(배치 생성 등) 이 마이그레이션 단계에서만 함께 묶이지만,
+// 새 id는 summary까지 포함해 여전히 구분되므로 그 이후엔 문제 없다 — 이미 확인/열람한
+// 알림이 배포 직후 되살아나는 것보다는 훨씬 낫다는 판단(2026-08-25).
+function legacyNotificationIdPattern(item: BackendNotificationItem): RegExp {
+  return new RegExp(`^${escapeRegExp(item.type)}-${escapeRegExp(item.occurred_at)}-\\d+$`);
+}
+
+// 알림 id 포맷을 `${type}-${occurred_at}-${index}` → `${type}-${elder_id}-${occurred_at}-${summary}`로
+// 바꾸면서(아래), 배포 전에 저장돼 있던 구버전 id들이 새 id와 안 맞게 됐다 — 그러면
+// dismissedSosStore(sos-store.ts)에 저장해둔 "이미 확인한 SOS"나 notificationSeenStore에
+// 저장해둔 "이미 열람한 알림"이 배포 직후 한 번 되살아난다(2026-08-25 코드 리뷰 지적). 새로
+// 받아온 알림마다 구버전 id가 그 store 안에 남아있는지 한 번 확인해서, 있으면 새 id를
+// 대신 넣어준다 — 딱 한 번만 일어나는 전환이라 이후엔 이 함수가 할 일이 없어진다(이미 새
+// id로 저장돼 있으므로).
+function migrateLegacyLocalIds(
+  entries: { item: BackendNotificationItem; newId: string }[],
+  currentIds: string[]
+): string[] {
+  const additions: string[] = [];
+  for (const { item, newId } of entries) {
+    if (currentIds.includes(newId)) continue;
+    const pattern = legacyNotificationIdPattern(item);
+    if (currentIds.some((id) => pattern.test(id))) additions.push(newId);
+  }
+  return additions;
+}
+
 async function fetchNotificationItems(
   url: string,
   accessToken: string,
-  viewer: "guardian" | "elder"
+  viewer: "guardian" | "elder",
+  wardId?: string
 ): Promise<NotificationItem[]> {
   const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
     url,
@@ -196,9 +231,22 @@ async function fetchNotificationItems(
       throw new Error(`알림을 불러오지 못했어요 (status ${response.status})`);
     }
     const data: { items: BackendNotificationItem[] } = await response.json();
-    return data.items.map((item, index) =>
-      mapBackendItem(item, `${item.type}-${item.occurred_at}-${index}`, viewer)
-    );
+    const entries = data.items.map((item) => ({
+      item,
+      newId: `${item.type}-${item.elder_id ?? "self"}-${item.occurred_at}-${item.summary}`,
+    }));
+
+    if (viewer === "guardian") {
+      const additions = migrateLegacyLocalIds(entries, dismissedSosStore.read());
+      if (additions.length > 0) {
+        dismissedSosStore.update((prev) => [...new Set([...prev, ...additions])]);
+      }
+    } else if (wardId) {
+      const additions = migrateLegacyLocalIds(entries, getSeenNotificationIds(wardId));
+      if (additions.length > 0) markNotificationsSeen(wardId, additions);
+    }
+
+    return entries.map(({ item, newId }) => mapBackendItem(item, newId, viewer));
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new Error("알림을 불러오는 데 시간이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.");
@@ -235,7 +283,8 @@ export async function fetchElderNotifications(params: { mockWardId: string }): P
     return fetchNotificationItems(
       `${API_BASE_URL}/app/elder/${access.backendWardId}/notifications`,
       access.accessToken,
-      "elder"
+      "elder",
+      params.mockWardId
     );
   }
 
