@@ -260,8 +260,12 @@ export function HomeView({
   // 찾으면(분석이 유난히 오래 걸리거나 실패) 포기하고 "기록" 탭 안내로 넘긴다.
   const [pendingAnalysisMealId, setPendingAnalysisMealId] = useState<string | null>(null);
   const [analysisTimedOut, setAnalysisTimedOut] = useState(false);
-  const POLL_INTERVAL_MS = 4000;
-  const POLL_MAX_ATTEMPTS = 8; // 최대 약 32초
+  // GPU 잔반 분석 자체는 0.8초 안에 끝나는데(2026-08-25 확인), 예전엔 폴링 간격이
+  // 4초라 아무리 빨리 끝나도 최소 4초는 기다려야 화면에 반영됐다 — 1초로 줄여서
+  // 그 하한선을 낮춘다. 총 대기 한도(약 32초)는 그대로 유지하려고 시도 횟수를
+  // 8 -> 32로 같이 늘렸다.
+  const POLL_INTERVAL_MS = 1000;
+  const POLL_MAX_ATTEMPTS = 32; // 최대 약 32초
 
   useEffect(() => {
     if (!pendingAnalysisMealId) return;
