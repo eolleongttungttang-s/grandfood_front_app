@@ -437,16 +437,36 @@ export function computeNutritionSnapshotForDate(
 ): TodayNutritionSnapshot {
   const target = getRecommendationForDate(monthly, dateStr);
   const items = target?.items ?? [];
+  // 섭취기록 탭 "오늘 영양성분 분석"(records-view.tsx)이 바로 이 함수로 "실제" 섭취량을
+  // 구하는데, 밥(주식)은 반찬 추천 슬롯을 안 차지해 items엔 안 잡히지만(MealStaple 주석
+  // 참고) 목표치(targetCalorieKcal 등, health/nutrition_targets.py의 하루 TDEE·KDRI 기준)는
+  // 밥을 포함한 값이라, 밥을 빼고 반찬끼리만 더하면 "실제"가 항상 밥만큼 목표보다 낮게
+  // 나온다 — 특히 탄수화물은 밥이 주 공급원이라 격차가 크다(2026-08-26 피드백). 식단 탭의
+  // 끼니별 요약(today-menu.ts)은 처음부터 밥을 포함해서 계산해 문제없었는데, 이 함수만
+  // 밥을 빼먹고 있었다. getRecommendationForDate의
+  // staple 필드는 끼니 하나만 콕 집어 조회할 때(mealType 지정)만 채워지고, 여기처럼 하루
+  // 전체(모든 끼니의 items를 합친) 스냅샷을 구할 땐 항상 null이라 그걸 그대로 쓸 수 없다 —
+  // 그날 각 끼니(day.meals)의 staple을 전부 찾아 합산한다(하루에 끼니가 여러 번이면 밥도
+  // 그만큼 여러 번 먹은 것으로 취급, today-menu.ts:141-144의 끼니 1회분 처리와 같은 방식).
+  const day = monthly?.days?.find((d) => d.serviceDate === dateStr);
+  const staples = (day?.meals ?? []).map((m) => m.staple).filter((s): s is MealStaple => s != null);
   // 소수 100g당 값을 여러 개 더하면 부동소수점 오차가 그대로 쌓여 "24.630000000000003"처럼
   // 노출된다(2026-08-21 버그 리포트, today-menu.ts의 sum()과 동일한 원인) — 소수점 둘째
   // 자리에서 반올림해 지운다.
   const round2 = (n: number) => Math.round(n * 100) / 100;
+  const sumWithStaples = (
+    pick: (i: BanchanRecommendationItem) => number | null,
+    pickStaple: (s: MealStaple) => number
+  ) =>
+    round2(
+      items.reduce((sum, i) => sum + (pick(i) ?? 0), staples.reduce((sum, s) => sum + pickStaple(s), 0))
+    );
   return {
     hasData: target?.status === "done" && items.length > 0,
-    kcal: round2(items.reduce((sum, i) => sum + (i.caloriePer100g ?? 0), 0)),
-    proteinG: round2(items.reduce((sum, i) => sum + (i.proteinPer100g ?? 0), 0)),
-    sodiumMg: round2(items.reduce((sum, i) => sum + (i.sodiumPer100g ?? 0), 0)),
-    carbsG: round2(items.reduce((sum, i) => sum + (i.carbsPer100g ?? 0), 0)),
+    kcal: sumWithStaples((i) => i.caloriePer100g, (s) => s.caloriePer100g),
+    proteinG: sumWithStaples((i) => i.proteinPer100g, (s) => s.proteinPer100g),
+    sodiumMg: sumWithStaples((i) => i.sodiumPer100g, (s) => s.sodiumPer100g),
+    carbsG: sumWithStaples((i) => i.carbsPer100g, (s) => s.carbsPer100g),
     targetCalorieKcal: target?.targetCalorieKcal ?? null,
     targetProteinG: target?.targetProteinG ?? null,
     targetSodiumMg: target?.targetSodiumMg ?? null,
