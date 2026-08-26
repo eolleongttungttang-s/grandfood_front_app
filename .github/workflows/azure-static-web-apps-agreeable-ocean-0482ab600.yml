@@ -14,14 +14,18 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
     name: Build and Deploy Job
-    # 이 앱은 next.config.ts에서 output:"export"로 정적 export하기 때문에, 백엔드 주소는
-    # "실행 중"이 아니라 이 빌드 스텝에서 process.env로 읽혀 번들에 그대로 박힌다.
-    # 값을 코드/워크플로우에 하드코딩하지 않고 repo variable로 두는 이유: 배포 대상(Container App
-    # 등)이 재생성되거나 주소가 바뀌어도 코드 수정 없이 Settings > Secrets and variables >
-    # Actions > Variables 에서 NEXT_PUBLIC_API_URL 값만 바꾸면 되기 때문.
-    # (민감정보가 아닌 공개 URL이라 Secrets가 아니라 Variables에 둔다.)
+    # 이 앱은 next.config.ts에서 output:"export"로 정적 export하기 때문에, 백엔드 주소나
+    # 도로명주소 팝업 승인키 같은 값들은 "실행 중"이 아니라 이 빌드 스텝에서 process.env로
+    # 읽혀 번들에 그대로 박힌다. 값을 코드/워크플로우에 하드코딩하지 않고 repo variable로
+    # 두는 이유: 재생성/키 재발급 등으로 값이 바뀌어도 코드 수정 없이 Settings > Secrets
+    # and variables > Actions > Variables 에서 해당 값만 바꾸면 되기 때문.
+    # (민감정보가 아니라 Secrets가 아니라 Variables에 둔다 — NEXT_PUBLIC_JUSO_CONFM_KEY는
+    # juso.go.kr 팝업 URL 쿼리 파라미터로 그대로 실려나가 어차피 사용자 브라우저 주소창에
+    # 노출되는 값이다. 2026-08-26: 이 변수가 워크플로우에 없어서 배포본이 빈 키로 팝업을
+    # 열다 "승인되지 않은 KEY입니다" 오류가 났던 것을 여기서 추가해 고쳤다.)
     env:
       NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+      NEXT_PUBLIC_JUSO_CONFM_KEY: ${{ vars.NEXT_PUBLIC_JUSO_CONFM_KEY }}
     steps:
       - uses: actions/checkout@v3
         with:
