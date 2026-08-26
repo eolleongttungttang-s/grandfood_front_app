@@ -383,9 +383,9 @@ export function ProfileView({
 
         <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="flex flex-col">
-            <span className="text-sm font-semibold text-foreground">안부확인콜</span>
+            <span className="text-sm font-semibold text-foreground">안부확인알람</span>
             <span className="text-xs text-muted-foreground">
-              정해진 시각에 전화로 안부를 여쭤봐요 · 선택
+              보호자가 알람으로 안부를 확인할 수 있어요 · 선택
             </span>
           </div>
           <Switch

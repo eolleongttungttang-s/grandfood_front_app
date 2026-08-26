@@ -7,6 +7,7 @@ import { Loader2, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AddressSearchField } from "@/components/app/address-search-field";
 import { BrandHeader } from "@/components/app/brand-header";
 import { Button } from "@/components/ui/button";
 import { ButtonSelectGroup } from "@/components/app/button-select-group";
@@ -323,10 +324,7 @@ export default function SignupPage() {
                     value={gender}
                     onChange={setGender}
                   />
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="signup-address">주소</Label>
-                    <Input id="signup-address" value={address} onChange={(event) => setAddress(event.target.value)} autoComplete="street-address" required />
-                  </div>
+                  <AddressSearchField id="signup-address" label="주소" value={address} onChange={setAddress} required />
                   {/* 이용 플랜 select는 여기 없다 — 가입 시점엔 아직 무슨 플랜이 실제로 뭘
                       포함하는지(배달 횟수, 리포트 주기 등) 제대로 안내받지 못한 채 고르게 돼서,
                       실제로 구독을 만드는 것도 아닌데(위 handleSubmit 주석 참고) "이미 골랐다"는
@@ -424,7 +422,7 @@ export default function SignupPage() {
                   <label className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5">
                     <Checkbox checked={ttsCallConsent} onCheckedChange={setTtsCallConsent} />
                     <span className="text-sm text-foreground">
-                      안부확인콜(전화로 안부를 여쭤보는 서비스)에 동의해요{" "}
+                      안부확인알람(보호자가 알람으로 안부를 확인하는 서비스)에 동의해요{" "}
                       <span className="text-muted-foreground">· 선택</span>
                     </span>
                   </label>
@@ -435,7 +433,7 @@ export default function SignupPage() {
                     onClick={() => speakOnDemand(ttsCallConsentReadAloudText())}
                   >
                     <Volume2 />
-                    안부확인콜이 뭔지 들려주기
+                    안부확인알람이 뭔지 들려주기
                   </Button>
                 </>
               )}

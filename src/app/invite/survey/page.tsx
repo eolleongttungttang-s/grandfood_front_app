@@ -36,6 +36,10 @@ function InviteSurveyPageContent() {
 
   if (!account || !wardId || !ward) return null;
 
+  // code가 있으면(QR 초대로 들어와 방금 registerBackendUserIfNeeded로 실제 계정을 만든
+  // 최초 가입) 튜토리얼로 보낸다. code가 없는 재방문("생활 정보 수정")은 그대로 홈으로.
+  const afterCompleteHref = code ? "/user/tutorial" : "/user/home";
+
   // 초대 동의(consent-view.tsx) 직후엔 아직 질환 설문 전이라 실제 백엔드 User를 안
   // 만들어뒀다 — 여기, 설문이 끝난(또는 건너뛴) 이 시점에야 condition_flags까지
   // 채워서 POST /wards/invites/{code}/register를 부른다. code가 없으면(예: 마이
@@ -106,13 +110,13 @@ function InviteSurveyPageContent() {
           await saveHealthMetricsLocally(health);
           await registerBackendUserIfNeeded(health);
           toast.success("입력해주셔서 감사해요!");
-          router.push("/user/home");
+          router.push(afterCompleteHref);
         }}
         onSkip={async (partial, answeredStep, health) => {
           await skipCareProfile(wardId, partial, answeredStep);
           await saveHealthMetricsLocally(health);
           await registerBackendUserIfNeeded(health);
-          router.push("/user/home");
+          router.push(afterCompleteHref);
         }}
       />
     </div>

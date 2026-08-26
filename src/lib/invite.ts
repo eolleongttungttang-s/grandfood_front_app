@@ -15,7 +15,6 @@ export type InviteRequest = {
   elderName: string;
   elderPhone: string;
   address: string;
-  addressDetail: string;
   sentAt: string;
 };
 
@@ -33,24 +32,21 @@ export const MOCK_INVITE: InviteRequest = {
   elderName: elderAccount.name,
   elderPhone: elderAccount.phone,
   address: elderWard.address,
-  addressDetail: "102동 1204호",
   sentAt: "오늘 오전 10:02",
 };
 
-// 어르신이 e-consent 화면에서 확인/수정하는 4개 필드.
+// 어르신이 e-consent 화면에서 확인/수정하는 3개 필드.
 // 보호자 입력값으로 프리필되지만, 거부 시 즉시 삭제되고 재입력이 필요하다.
 export type InviteFormState = {
   elderName: string;
   elderPhone: string;
   address: string;
-  addressDetail: string;
 };
 
 const EMPTY_FORM_STATE: InviteFormState = {
   elderName: "",
   elderPhone: "",
   address: "",
-  addressDetail: "",
 };
 
 export const inviteFormStore = createLocalStore<InviteFormState>(
@@ -73,7 +69,6 @@ export async function resolveInviteByCode(code: string | null): Promise<InviteRe
     elderName: invite.name,
     elderPhone: invite.phone,
     address: "",
-    addressDetail: "",
     sentAt: invite.issuedAt,
   };
 }
@@ -83,7 +78,6 @@ export function toFormState(invite: InviteRequest): InviteFormState {
     elderName: invite.elderName,
     elderPhone: invite.elderPhone,
     address: invite.address,
-    addressDetail: invite.addressDetail,
   };
 }
 

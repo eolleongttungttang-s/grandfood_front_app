@@ -12,6 +12,7 @@ import { InviteFormState, submitInviteConsent, submitInviteDecline } from "@/lib
 import { consumeWardInvite } from "@/lib/ward-invite";
 import { addWard, createSelfWard } from "@/lib/wards";
 import { speakOnDemand } from "@/lib/accessibility";
+import { AddressSearchField } from "@/components/app/address-search-field";
 import { PhoneInput } from "@/components/app/phone-input";
 import { useSession } from "@/lib/session";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -33,9 +34,9 @@ function readAloudText(guardianName: string) {
 
 export function ttsCallConsentReadAloudText() {
   return (
-    "정해진 시각에 전화로 안부를 여쭤보는 안부확인콜 서비스예요. " +
+    "보호자가 알람으로 안부를 확인할 수 있는 안부확인알람 서비스예요. " +
     "동의하지 않으셔도 도시락 배송이나 식사 기록 같은 다른 서비스는 그대로 이용하실 수 있어요. " +
-    "선택 사항이니 편하게 결정하시면 돼요. 안부확인콜에도 동의하시겠어요?"
+    "선택 사항이니 편하게 결정하시면 돼요. 안부확인알람에도 동의하시겠어요?"
   );
 }
 
@@ -102,7 +103,10 @@ export function ConsentView({
     try {
       await submitInviteConsent(form);
 
-      const address = `${form.address} ${form.addressDetail}`.trim();
+      // form.address는 AddressSearchField(juso.go.kr 도로명주소 검색)가 채우는데, 공동주택
+      // 등은 동/호수(addrDetail)까지 이미 합쳐서 넣어준다(juso-address.ts의 formatJusoAddress) —
+      // 그래서 별도 "상세주소" 입력칸을 두면 여기서 다시 이어붙이다 동/호수가 중복된다.
+      const address = form.address.trim();
 
       // 실제 백엔드 User는 여기서 만들지 않는다 — 이 시점엔 아직 다음 화면(/invite/survey)의
       // 질환 설문 전이라 condition_flags가 항상 비어서 나갈 수밖에 없다. 대신 코드를
@@ -199,23 +203,12 @@ export function ConsentView({
               onChange={(value) => updateField("elderPhone", value)}
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="consent-address">받으실 주소</Label>
-            <Input
-              id="consent-address"
-              value={form.address}
-              onChange={(e) => updateField("address", e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="consent-address-detail">상세주소 (동/호수 등)</Label>
-            <Input
-              id="consent-address-detail"
-              placeholder="예: 101동 502호"
-              value={form.addressDetail}
-              onChange={(e) => updateField("addressDetail", e.target.value)}
-            />
-          </div>
+          <AddressSearchField
+            id="consent-address"
+            label="받으실 주소"
+            value={form.address}
+            onChange={(value) => updateField("address", value)}
+          />
         </div>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
@@ -360,7 +353,7 @@ export function ConsentView({
         <label className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5">
           <Checkbox checked={ttsCallConsent} onCheckedChange={setTtsCallConsent} />
           <span className="text-sm text-foreground">
-            안부확인콜(전화로 안부를 여쭤보는 서비스)에 동의해요{" "}
+            안부확인알람(보호자가 알람으로 안부를 확인하는 서비스)에 동의해요{" "}
             <span className="text-muted-foreground">· 선택</span>
           </span>
         </label>
@@ -371,7 +364,7 @@ export function ConsentView({
           onClick={() => speakOnDemand(ttsCallConsentReadAloudText())}
         >
           <Volume2 />
-          안부확인콜이 뭔지 들려주기
+          안부확인알람이 뭔지 들려주기
         </Button>
 
         {error && (
