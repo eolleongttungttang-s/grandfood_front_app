@@ -1,10 +1,13 @@
 "use client";
 
 import { useLayoutEffect, useState, type RefObject } from "react";
+import { Volume2, VolumeX } from "lucide-react";
 
+import { speakCard, stopSpeaking, useSpeakingCardId } from "@/lib/accessibility";
 import { SpeakableCard } from "@/components/app/speakable-card";
 import { Button } from "@/components/ui/button";
 import { USER_TOUR_STEPS } from "@/lib/user-tour";
+import { cn } from "@/lib/utils";
 
 type Highlight = { top: number; left: number; width: number; height: number; containerHeight: number };
 
@@ -28,6 +31,18 @@ export function TabTourOverlay({
   const [highlight, setHighlight] = useState<Highlight | null>(null);
   const current = USER_TOUR_STEPS[step];
   const isLast = step === USER_TOUR_STEPS.length - 1;
+  const speakId = `tour-step-${step}`;
+  const speakText = `${current.title}. ${current.hint}`;
+  // 스피커 아이콘을 SpeakableCard의 카드 우상단 오버레이 대신 "1/4" 옆으로 옮겼다 — 모바일
+  // 폭에서 안내 문구가 두 줄로 꽉 차면 오버레이 아이콘이 글자 위에 겹쳐서 잘 안 보였다
+  // (2026-08-26 피드백). 아래 SpeakableCard는 variant="none"으로 카드 자체의 아이콘만 끄고
+  // 탭 영역·TTS 로직은 그대로 재사용한다 — 이 버튼은 그 상태를 그대로 보여주는 별도 진입점.
+  const isSpeaking = useSpeakingCardId() === speakId;
+
+  function handleSpeakToggle() {
+    if (isSpeaking) stopSpeaking();
+    else speakCard(speakId, speakText);
+  }
 
   useLayoutEffect(() => {
     function measure() {
@@ -80,9 +95,22 @@ export function TabTourOverlay({
         style={calloutStyle}
       >
         <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-muted-foreground">
-            {step + 1} / {USER_TOUR_STEPS.length}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-muted-foreground">
+              {step + 1} / {USER_TOUR_STEPS.length}
+            </span>
+            <button
+              type="button"
+              aria-label={isSpeaking ? "읽어주기 멈추기" : "안내 문구 읽어주기"}
+              onClick={handleSpeakToggle}
+              className={cn(
+                "flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors",
+                isSpeaking ? "bg-accent text-accent-foreground" : "bg-foreground/10 text-foreground/50"
+              )}
+            >
+              {isSpeaking ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            </button>
+          </div>
           <button
             type="button"
             className="text-sm font-semibold text-muted-foreground underline underline-offset-2"
@@ -93,12 +121,9 @@ export function TabTourOverlay({
         </div>
         {/* 다른 화면 카드들과 같은 규칙(SpeakableCard, 애저 스피치)으로 이 안내도 눌러서
             들을 수 있게 한다(2026-08-26 피드백) — id를 step으로 구분해서 탭을 넘길 때마다
-            새 문구로 바뀐다. */}
-        <SpeakableCard
-          id={`tour-step-${step}`}
-          text={`${current.title}. ${current.hint}`}
-          className="flex flex-col gap-1"
-        >
+            새 문구로 바뀐다. 카드 자체의 스피커 아이콘(variant="overlay")은 껐다 — 위 "1/4"
+            옆 버튼이 같은 역할을 한다. */}
+        <SpeakableCard id={speakId} text={speakText} variant="none" className="flex flex-col gap-1">
           <h2 className="text-xl leading-snug font-extrabold text-foreground">{current.title}</h2>
           <p className="text-base text-muted-foreground">{current.hint}</p>
         </SpeakableCard>
