@@ -34,9 +34,13 @@ export function PhotoGuideView({ onNext, onSkip }: { onNext: () => void; onSkip:
         {/* 이 화면 전부에 카드별 TTS(SpeakableCard, 애저 스피치)를 붙인다(2026-08-26
             피드백) — 홈/식단 화면과 같은 규칙으로, 문구를 눈으로 읽기 쉽게 다듬은 그대로가
             아니라 사람이 말하듯 풀어 쓴 문장(text)을 따로 준다. */}
+        {/* 제목(text-2xl)이 모바일 폭에서 두 줄로 꽉 차면 기본(overlay) 우상단 아이콘이 글자
+            위에 겹쳤다(2026-08-26 피드백) — variant="leading"을 쓰면 이 카드가 flex-col이라
+            아이콘이 별도 flex item으로 h2 위 한 줄을 차지해서 겹치지 않는다. */}
         <SpeakableCard
           id="tutorial-photo-intro"
           text="사진은 이렇게 찍어주세요. 정확한 잔반 분석을 위해 꼭 확인해주세요."
+          variant="leading"
           className="flex flex-col gap-1.5"
         >
           <h2 className="text-2xl leading-snug font-extrabold break-keep text-foreground">
