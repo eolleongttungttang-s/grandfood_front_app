@@ -26,22 +26,42 @@ import { Button } from "@/components/ui/button";
 import { GrandFoodMark } from "@/components/brand/grandfood-logo";
 import { RecipeRecommendationList } from "@/components/app/recipe-recommendation-list";
 
-function StatCard({ label, value }: { label: string; value: string }) {
+// 백엔드 조회 세 단계(응답 전/응답은 왔는데 쓸 수 있는 값이 없음/실제 값 있음)를 명시적으로
+// 구분한다 — 예전엔 "없으면 조용히 목업(추천 조합 목표치)으로 대체"했는데, 그러면 실제로는
+// 아직 잔반 사진 한 장 안 올린 대상자도 화면엔 그럴싸한 숫자가 떠서 보호자가 실제 섭취
+// 데이터로 착각한다(2026-08-26 피드백). "insufficient"면 목업 숫자 대신 안내 문구를 보여준다.
+type BackendStat<T> = { status: "loading" } | { status: "insufficient" } | { status: "ready"; value: T };
+
+function StatCard({ label, unit, stat }: { label: string; unit: string; stat: BackendStat<number> }) {
   return (
     <div className="flex flex-col gap-1 rounded-xl bg-muted px-4 py-3">
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <span className="text-lg font-extrabold text-foreground">{value}</span>
+      {stat.status === "ready" ? (
+        <span className="text-lg font-extrabold text-foreground">
+          {stat.value}
+          {unit}
+        </span>
+      ) : stat.status === "loading" ? (
+        <span className="text-lg font-extrabold text-muted-foreground">···</span>
+      ) : (
+        <span className="text-sm font-semibold text-muted-foreground">아직 섭취 기록이 부족해요</span>
+      )}
     </div>
   );
 }
 
 // 영양소별 목표 대비 섭취(nutrition-gaps)의 nutrient_type은 자유 문자열 컬럼이라 백엔드가
 // 실제로 어떤 값을 쓰는지 시드 데이터로 확정되어 있지 않다 — 나트륨/단백질/열량으로 보이는
-// 항목만 느슨하게(영문·한글 키워드 포함 여부) 찾아 쓰고, 못 찾으면 그 카드는 목업 값을 그대로
-// 둔다(완전히 안 보이게 하는 것보다, 아직 실제 기록이 없다는 걸 자연스럽게 드러내는 셈).
+// 항목만 느슨하게(영문·한글 키워드 포함 여부) 찾아 쓴다.
 function findNutrientAverage(items: NutritionGapItem[], keywords: string[]): number | null {
   const match = items.find((i) => keywords.some((k) => i.nutrientType.toLowerCase().includes(k)));
   return match ? Math.round(match.averageAmount) : null;
+}
+
+function resolveNutrientStat(gapsStat: BackendStat<NutritionGapItem[]>, keywords: string[]): BackendStat<number> {
+  if (gapsStat.status !== "ready") return gapsStat;
+  const avg = findNutrientAverage(gapsStat.value, keywords);
+  return avg === null ? { status: "insufficient" } : { status: "ready", value: avg };
 }
 
 export function ReportView({
@@ -62,30 +82,54 @@ export function ReportView({
   const days = period === "주간" ? 7 : 30;
 
   // 실제 백엔드 리포트 데이터(GET /app/guardian/{id}/{diet-history,nutrition-gaps,health-report})가
-  // 있으면 목업(reports.ts getNutritionReport) 대신 그걸 보여준다 — 없거나 실패하면(자가등록 본인이
-  // 관리하는 대상자, 아직 섭취 기록이 없는 신규 대상자 등) 조용히 목업으로 남는다.
-  const [backendCompleteRate, setBackendCompleteRate] = useState<number | null>(null);
-  const [backendGaps, setBackendGaps] = useState<NutritionGapItem[] | null>(null);
+  // 있으면 목업(reports.ts getNutritionReport) 대신 그걸 보여준다 — 없으면(자가등록 본인이 관리하는
+  // 대상자, 아직 섭취 기록이 없는 신규 대상자 등) "기록 부족" 상태를 그대로 드러낸다. 목업(추천
+  // 조합 목표치)으로 조용히 대체하지 않는다 — 보호자가 그걸 실제 섭취 데이터로 착각한다
+  // (2026-08-26 피드백).
+  // completeRate/gaps를 "loading" 상태로 직접 setState하는 대신, 결과와 "어느 조회 조건
+  // (statKey) 기준으로 받은 결과인지"를 한 state에 같이 담아서 지금 조건과 다르면 로딩중으로
+  // 취급한다 — effect 본문에서 setState를 동기적으로 바로 부르면 react-hooks/set-state-in-effect
+  // 린트 규칙에 걸린다(MedicationFoodSuggestionStep.tsx와 같은 이유·같은 패턴).
+  const statKey = `${ward.id}|${ward.name}|${ward.age}|${ward.address}|${days}|${viewerGuardianLoginId ?? ""}`;
+  const [completeRateLoaded, setCompleteRateLoaded] = useState<{ key: string; stat: BackendStat<number> } | null>(
+    null
+  );
+  const [gapsLoaded, setGapsLoaded] = useState<{ key: string; stat: BackendStat<NutritionGapItem[]> } | null>(null);
   const [backendHealthReport, setBackendHealthReport] = useState<HealthReportSummary | null>(null);
+  const completeRateStat: BackendStat<number> =
+    completeRateLoaded?.key === statKey ? completeRateLoaded.stat : { status: "loading" };
+  const gapsStat: BackendStat<NutritionGapItem[]> =
+    gapsLoaded?.key === statKey ? gapsLoaded.stat : { status: "loading" };
 
   useEffect(() => {
     let cancelled = false;
     const identity = { mockWardId: ward.id, name: ward.name, age: ward.age, address: ward.address };
 
     fetchGuardianDietHistory(identity, days, viewerGuardianLoginId).then((items) => {
-      if (cancelled || !items || items.length === 0) return;
+      if (cancelled) return;
+      if (!items || items.length === 0) {
+        setCompleteRateLoaded({ key: statKey, stat: { status: "insufficient" } });
+        return;
+      }
       // "완료된 끼니 비율"이 아니라 "얼마나 실제로 드셨는지"(100 - 평균 잔반율)로 바꿨다
       // (2026-08-21 피드백) — 사진 전후 비교로 이미 정확한 잔반율을 아는데, 사진을
       // 찍었는지 여부만 보는 완료율은 "얼마나 남겼는지"를 담지 못한다. 라벨("식사
       // 완료율")은 그대로 두고 계산 기준만 바꾼다.
       const daily = deriveDailyLeftover(items, recentKstDateKeys(days));
       const known = daily.filter((d) => d.avgLeftoverPercent !== null);
-      if (known.length === 0) return;
+      if (known.length === 0) {
+        setCompleteRateLoaded({ key: statKey, stat: { status: "insufficient" } });
+        return;
+      }
       const avgLeftover = known.reduce((sum, d) => sum + (d.avgLeftoverPercent ?? 0), 0) / known.length;
-      setBackendCompleteRate(Math.round(100 - avgLeftover));
+      setCompleteRateLoaded({ key: statKey, stat: { status: "ready", value: Math.round(100 - avgLeftover) } });
     });
     fetchGuardianNutritionGaps(identity, days, viewerGuardianLoginId).then((items) => {
-      if (!cancelled && items) setBackendGaps(items);
+      if (cancelled) return;
+      setGapsLoaded({
+        key: statKey,
+        stat: items && items.length > 0 ? { status: "ready", value: items } : { status: "insufficient" },
+      });
     });
     fetchGuardianHealthReport(identity, viewerGuardianLoginId).then((result) => {
       if (!cancelled) setBackendHealthReport(result);
@@ -93,21 +137,11 @@ export function ReportView({
     return () => {
       cancelled = true;
     };
-  }, [ward.id, ward.name, ward.age, ward.address, days, viewerGuardianLoginId]);
+  }, [ward.id, ward.name, ward.age, ward.address, days, viewerGuardianLoginId, statKey]);
 
-  const avgSodiumMg = backendGaps ? (findNutrientAverage(backendGaps, ["sodium", "나트륨"]) ?? mockReport.avgSodiumMg) : mockReport.avgSodiumMg;
-  const avgProteinG = backendGaps ? (findNutrientAverage(backendGaps, ["protein", "단백질"]) ?? mockReport.avgProteinG) : mockReport.avgProteinG;
-  const avgKcal = backendGaps
-    ? (findNutrientAverage(backendGaps, ["kcal", "calorie", "열량", "칼로리"]) ?? mockReport.avgKcal)
-    : mockReport.avgKcal;
-
-  const report = {
-    ...mockReport,
-    completeRate: backendCompleteRate ?? mockReport.completeRate,
-    avgSodiumMg,
-    avgProteinG,
-    avgKcal,
-  };
+  const sodiumStat = resolveNutrientStat(gapsStat, ["sodium", "나트륨"]);
+  const proteinStat = resolveNutrientStat(gapsStat, ["protein", "단백질"]);
+  const kcalStat = resolveNutrientStat(gapsStat, ["kcal", "calorie", "열량", "칼로리"]);
 
   // "건강데이터 결합 해석" — 오늘 AI가 배정한 반찬의 영양가 합 vs 목표치(records-view.tsx의
   // "오늘 영양성분 분석"과 동일한 기준, computeTodayNutritionSnapshot 참고) + 최근 식사 기록을
@@ -164,7 +198,7 @@ export function ReportView({
             {ward.name}님 건강 리포트
           </h1>
           <p className="text-sm text-muted-foreground">
-            {report.period} · {report.rangeLabel}
+            {mockReport.period} · {mockReport.rangeLabel}
           </p>
         </div>
 
@@ -190,10 +224,10 @@ export function ReportView({
         </div>
 
         <div className="grid grid-cols-2 gap-2.5">
-          <StatCard label="식사 완료율" value={`${report.completeRate}%`} />
-          <StatCard label="평균 나트륨" value={`${report.avgSodiumMg}mg`} />
-          <StatCard label="평균 단백질" value={`${report.avgProteinG}g`} />
-          <StatCard label="평균 열량" value={`${report.avgKcal}kcal`} />
+          <StatCard label="식사 완료율" unit="%" stat={completeRateStat} />
+          <StatCard label="평균 나트륨" unit="mg" stat={sodiumStat} />
+          <StatCard label="평균 단백질" unit="g" stat={proteinStat} />
+          <StatCard label="평균 열량" unit="kcal" stat={kcalStat} />
         </div>
 
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
@@ -216,7 +250,7 @@ export function ReportView({
               <span className="text-xs text-muted-foreground">{backendHealthReport.reportDate} 검수 확정</span>
             </>
           ) : (
-            report.notes.map((n, i) => (
+            mockReport.notes.map((n, i) => (
               <p key={i} className="text-sm text-foreground">
                 · {n}
               </p>

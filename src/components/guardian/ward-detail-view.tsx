@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   ChevronLeft,
@@ -275,16 +275,18 @@ export function WardDetailView({
         age: ward.age,
         address: ward.address,
       });
-      toast.success(`${ward.name}님 안부 확인을 요청했어요.`);
+      toast.success(`${ward.name}님 안부확인알람을 요청했어요.`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "안부 확인 요청에 실패했어요.");
+      toast.error(err instanceof Error ? err.message : "안부확인알람 요청에 실패했어요.");
     } finally {
       setRequestingWellnessCall(false);
     }
   }
 
+  const rootRef = useRef<HTMLDivElement>(null);
+
   return (
-    <div className="flex flex-1 flex-col">
+    <div ref={rootRef} className="flex flex-1 flex-col">
       <div className="flex items-center justify-between bg-sidebar px-5 py-3 text-sidebar-foreground">
         <div className="flex items-center gap-3">
           <GrandFoodMark className="h-6 w-6 shrink-0 rounded-md" />
@@ -342,7 +344,7 @@ export function WardDetailView({
             </Button>
             <Button size="sm" onClick={requestWellnessCheck} disabled={requestingWellnessCall}>
               <MessageCircle />
-              {requestingWellnessCall ? "요청하는 중..." : "안부 확인 요청"}
+              {requestingWellnessCall ? "요청하는 중..." : "안부확인알람 요청"}
             </Button>
             <Button
               variant="outline"
@@ -805,13 +807,11 @@ export function WardDetailView({
           active: activeTab === tab.id,
           onClick: () => {
             setActiveTab(tab.id);
-            // 실제로는 main(guardian/layout.tsx)이 아니라 window/document가 스크롤
-            // 컨테이너다 — main은 flex-1 + overflow-y-auto지만 상위 AccessibilityFrame이
-            // min-h-screen(고정 height가 아니라 최소값)이라 절대 clip되지 않고 콘텐츠
-            // 크기만큼 그대로 자라기 때문(코드 리뷰 지적으로 재확인, main.scrollTop을
-            // 직접 바꿔봐도 반응 없음을 확인함). 탭을 누르면 맨 위로 되돌려서 새 탭
-            // 내용(더 짧을 수 있음)을 바로 보여준다.
-            window.scrollTo({ top: 0, behavior: "instant" });
+            // 탭을 누르면 맨 위로 되돌려서 새 탭 내용(더 짧을 수 있음)을 바로 보여준다.
+            // 실제 스크롤 컨테이너는 이 컴포넌트가 아니라 guardian/layout.tsx의 main이라
+            // closest로 찾아서 그쪽 scrollTop을 바꾼다(AccessibilityFrame이 이제 h-dvh로
+            // 고정 높이라 main이 진짜 스크롤 영역이다 — window는 더 이상 스크롤되지 않는다).
+            rootRef.current?.closest("main")?.scrollTo({ top: 0, behavior: "instant" });
           },
         }))}
       />

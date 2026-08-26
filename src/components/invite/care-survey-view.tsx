@@ -46,6 +46,15 @@ export const EMPTY_HEALTH_METRICS_FORM: HealthMetricsForm = {};
 
 const ACTIVITY_LEVEL_OPTIONS: ActivityLevel[] = ["inactive", "light", "active", "very_active"];
 
+// signup/page.tsx의 보호자 관계 선택지(RELATIONSHIP_OPTIONS)와 같은 목록 — 비상연락처도
+// 결국 가족 관계인 경우가 대부분이라 같은 분류를 재사용한다. 목록에 없으면 "기타"를 골라
+// 직접 입력한다(EMERGENCY_CONTACT_RELATION_OPTIONS에 없는 기존 값도 이 경로로 취급).
+const EMERGENCY_CONTACT_RELATION_OPTIONS = ["딸", "아들", "며느리", "사위", "배우자", "형제자매", "손자녀"] as const;
+
+function isPresetEmergencyContactRelation(value: string): boolean {
+  return (EMERGENCY_CONTACT_RELATION_OPTIONS as readonly string[]).includes(value);
+}
+
 // care-profile.ts의 단계 뒤에 이어 붙인다 — CARE_SURVEY_STEP처럼 값 자체보다 "몇 번째
 // 단계인가"가 중요해서, 상수 하나(HEALTH_STEP_OFFSET)만 바꾸면 전체가 같이 밀리게 했다.
 const HEALTH_STEP_OFFSET = CARE_SURVEY_TOTAL_STEPS;
@@ -377,6 +386,24 @@ export function CareSurveyView({
   );
   const [submitting, setSubmitting] = useState(false);
 
+  // 비상연락처 "관계" 드롭다운 — form.emergencyContactRelation(단일 문자열)이 진짜 값이고,
+  // 이 두 state는 select UI를 그리기 위한 파생 상태다. 기존 값이 프리셋 목록에 없으면(수정
+  // 화면에서 예전에 자유 텍스트로 입력해둔 값 포함) "기타"를 선택한 것으로 보고 그 값을
+  // 커스텀 입력창에 그대로 채워 넣는다.
+  const [emergencyRelationMode, setEmergencyRelationMode] = useState<string>(() =>
+    initialForm.emergencyContactRelation === ""
+      ? ""
+      : isPresetEmergencyContactRelation(initialForm.emergencyContactRelation)
+        ? initialForm.emergencyContactRelation
+        : "기타"
+  );
+  const [customEmergencyRelationText, setCustomEmergencyRelationText] = useState(() =>
+    initialForm.emergencyContactRelation !== "" &&
+    !isPresetEmergencyContactRelation(initialForm.emergencyContactRelation)
+      ? initialForm.emergencyContactRelation
+      : ""
+  );
+
   // "복용 중인 약" 항목을 목록에서 바로 골라 들어왔다가(jumpToStep) 확인을 누르면, 원래는
   // enteredFromOverview 때문에 곧장 목록으로 돌아가서 바로 다음 단계인 "약물 관련 기피
   // 음식"(제안 카드)을 볼 기회가 없었다 — 방금 추가한 약 때문에 새로 뜬 제안이 있어도
@@ -419,6 +446,18 @@ export function CareSurveyView({
 
   function updateHealth<K extends keyof HealthMetricsForm>(key: K, value: HealthMetricsForm[K]) {
     setHealthForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  // "기타"를 벗어날 때만 커스텀 입력값을 비운다(handleRelationshipModeChange, signup/page.tsx와
+  // 동일한 이유) — "기타"를 유지한 채로는 재렌더돼도 입력값이 그대로 보존돼야 한다.
+  function handleEmergencyRelationModeChange(next: string) {
+    setEmergencyRelationMode(next);
+    if (next === "기타") {
+      update("emergencyContactRelation", customEmergencyRelationText.trim());
+    } else {
+      setCustomEmergencyRelationText("");
+      update("emergencyContactRelation", next);
+    }
   }
 
   function toggleIngredient(name: string) {
@@ -1113,13 +1152,38 @@ export function CareSurveyView({
                 <Label htmlFor="ec-relation" className="text-base">
                   관계
                 </Label>
-                <Input
+                <select
                   id="ec-relation"
-                  className="h-14 text-lg"
-                  placeholder="예: 딸, 아들, 며느리"
-                  value={form.emergencyContactRelation}
-                  onChange={(e) => update("emergencyContactRelation", e.target.value)}
-                />
+                  value={emergencyRelationMode}
+                  onChange={(e) => handleEmergencyRelationModeChange(e.target.value)}
+                  className="h-14 w-full rounded-xl border border-input bg-transparent px-4 text-lg text-foreground"
+                >
+                  <option value="">선택해 주세요</option>
+                  {EMERGENCY_CONTACT_RELATION_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                  <option value="기타">기타(직접 입력)</option>
+                </select>
+                {emergencyRelationMode === "기타" && (
+                  <>
+                    <Label htmlFor="ec-relation-custom" className="sr-only">
+                      관계 직접 입력
+                    </Label>
+                    <Input
+                      id="ec-relation-custom"
+                      className="h-14 text-lg"
+                      placeholder="예: 조카, 이웃"
+                      autoFocus
+                      value={customEmergencyRelationText}
+                      onChange={(e) => {
+                        setCustomEmergencyRelationText(e.target.value);
+                        update("emergencyContactRelation", e.target.value.trim());
+                      }}
+                    />
+                  </>
+                )}
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="ec-phone" className="text-base">

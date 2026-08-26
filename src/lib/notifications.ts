@@ -21,7 +21,7 @@ import { estimateDeliveryEta, type WardStatus } from "@/lib/ward-registry";
 // "완식"/"배송"은 백엔드 알림이 아니라 아래 fetchElderStreakNotification()/
 // getElderDeliveryNotification()이 프론트에서 직접 만드는 합성 항목이다(guardian 쪽
 // SOS와 같은 패턴 — notifications-view.tsx 참고).
-export type NotificationType = "SOS" | "잔반이상" | "영양부족" | "안부확인콜" | "완식" | "배송" | "기타";
+export type NotificationType = "SOS" | "잔반이상" | "영양부족" | "안부확인알람" | "완식" | "배송" | "기타";
 
 export type NotificationItem = {
   id: string;
@@ -40,7 +40,7 @@ const TYPE_STYLE: Record<NotificationType, string> = {
   SOS: "bg-destructive text-white",
   잔반이상: "bg-risk-high text-risk-high-foreground",
   영양부족: "bg-risk-caution text-risk-caution-foreground",
-  안부확인콜: "bg-secondary text-secondary-foreground",
+  안부확인알람: "bg-secondary text-secondary-foreground",
   완식: "bg-secondary text-secondary-foreground",
   배송: "bg-secondary text-secondary-foreground",
   기타: "bg-muted text-muted-foreground",
@@ -173,9 +173,9 @@ function mapBackendItem(item: BackendNotificationItem, id: string, viewer: "guar
   return {
     id,
     date,
-    type: "안부확인콜",
+    type: "안부확인알람",
     targetName,
-    message: `안부확인 콜: ${TTS_CALL_STATUS_LABEL[item.status] ?? item.status}`,
+    message: `안부확인알람: ${TTS_CALL_STATUS_LABEL[item.status] ?? item.status}`,
     read: item.status !== "pending",
   };
 }

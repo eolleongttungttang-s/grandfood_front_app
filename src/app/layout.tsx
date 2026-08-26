@@ -14,8 +14,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko" className="h-full antialiased font-sans">
-      <body className="min-h-full bg-[#2a1c15] font-sans">
+    <html lang="ko" className="h-dvh antialiased font-sans">
+      <body className="h-full bg-[#2a1c15] font-sans">
         <Providers>
           <AccessibilityFrame>{children}</AccessibilityFrame>
         </Providers>

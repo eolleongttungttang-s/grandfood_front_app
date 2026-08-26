@@ -8,7 +8,13 @@ import {
   useSyncExternalStore,
 } from "react";
 
-import { Account, findAccount, findAccountByLoginId, wardLinkOverridesStore } from "@/lib/auth";
+import {
+  Account,
+  birthDateOverridesStore,
+  findAccount,
+  findAccountByLoginId,
+  wardLinkOverridesStore,
+} from "@/lib/auth";
 
 const STORAGE_KEY = "grandfood-app-session";
 
@@ -93,13 +99,22 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     wardLinkOverridesStore.getServerSnapshot
   );
 
+  // birthDateOverridesStore(마이페이지 "기본 정보 수정"이 바꾼 생년월일)가 바뀌어도 account를
+  // 다시 계산한다 — 안 그러면 wardLinks와 같은 이유로, 수정 직후 이 화면을 다시 열었을 때
+  // account.birthDate가 여전히 옛 값이라 방금 고친 생년월일이 또 사라져 보인다.
+  const birthDates = useSyncExternalStore(
+    birthDateOverridesStore.subscribe,
+    birthDateOverridesStore.read,
+    birthDateOverridesStore.getServerSnapshot
+  );
+
   const account = useMemo(
     () => (loginId ? findAccountByLoginId(loginId) : null),
-    // wardLinks 자체는 콜백 안에서 안 쓰지만, 이 값이 바뀔 때마다 다시 계산되게 하려고
-    // 일부러 deps에 넣었다(findAccountByLoginId가 내부적으로 최신 wardLinkOverridesStore를
+    // wardLinks/birthDates 자체는 콜백 안에서 안 쓰지만, 이 값이 바뀔 때마다 다시 계산되게
+    // 하려고 일부러 deps에 넣었다(findAccountByLoginId가 내부적으로 최신 오버레이 스토어를
     // 다시 읽어오므로, 여기선 "다시 계산하라"는 트리거로만 쓰인다).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [loginId, wardLinks]
+    [loginId, wardLinks, birthDates]
   );
 
   const login = useCallback((id: string, password: string) => {

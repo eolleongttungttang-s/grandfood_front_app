@@ -6,6 +6,7 @@ import {
   Bell,
   Camera,
   ChevronRight,
+  CircleHelp,
   Images,
   Sparkles,
 } from "lucide-react";
@@ -414,19 +415,28 @@ export function HomeView({
         title={`안녕하세요, ${name}님`}
         subtitle={partnerStore?.name}
         right={
-          <Link
-            href="/user/notifications"
-            aria-label={hasUnreadNotification ? "알림, 안 읽은 알림 있음" : "알림"}
-            className="relative flex h-10 w-10 items-center justify-center rounded-full text-foreground hover:bg-muted"
-          >
-            <Bell className="h-5 w-5" />
-            {hasUnreadNotification && (
-              <span
-                aria-hidden="true"
-                className="absolute top-2 right-2 h-2 w-2 rounded-full bg-destructive ring-2 ring-card"
-              />
-            )}
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link
+              href="/user/tutorial?replay=1"
+              aria-label="사용법 다시 보기"
+              className="flex h-10 w-10 items-center justify-center rounded-full text-foreground hover:bg-muted"
+            >
+              <CircleHelp className="h-5 w-5" />
+            </Link>
+            <Link
+              href="/user/notifications"
+              aria-label={hasUnreadNotification ? "알림, 안 읽은 알림 있음" : "알림"}
+              className="relative flex h-10 w-10 items-center justify-center rounded-full text-foreground hover:bg-muted"
+            >
+              <Bell className="h-5 w-5" />
+              {hasUnreadNotification && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-2 right-2 h-2 w-2 rounded-full bg-destructive ring-2 ring-card"
+                />
+              )}
+            </Link>
+          </div>
         }
       />
 

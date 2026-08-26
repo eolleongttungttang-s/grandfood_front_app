@@ -13,6 +13,7 @@ import {
   BackendMealType,
   BanchanSuitability,
   getRecommendationForDate,
+  MealStaple,
   MonthlyBanchanRecommendation,
   todayDateString,
 } from "@/lib/banchan-recommendation";
@@ -55,6 +56,12 @@ export type TodayMenu = {
   /** true면 실제 AI 반찬 추천, false면 아직 실제 추천이 없어 목업으로 대체된 상태 —
    *  화면이 "대표 반찬 이모지"처럼 목업 카탈로그에만 있는 정보를 쓸지 판단하는 데 쓴다. */
   isReal: boolean;
+  /** 반찬과 별개로 항상 나오는 밥 — 백엔드가 카탈로그 평균값으로 내려주는 계획 단계
+   *  수치라(banchan-recommendation.ts MealStaple 참고) 실제 섭취량이 아니다. items 맨
+   *  앞에도 같은 정보가 표시용으로 들어가 있지만, 이 필드는 "밥인지 아닌지"를 화면이
+   *  구분해야 할 때(예: 실제 섭취 계열 화면과 헷갈리지 않게 표시를 다르게 하고 싶을 때)
+   *  쓰라고 별도로 남겨둔다. 목업/생성 중엔 항상 null. */
+  staple: MealStaple | null;
   /** 오늘 몫이 지금 한창 생성되고 있는 중(status: "generating"). 이 경우엔 목업으로
    *  폴백하지 않는다 — "AI가 지금 고르고 있다"는 게 화면에 뜬 상태에서 바로 아래에
    *  무관한 목업 반찬(현미밥·미역국...)이 나오면 그게 이미 나온 실제 결과처럼 보여서
@@ -116,7 +123,7 @@ export function resolveTodayMenu(
   // "실제 추천 결과(오늘은 없음)"로 취급한다 — 호출부가 items.length === 0 && isReal일
   // 때 빈 상태 문구를 보여줘야 한다.
   if (real && real.status === "done") {
-    const items: TodayMenuItem[] = [...real.items]
+    const banchanItems: TodayMenuItem[] = [...real.items]
       .sort((a, b) => a.slotIndex - b.slotIndex)
       .map((item) => ({
         id: item.banchanId,
@@ -126,12 +133,29 @@ export function resolveTodayMenu(
         proteinG: item.proteinPer100g,
         suitability: item.suitability,
       }));
+    // 밥은 반찬 추천 슬롯을 안 차지해 real.items엔 안 잡히지만(banchan-recommendation.ts
+    // MealStaple 주석 참고) 실제 식판엔 항상 올라가므로, 맨 앞에 표시용으로 끼워 넣는다 —
+    // 그래야 "오늘 메뉴 구성"이 실제 한 끼와 같아 보인다(예: "토마토달걀볶음, 소불고기볶음,
+    // 고사리나물, 밥").
+    const stapleItem: TodayMenuItem[] = real.staple
+      ? [
+          {
+            id: `staple-${real.staple.name}`,
+            name: real.staple.name,
+            kcal: real.staple.caloriePer100g,
+            sodiumMg: real.staple.sodiumPer100g,
+            proteinG: real.staple.proteinPer100g,
+            suitability: null,
+          },
+        ]
+      : [];
+    const items = [...stapleItem, ...banchanItems];
     return {
       items,
       totalKcal: sum(items.map((i) => i.kcal)),
       totalSodiumMg: sum(items.map((i) => i.sodiumMg)),
       totalProteinG: sum(items.map((i) => i.proteinG)),
-      totalCarbsG: sum(real.items.map((i) => i.carbsPer100g)),
+      totalCarbsG: sum([...real.items.map((i) => i.carbsPer100g), real.staple?.carbsPer100g ?? null]),
       targetCalorieKcal: real.targetCalorieKcal,
       targetProteinG: real.targetProteinG,
       targetSodiumMg: real.targetSodiumMg,
@@ -146,6 +170,7 @@ export function resolveTodayMenu(
       ],
       isReal: true,
       isGenerating: false,
+      staple: real.staple,
     };
   }
 
@@ -163,6 +188,7 @@ export function resolveTodayMenu(
       reasons: [],
       isReal: false,
       isGenerating: true,
+      staple: null,
     };
   }
 
@@ -188,5 +214,6 @@ export function resolveTodayMenu(
     reasons: combo.reasons,
     isReal: false,
     isGenerating: false,
+    staple: null,
   };
 }

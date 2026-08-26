@@ -144,7 +144,7 @@ function UserSurveyPageContent() {
           updatedAt: localExistingHealth?.updatedAt ?? new Date(0).toISOString(),
         }
       : undefined;
-  const afterCompleteHref = returnTo || (isFirstTime ? "/user/home" : "/user/profile");
+  const afterCompleteHref = returnTo || (isFirstTime ? "/user/tutorial" : "/user/profile");
 
   // invite/survey/page.tsx와 같은 이유(개별 필드 단위로, 값이 하나도 없으면 0이 아니라
   // undefined 그대로 유지)로 병합해서 저장한다 — 다만 여기는 재방문(마이 화면)이라 실제

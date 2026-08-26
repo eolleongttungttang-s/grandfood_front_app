@@ -103,6 +103,20 @@ export function updateAccountTtsCallConsent(loginId: string, consent: boolean): 
   ttsConsentOverridesStore.update((prev) => ({ ...prev, [loginId]: consent }));
 }
 
+// 이용자 본인 계정(role: "user")만 해당 — user/profile/edit/page.tsx의 "기본 정보 수정"이
+// 생년월일을 바꿀 수 있게 하면서 같은 오버레이 패턴을 재사용한다. 예전엔 이 화면이 Ward.age
+// (숫자)만 갱신하고 계정의 birthDate는 그대로 둬서, 다시 이 화면을 열면 원래 생년월일이
+// 사라지고 매번 빈 선택창부터 다시 골라야 했다(2026-08-26 피드백 — "생년월일은 초기화될
+// 필요가 없잖아").
+export const birthDateOverridesStore = createLocalStore<Record<string, string>>(
+  "grandfood-app-birth-date-overrides",
+  {}
+);
+
+export function updateAccountBirthDate(loginId: string, birthDate: string): void {
+  birthDateOverridesStore.update((prev) => ({ ...prev, [loginId]: birthDate }));
+}
+
 // session.tsx가 이 store를 구독해서, 어느 화면에서 linkWardToGuardian이 호출되든(로그인
 // 시점이 아니어도) 이미 떠 있는 화면의 account.wardIds가 즉시 갱신되게 한다 — 그 전엔
 // account가 loginId 문자열이 바뀔 때만(사실상 재로그인) 다시 계산돼서, 로그인된 채로
@@ -123,10 +137,14 @@ export function linkWardToGuardian(guardianLoginId: string, wardId: string): voi
 export function getAccounts(): Account[] {
   const ttsOverrides = ttsConsentOverridesStore.read();
   const wardLinkOverrides = wardLinkOverridesStore.read();
+  const birthDateOverrides = birthDateOverridesStore.read();
   return [...ACCOUNTS, ...readRegisteredAccounts()].map((account) => {
     let next = account;
     if (account.loginId in ttsOverrides) {
       next = { ...next, ttsCallConsent: ttsOverrides[account.loginId] };
+    }
+    if (account.loginId in birthDateOverrides) {
+      next = { ...next, birthDate: birthDateOverrides[account.loginId] };
     }
     const linkedWardIds = wardLinkOverrides[account.loginId];
     if (next.role === "guardian" && linkedWardIds?.length) {
