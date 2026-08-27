@@ -129,6 +129,7 @@ export function ConsentView({
         planType: "basic",
         selfWardId: newWard.id,
         ttsCallConsent,
+        passwordSource: "auto-generated",
       });
       if ("error" in result) {
         setError(result.error);

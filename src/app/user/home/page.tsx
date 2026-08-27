@@ -26,5 +26,5 @@ export default function UserHomePage() {
   }
 
   const detail = getWardDetail(ward);
-  return <HomeView name={account.name} ward={ward} detail={detail} />;
+  return <HomeView name={account.name} ward={ward} detail={detail} account={account} />;
 }

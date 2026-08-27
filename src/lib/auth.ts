@@ -1,5 +1,10 @@
 import { createLocalStore } from "@/lib/local-store";
 
+// 크로스디바이스 폴백 로그인(ensureLocalUserAccount)이 백엔드가 안 주는 전화번호 자리에
+// 채워두는 더미값 — password-security-notice.ts가 "이 계정은 원래 출처(진짜 전화번호)를
+// 모른다"는 신호로도 재사용한다.
+export const UNKNOWN_PHONE_PLACEHOLDER = "000-0000-0000";
+
 export type UserRole = "user" | "guardian";
 
 export type Account = {
@@ -26,6 +31,15 @@ export type Account = {
    *  TODO(backend): UserModel에 해당 컬럼이 생기면 POST /users 요청 바디에 실어 보내야 함
    *  (지금은 백엔드에 저장할 자리가 없어서 로컬에만 둠 — docs/backend-api-contract.md 참고). */
   ttsCallConsent?: boolean;
+  /** role === "user"만 해당 — "auto-generated"면 본인이 고른 게 아니라 QR초대
+   *  가입(consent-view.tsx)이 전화번호 뒷자리로 자동 만든 비밀번호다. password-security-notice.ts가
+   *  이 값을 보고 "비밀번호가 전화번호로 자동 생성됐다"는 안내를 띄울지 정한다 — 비밀번호
+   *  숫자 모양(4자리)만으로 추측하면, 직접 가입하며 스스로 "1234" 같은 걸 고른 사람에게도
+   *  "전화번호로 자동 생성됐다"는 틀린 문구를 보여주게 된다(2026-08-27 피드백). 값이 없으면
+   *  본인이 직접 정했거나(직접가입) 크로스디바이스 폴백(ensureLocalUserAccount)처럼 이 기기가
+   *  원래 출처를 알 방법이 없는 경우다 — 후자는 실제로 자동생성 비밀번호를 쓰고 있어도 안내를
+   *  못 띄우는 알려진 한계지만, 틀린 문구를 보여주는 것보다 안전한 쪽을 택했다. */
+  passwordSource?: "auto-generated";
 };
 
 export type RegisterAccountCommand = {
@@ -42,6 +56,7 @@ export type RegisterAccountCommand = {
   selfWardId?: string;
   wardIds?: string[];
   ttsCallConsent?: boolean;
+  passwordSource?: "auto-generated";
 };
 
 export type RegisterAccountResult =
@@ -247,7 +262,7 @@ export function ensureLocalUserAccount(params: {
     role: "user",
     org: "개인 이용자",
     name: params.name,
-    phone: "000-0000-0000",
+    phone: UNKNOWN_PHONE_PLACEHOLDER,
     selfWardId: params.selfWardId,
   };
   writeRegisteredAccounts([...readRegisteredAccounts(), account]);
@@ -308,6 +323,7 @@ export function registerAccount(command: RegisterAccountCommand): RegisterAccoun
           address,
           planType: command.planType ?? "basic",
           ttsCallConsent: command.ttsCallConsent ?? false,
+          passwordSource: command.passwordSource,
         }
       : {}),
     ...(command.role === "user"
