@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { Account } from "@/lib/auth";
 import { Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
@@ -20,6 +21,7 @@ import {
   fetchElderNotifications,
   fetchElderStreakNotification,
   getElderDeliveryNotification,
+  getElderPasswordSecurityNotice,
   getElderSosAcknowledgment,
   getSeenNotificationIds,
 } from "@/lib/notifications";
@@ -88,10 +90,12 @@ export function HomeView({
   name,
   ward,
   detail,
+  account,
 }: {
   name: string;
   ward: Ward;
   detail: WardDetail;
+  account: Account;
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
   // dislikesStore(로컬 id 목록)만으로는 이 브라우저에서 누른 기록만 보인다 — 백엔드에
@@ -188,9 +192,11 @@ export function HomeView({
     ]).then(([notifications, streak]) => {
       if (cancelled) return;
       const sosAckItem = getElderSosAcknowledgment(ward.id);
+      const passwordNotice = getElderPasswordSecurityNotice(account);
       const merged = [
         getElderDeliveryNotification(ward.status),
         ...(sosAckItem ? [sosAckItem] : []),
+        ...(passwordNotice ? [passwordNotice] : []),
         ...notifications,
         ...(streak ? [streak] : []),
       ];
@@ -200,7 +206,7 @@ export function HomeView({
     return () => {
       cancelled = true;
     };
-  }, [ward.id, ward.name, ward.age, ward.address, ward.status, sosAck]);
+  }, [ward.id, ward.name, ward.age, ward.address, ward.status, sosAck, account]);
 
   // 오늘 실제 AI 추천이 있으면 그걸, 없으면 목업으로 자연스럽게 폴백한다 — diet-view.tsx와
   // 같은 이유(2026-08-13 피드백, "오늘의 추천 반찬 조합" 카드와 AI 반찬 추천 달력이 서로

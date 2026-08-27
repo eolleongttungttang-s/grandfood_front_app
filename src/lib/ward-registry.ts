@@ -47,6 +47,22 @@ export function newWardDefaults() {
   return NEW_WARD_DEFAULTS;
 }
 
+export type MealSlotLabel = "아침" | "점심" | "저녁";
+
+// home-view.tsx(currentBackendMealType)/meal-log-store.ts(getCurrentMealSlot)와 같은
+// 시간대 기준(11시 이전=아침, 11~17시=점심, 그 외=저녁)을 그대로 복제한다 — 이 값들과
+// 똑같이 시간대별로 갈리는 배송 시각을 보여주려면 같은 기준이 필요한데, ward-registry.ts는
+// 파일 맨 위 설명대로 그런 client 전용 모듈에 의존할 수 없어서(빌드 에러) 이 코드베이스의
+// 기존 관례(diet-view.tsx 등도 각자 복제)를 그대로 따라 여기서도 독립적으로 계산한다.
+function currentMealSlotLabel(): MealSlotLabel {
+  const hour = new Date().getHours();
+  if (hour < 11) return "아침";
+  if (hour < 17) return "점심";
+  return "저녁";
+}
+
+const MEAL_PERIOD: Record<MealSlotLabel, "오전" | "오후"> = { 아침: "오전", 점심: "오후", 저녁: "오후" };
+
 // 배송 도메인 자체가 백엔드에 없어서(grandfood_backend GET /wards/{id}/deliveries조차
 // "실제 주문/배송 도메인이 없어 목업 값을 채워 넣는다"고 명시함) 이 값은 처음부터 실측이
 // 아니라 대상자 상태값 하나로 대충 고른 자리표시자다. 그래서 홈 화면에 "오늘 점심 배송
@@ -54,8 +70,37 @@ export function newWardDefaults() {
 // 목업이지?"), notifications.ts가 완식 스트릭과 같은 방식(프론트 합성 알림)으로 알림
 // 목록에 하루 한 번만 띄운다 — wards.ts(getWardDetail)와 notifications.ts 둘 다 같은
 // 값을 써야 해서 여기 한 곳에만 둔다.
+//
+// 시각 자체도 지금 끼니(아침/점심/저녁)에 맞춰 갈린다(2026-08-27 피드백 — 화면에 보이는
+// 오늘의 추천 반찬 조합은 끼니마다 바뀌는데 배송 안내만 항상 "점심 12시"로 고정돼 있던
+// 문제). "확인 필요" 상태는 기존과 같은 이유로 다른 상태보다 30분 늦은 시각을 쓴다. 값
+// 자체엔 오전/오후를 안 붙인다 — 이 값을 쓰는 notifications.ts의 어르신용 문구가 이미
+// "오늘 {끼니} 배송이 {eta}에..."처럼 끼니 이름으로 시간대를 알려주기 때문(중복 방지).
+const DELIVERY_ETA_BY_MEAL: Record<MealSlotLabel, { needsCheck: string; onTrack: string }> = {
+  아침: { needsCheck: "8:30", onTrack: "8:00" },
+  점심: { needsCheck: "12:30", onTrack: "12:00" },
+  저녁: { needsCheck: "5:30", onTrack: "5:00" },
+};
+
+// notifications.ts(getElderDeliveryNotification)가 끼니 이름과 시각을 각각 따로 계산하면
+// (currentMealSlotLabel과 estimateDeliveryEta를 별도로 호출) 둘 다 내부에서 각자
+// new Date()를 새로 읽어서, 아주 드물게 11시/17시 경계 순간에 서로 다른 끼니로 계산돼
+// "오늘 아침 배송이 12:00에 예정되어 있어요" 같은 안 맞는 조합이 나올 수 있다(코드 리뷰
+// 지적, 2026-08-27). 끼니와 시각을 한 번의 계산으로 같이 반환해서 이 경합을 없앤다.
+export function currentMealDelivery(status: WardStatus): { mealLabel: MealSlotLabel; eta: string } {
+  const mealLabel = currentMealSlotLabel();
+  const table = DELIVERY_ETA_BY_MEAL[mealLabel];
+  return { mealLabel, eta: status === "확인 필요" ? table.needsCheck : table.onTrack };
+}
+
+// wards.ts(getWardDetail)/ward-detail-view.tsx처럼 끼니 이름 없이 시각 하나만("배송 5:00")
+// 보여주는 화면용 — 끼니 이름이 옆에 없으면 "5:00"이 오전인지 오후인지 알 수 없어서
+// (특히 저녁 시각이 새벽 5시처럼 보임, 코드 리뷰 지적) 오전/오후를 붙여 그 자체로
+// 모호하지 않게 만든다. notifications.ts의 어르신용 문구는 끼니 이름이 이미 있으니
+// 대신 currentMealDelivery()의 bare eta를 쓴다.
 export function estimateDeliveryEta(status: WardStatus): string {
-  return status === "확인 필요" ? "12:30" : "12:00";
+  const { mealLabel, eta } = currentMealDelivery(status);
+  return `${MEAL_PERIOD[mealLabel]} ${eta}`;
 }
 
 function readRegisteredWards(): Ward[] {

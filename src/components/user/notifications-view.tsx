@@ -7,10 +7,12 @@ import {
   fetchElderNotifications,
   fetchElderStreakNotification,
   getElderDeliveryNotification,
+  getElderPasswordSecurityNotice,
   getElderSosAcknowledgment,
   markNotificationsSeen,
   notificationBadgeClass,
 } from "@/lib/notifications";
+import { useSession } from "@/lib/session";
 import { sosAckStore } from "@/lib/sos-store";
 import { useLocalStore } from "@/lib/use-store";
 import { Ward } from "@/lib/wards";
@@ -23,6 +25,7 @@ import { TopBar } from "@/components/app/top-bar";
 // 패턴으로 별도 화면으로 뺐다. 완식 스트릭/보호자의 SOS 확인 알림은 백엔드 알림이 아니라
 // 프론트 합성 항목이라(notifications.ts 상단 주석 참고) 맨 앞에 따로 붙인다.
 export function NotificationsView({ ward }: { ward: Ward }) {
+  const { account } = useSession();
   const [items, setItems] = useState<NotificationItem[] | null>(null);
   const [streak, setStreak] = useState<NotificationItem | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +64,14 @@ export function NotificationsView({ ward }: { ward: Ward }) {
   const loading = items === null && !error;
   const delivery = getElderDeliveryNotification(ward.status);
   const sosAck = getElderSosAcknowledgment(ward.id);
-  const merged = [delivery, ...(sosAck ? [sosAck] : []), ...(streak ? [streak] : []), ...(items ?? [])];
+  const passwordNotice = getElderPasswordSecurityNotice(account);
+  const merged = [
+    delivery,
+    ...(sosAck ? [sosAck] : []),
+    ...(passwordNotice ? [passwordNotice] : []),
+    ...(streak ? [streak] : []),
+    ...(items ?? []),
+  ];
 
   // 이 화면을 열어서 목록을 실제로 본 시점에, 지금까지 온 항목을 전부 "본 것"으로 기록한다
   // — home-view.tsx의 종 아이콘 배지가 이 기록을 기준으로 켜지므로, 여기 한 번 들어오면
@@ -93,7 +103,7 @@ export function NotificationsView({ ward }: { ward: Ward }) {
             {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-destructive" />}
             <div className={`flex flex-1 flex-col gap-1 ${n.read ? "pl-5" : ""}`}>
               <Badge className={`${notificationBadgeClass(n.type)} w-fit`}>{n.type}</Badge>
-              <p className="text-sm text-foreground">{n.message}</p>
+              <p className="text-sm break-keep text-foreground">{n.message}</p>
               <span className="text-xs text-muted-foreground">{n.date}</span>
             </div>
           </div>
