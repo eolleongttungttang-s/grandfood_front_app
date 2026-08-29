@@ -65,7 +65,12 @@ export function WardListView({ name, wards }: { name: string; wards: Ward[] }) {
             className="flex items-center gap-2 rounded-xl bg-destructive px-4 py-3 text-sm font-semibold text-white shadow-sm"
           >
             <Siren className="h-4 w-4 shrink-0 animate-pulse" />
-            {activeSosNames.join(", ")}님이 SOS를 보냈어요. 바로 확인하세요.
+            {/* break-keep(word-break: keep-all) 없이는 좁은 화면·큰 글씨 모드에서 "확인하세요"
+                같은 한 단어 중간이 "확" / "인하세요"로 갈라져 보인다(2026-08-29 사용자 리포트)
+                — top-bar.tsx 등 이 앱 다른 곳의 관례와 동일하게 단어 경계에서만 줄바꿈되게 한다. */}
+            <span className="break-keep">
+              {activeSosNames.join(", ")}님이 SOS를 보냈어요. 바로 확인하세요.
+            </span>
           </Link>
         )}
 
