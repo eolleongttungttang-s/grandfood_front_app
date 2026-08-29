@@ -389,27 +389,53 @@ export function HomeView({
       <div className="flex flex-1 flex-col gap-4 pb-6">
         <TopBar title={`환영해요, ${name}님`} subtitle="그랜드푸드가 처음이시군요" />
         <div className="flex flex-col gap-4 px-5">
-          <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
+          {/* 2026-08-29 사용자 피드백 — 원래 문구가 3문장(추천·배송·잔반분석·구독안내)이라
+              첫 진입 화면치고 너무 길었다. 핵심(AI 추천+배송, 잔반 자동분석)만 한 문장으로
+              줄이고, 구독 필요 여부에 따라 달라지던 마지막 안내 문장은 버튼 라벨이 이미
+              같은 역할을 하므로 없앴다. 글자 크기도 문단·버튼 모두 키우고(text-base/lg,
+              버튼은 다른 화면의 주요 CTA와 같은 h-14 규모), 이 카드도 다른 홈 카드들처럼
+              SpeakableCard로 감싸 탭하면 Azure 음성으로 읽어주게 한다. 문단에 break-keep을
+              준 이유는 — 모바일 폭에서 "분석해드려요"처럼 한 단어 중간이 "분석해드"/"려요"로
+              갈라지는 문제가 있었다(2026-08-29 사용자 리포트, ward-list-view.tsx SOS 배너와
+              동일한 원인·수정). */}
+          <SpeakableCard
+            id="home-first-time-welcome"
+            text="건강 상태에 맞는 반찬을 AI가 골라 배송해드리고, 잔반 사진만 올리면 잔반율도 자동으로 분석해드려요."
+            className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-6 text-center shadow-sm"
+          >
             <GrandFoodMark className="h-14 w-14" />
             <p className="text-base font-bold text-foreground">GrandFood와 함께 시작해요</p>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              그랜드푸드는 건강 상태와 질환·알레르기에 맞춰 AI가 매주 반찬을 추천하고, 담당
-              반찬가게가 그대로 배송해드리는 서비스예요. 잔반 사진만 올리면 잔반율도 자동으로
-              분석해드려요.
-              {needsSubscription && " 먼저 구독을 시작하면 바로 이용하실 수 있어요."}
+            <p className="break-keep text-base leading-relaxed text-muted-foreground">
+              건강 상태에 맞는 반찬을 AI가 골라 배송해드리고, 잔반 사진만 올리면 잔반율도
+              자동으로 분석해드려요.
             </p>
             {needsSubscription ? (
-              <Button className="mt-1 w-full" nativeButton={false} render={<Link href="/user/subscription" />}>
+              // 카드 전체가 SpeakableCard 탭 영역이라 이 버튼 클릭도 그대로 버블링되면
+              // 페이지 이동과 동시에 음성 읽기가 토글된다 — stopPropagation으로 막는다
+              // (식전/식후 사진 업로드 라벨과 동일한 이유, 위 583번째 줄 참고).
+              <Button
+                size="lg"
+                className="mt-1 h-14 w-full text-lg font-bold"
+                nativeButton={false}
+                onClick={(e) => e.stopPropagation()}
+                render={<Link href="/user/subscription" />}
+              >
                 <Sparkles />
                 구독하고 시작하기
               </Button>
             ) : (
-              <Button className="mt-1 w-full" nativeButton={false} render={<Link href="/user/diet" />}>
+              <Button
+                size="lg"
+                className="mt-1 h-14 w-full text-lg font-bold"
+                nativeButton={false}
+                onClick={(e) => e.stopPropagation()}
+                render={<Link href="/user/diet" />}
+              >
                 <Sparkles />
                 AI 반찬 추천 받으러 가기
               </Button>
             )}
-          </div>
+          </SpeakableCard>
         </div>
       </div>
     );

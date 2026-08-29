@@ -190,11 +190,17 @@ export function DietView({
       <div className="flex flex-1 flex-col gap-4 pb-6">
         <TopBar title="내 식단" subtitle="AI 반찬 추천을 먼저 받아보세요" />
         <div className="flex flex-col gap-4 px-5">
-          <p className="text-sm text-muted-foreground">
+          <p className="break-keep text-sm text-muted-foreground">
             아직 배정된 식단이 없어요. 아래에서 AI 반찬 추천을 먼저 받아보세요 — 받고 나면 이
             화면에 매일 식단과 잔반 분석, 식사 기록이 순서대로 나타나요.
           </p>
-          <BanchanRecommendationSection identity={banchanIdentity} state={banchanRecommendation} subscribeHref="/user/subscription" surveyHref="/user/survey?returnTo=%2Fuser%2Fdiet&section=health" />
+          <BanchanRecommendationSection
+            identity={banchanIdentity}
+            state={banchanRecommendation}
+            subscribeHref="/user/subscription"
+            surveyHref="/user/survey?returnTo=%2Fuser%2Fdiet&section=health"
+            speakableId="diet-ai-recommendation"
+          />
         </div>
       </div>
     );
@@ -245,6 +251,7 @@ export function DietView({
           surveyHref="/user/survey?returnTo=%2Fuser%2Fdiet&section=health"
           onSelectedMealChange={handleSelectedMealChange}
           todayCompletedMealTypes={[...todayCompletedMealTypes]}
+          speakableId="diet-ai-recommendation"
         />
 
         {/* "오늘 메뉴 구성" 카드는 뺐다 — 홈 화면의 "오늘의 추천 반찬 조합"과 내용이 완전히
