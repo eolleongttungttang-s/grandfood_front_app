@@ -49,13 +49,15 @@ import { ExpandToggle } from "@/components/app/expand-toggle";
 import { DietDayDetail } from "@/components/app/diet-day-detail";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
-import {
-  addDaysToDateString,
-  computeAchievementPct,
-  computeNutritionSnapshotForDate,
-  todayDateString,
-} from "@/lib/banchan-recommendation";
-import { weekdayLabel } from "@/lib/date-format";
+// 2026-08-29: "최근 7일 달성률"(아래 주석 처리된 계산/렌더 참고)을 숨기면서 여기서만 쓰던
+// import도 함께 주석 처리 — 지우지 않고 남겨서 나중에 되살릴 때 바로 알아볼 수 있게 한다.
+// import {
+//   addDaysToDateString,
+//   computeAchievementPct,
+//   computeNutritionSnapshotForDate,
+//   todayDateString,
+// } from "@/lib/banchan-recommendation";
+// import { weekdayLabel } from "@/lib/date-format";
 import { requestWellnessCall } from "@/lib/wellness-calls";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
@@ -213,25 +215,20 @@ export function WardDetailView({
   const menuEmoji =
     todayMenu.isReal || todayMenu.isGenerating ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
 
-  // "최근 7일 달성률" — 보호자 전용(2026-08-19 결정, 어르신 본인 화면은 그대로 둠). 이미
-  // 위에서 조회한 banchanRecommendation.monthly를 그대로 재사용해서 최근 7일 각각의 "실제/
-  // 목표" 평균 달성률을 구한다. "최근 14일 섭취 기록" 카드와 겹박스가 되지 않도록 같은 카드
-  // 안에 이어붙인다(records-view.tsx는 두 카드로 나뉘어 있지만, 여긴 보호자가 한 화면에서
-  // 완식 여부와 영양 달성률을 같이 훑어보게 하나로 합친다).
-  const NUTRITION_TREND_DAYS = 7;
-  // useMemo로 banchanRecommendation.monthly에만 묶어뒀었는데, 그 안에서 부르는
-  // todayDateString()은 "지금"(wall clock) 기준이라 monthly가 안 바뀌는 한(주간 생성
-  // 폴링이 끝난 뒤엔 안 바뀜) 자정이 지나도 다시 계산되지 않았다(코드 리뷰 지적: 그래프
-  // 날짜 범위와 "오늘" 표시가 어제 기준에 멈춰 있었음). computeNutritionSnapshotForDate는
-  // 이미 메모리에 있는 monthly.weeks를 훑는 순수 조회라 매 렌더마다 다시 계산해도 비용이
-  // 거의 없다 — 메모이제이션을 빼서 항상 실제 "오늘"을 반영하게 한다.
-  const today = todayDateString();
-  const nutritionTrend: { date: string; pct: number | null }[] = [];
-  for (let i = NUTRITION_TREND_DAYS - 1; i >= 0; i--) {
-    const date = addDaysToDateString(today, -i);
-    nutritionTrend.push({ date, pct: computeAchievementPct(computeNutritionSnapshotForDate(banchanRecommendation.monthly, date)) });
-  }
-  const hasNutritionTrend = nutritionTrend.some((d) => d.pct != null);
+  // "최근 7일 달성률" — 2026-08-29 사용자 피드백으로 숨김. 이 값은 실제 섭취량(잔반율)이
+  // 아니라 "AI가 배정한 반찬의 영양가 합이 목표치에 얼마나 가까웠는지"라, 바로 아래
+  // "최근 14일 섭취 기록"(실제 완식/소량/미응답 기록)과 다른 걸 재는데도 이름이
+  // "달성률"이라 보호자가 "실제로 잘 드셨다"로 오해하기 쉬웠다. 완전히 지우진 않고
+  // 계산/렌더 모두 주석 처리만 해둔다 — 나중에 라벨을 바꾸거나 실제 섭취량 기반으로
+  // 다시 계산하는 식으로 되살릴 수 있게.
+  // const NUTRITION_TREND_DAYS = 7;
+  // const today = todayDateString();
+  // const nutritionTrend: { date: string; pct: number | null }[] = [];
+  // for (let i = NUTRITION_TREND_DAYS - 1; i >= 0; i--) {
+  //   const date = addDaysToDateString(today, -i);
+  //   nutritionTrend.push({ date, pct: computeAchievementPct(computeNutritionSnapshotForDate(banchanRecommendation.monthly, date)) });
+  // }
+  // const hasNutritionTrend = nutritionTrend.some((d) => d.pct != null);
 
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   // diet-view.tsx의 같은 카드와 동일하게 기본은 접어둔다(2026-08-14 방침 — 필요한 사람만 더 눌러보게).
@@ -693,10 +690,10 @@ export function WardDetailView({
       {activeTab === "records" && (
         <>
         <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          {/* 완식 여부(최근 14일)와 영양 목표 달성률(최근 7일)을 보호자가 한 화면에서 같이
-              훑어보게 하나의 카드로 합쳤다(2026-08-19 결정, 어르신 본인 화면(records-view.tsx)
-              은 두 카드로 분리된 채 그대로 둠 — 어르신 화면은 단순함을 우선한다). */}
-          {hasNutritionTrend && (
+          {/* "영양 목표 달성률(최근 7일)" 막대 그래프는 2026-08-29 사용자 피드백으로 숨김
+              (위 계산부 주석 참고 — 실제 섭취량이 아니라 식단 구성과 목표치의 근접도를
+              재는 값이라 "달성률"이라는 이름이 오해를 샀다). JSX만 통째로 주석 처리. */}
+          {/* {hasNutritionTrend && (
             <div className="flex flex-col gap-3">
               <h2 className="text-sm font-bold text-foreground">최근 {NUTRITION_TREND_DAYS}일 달성률</h2>
               <div className="flex items-end gap-1.5">
@@ -723,9 +720,9 @@ export function WardDetailView({
                 })}
               </div>
             </div>
-          )}
+          )} */}
 
-          <div className={`flex flex-col gap-3 ${hasNutritionTrend ? "border-t border-border pt-4" : ""}`}>
+          <div className="flex flex-col gap-3">
             {/* 범례는 제목과 한 줄에 두어야 가시성이 좋다는 피드백에 따라 같은 행에 둔다. */}
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
               <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>

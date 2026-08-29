@@ -115,12 +115,15 @@ export function WardListView({ name, wards }: { name: string; wards: Ward[] }) {
                       href={`/guardian/wards/detail?id=${ward.id}`}
                       className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-muted text-base font-extrabold text-muted-foreground">
                           {ward.name.slice(0, 1)}
                         </div>
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-1.5">
+                        <div className="flex min-w-0 flex-col gap-1">
+                          {/* 이름+관계를 한 줄로 고정 — 글자 사이 gap과 배지 폭까지 겹치면
+                              (특히 큰 글씨 모드) 이름이 글자 단위로 줄바꿈되던 문제(2026-08-29
+                              사용자 리포트). truncate로 줄바꿈 대신 한 줄 안에서 잘리게 한다. */}
+                          <div className="flex items-center gap-0.5 truncate">
                             <span className="font-semibold text-foreground">
                               {ward.name}
                             </span>
