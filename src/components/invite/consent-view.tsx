@@ -176,7 +176,7 @@ export function ConsentView({
 
       <div className="flex flex-col gap-4 px-5">
         <div className="flex flex-col items-center gap-1.5 text-center">
-          <p className="text-lg leading-relaxed text-foreground">
+          <p className="break-keep text-lg leading-relaxed text-foreground">
             <b className="text-accent">{guardianName}</b>님이 가입을 도와드리고 있어요
           </p>
           <p className="text-sm text-muted-foreground">

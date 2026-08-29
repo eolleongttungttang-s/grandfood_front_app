@@ -19,6 +19,7 @@ import { BackendMealType, MonthlyBanchanRecommendation, WardIdentity } from "@/l
 import { hasAnyProgress, MonthlyBanchanRecommendationState } from "@/lib/use-monthly-banchan-recommendation";
 import { BanchanRecommendationCalendar } from "@/components/app/banchan-recommendation-calendar";
 import { RecommendationReminderModal } from "@/components/app/RecommendationReminderModal";
+import { SpeakableCard } from "@/components/app/speakable-card";
 import { isMissingHealthInfo, useRecommendationReadiness } from "@/lib/useRecommendationReadiness";
 
 export function BanchanRecommendationSection({
@@ -28,6 +29,7 @@ export function BanchanRecommendationSection({
   surveyHref,
   onSelectedMealChange,
   todayCompletedMealTypes,
+  speakableId,
 }: {
   identity: WardIdentity;
   state: MonthlyBanchanRecommendationState;
@@ -47,6 +49,13 @@ export function BanchanRecommendationSection({
     monthlyForDate: MonthlyBanchanRecommendation | null
   ) => void;
   todayCompletedMealTypes?: readonly BackendMealType[];
+  /** 탭하면 Azure 음성으로 카드 내용을 읽어주게 한다(SpeakableCard) — 값이 있을 때만
+   *  켜진다. 이용자 본인 화면(diet-view.tsx)만 넘긴다 — 보호자 화면(ward-detail-view.tsx)은
+   *  다른 어르신 카드들도 전부 TTS가 없어서(가족 보호자는 화면을 직접 읽으니 음성 안내가
+   *  필요 없음) 여기만 예외로 켤 이유가 없다. 달력이 뜬 상태(BanchanRecommendationCalendar,
+   *  내부에 끼니별 버튼이 많음)에서는 이 카드 하나로 통째로 읽어줄 만한 단일 문장이 없어서
+   *  적용 대상이 아니다 — 구독 필요/아직 요청 안 함, 두 "안내 문구만 있는" 상태에서만 켠다. */
+  speakableId?: string;
 }) {
   const { month, monthly, loading, requesting, polling, error, hasActiveSubscription, request } = state;
   const router = useRouter();
@@ -80,24 +89,43 @@ export function BanchanRecommendationSection({
   // 추천받기"/빈 상태 문구를 가르면 구독 직후 첫 진입에서도 "다시" 문구와 빈 달력이 뜬다
   // (2026-08-13 피드백). 실제로 뭔가 진행된 적 있는지(hasAnyProgress)로 가른다.
   const hasProgress = hasAnyProgress(monthly);
+  // 달력이 뜨는 상태(카드 안에 끼니별 버튼이 잔뜩 있음)는 한 문장으로 요약해 읽어줄 수 없어
+  // TTS 대상이 아니다 — "안내 문구만 있는" 두 상태(구독 필요 / 아직 요청 안 함)에서만
+  // speechText가 채워지고, 이때만 카드를 SpeakableCard로 감싼다.
+  const speechText =
+    !loading && needsSubscription
+      ? `${month} 월 배송 추천. 구독이 있어야 AI 반찬 추천을 받을 수 있어요. 위 버튼을 눌러 먼저 구독을 시작해 주세요.`
+      : !loading && (!monthly || !hasProgress)
+        ? `${month} 월 배송 추천. 아직 이번 달 AI 반찬 추천을 요청하지 않았어요. 위 버튼을 눌러 받아보세요.`
+        : null;
 
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+  const cardContent = (
+    <>
+      {/* 버튼("다시 추천받기" 등)이 월 텍스트("2026-08 월 배송 추천")와 한 줄에서 폭을
+          나눠 가지면, 좁은 모바일 화면에서 버튼 폭에 밀려 월 텍스트가 두 줄로 꺾여
+          보였다(2026-08-22 피드백, "PC에선 깔끔한데 모바일에선 지저분") — 버튼은 짧은
+          라벨("AI 반찬 추천")과만 한 줄에 두고, 월 텍스트는 카드 폭 전체를 혼자 쓰는
+          별도 줄로 내려서 버튼과 폭을 다투지 않게 한다. */}
       <div className="flex flex-col gap-1">
-        {/* 버튼("다시 추천받기" 등)이 월 텍스트("2026-08 월 배송 추천")와 한 줄에서 폭을
-            나눠 가지면, 좁은 모바일 화면에서 버튼 폭에 밀려 월 텍스트가 두 줄로 꺾여
-            보였다(2026-08-22 피드백, "PC에선 깔끔한데 모바일에선 지저분") — 버튼은 짧은
-            라벨("AI 반찬 추천")과만 한 줄에 두고, 월 텍스트는 카드 폭 전체를 혼자 쓰는
-            별도 줄로 내려서 버튼과 폭을 다투지 않게 한다. */}
         <div className="flex items-center justify-between gap-3">
           <span className="text-xs font-bold text-sidebar-primary">AI 반찬 추천</span>
           {needsSubscription ? (
-            <Button size="sm" nativeButton={false} render={<Link href={subscribeHref} />}>
+            // 카드 전체가 SpeakableCard 탭 영역일 수 있어 버튼 클릭이 그대로 버블링되면
+            // 페이지 이동과 동시에 음성 읽기가 토글된다 — stopPropagation으로 막는다
+            // (home-view.tsx 구독 버튼과 동일한 이유).
+            <Button size="sm" nativeButton={false} onClick={(e) => e.stopPropagation()} render={<Link href={subscribeHref} />}>
               <Sparkles />
               구독하러 가기
             </Button>
           ) : (
-            <Button size="sm" onClick={handleRequestClick} disabled={requesting || loading || hasActiveSubscription == null}>
+            <Button
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRequestClick();
+              }}
+              disabled={requesting || loading || hasActiveSubscription == null}
+            >
               <Sparkles />
               {requesting ? "요청하는 중..." : hasProgress ? "다시 추천받기" : "AI 추천받기"}
             </Button>
@@ -115,7 +143,7 @@ export function BanchanRecommendationSection({
           구독이 있어야 AI 반찬 추천을 받을 수 있어요. 위 버튼을 눌러 먼저 구독을 시작해 주세요.
         </p>
       ) : !monthly || !hasProgress ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="break-keep text-sm text-muted-foreground">
           아직 이번 달 AI 반찬 추천을 요청하지 않았어요. 위 버튼을 눌러 받아보세요.
         </p>
       ) : (
@@ -127,6 +155,27 @@ export function BanchanRecommendationSection({
           onSelectedMealChange={onSelectedMealChange}
           todayCompletedMealTypes={todayCompletedMealTypes}
         />
+      )}
+    </>
+  );
+
+  return (
+    <>
+      {speakableId && speechText ? (
+        // 기본(overlay) 아이콘은 카드 우상단에 얹히는데, 이 카드는 그 자리에 이미
+        // "구독하러 가기"/"AI 추천받기" 버튼이 있어서 아이콘이 버튼과 겹쳐 탭 영역을
+        // 가릴 수 있다(2026-08-29) — variant="leading"으로 아이콘을 별도 줄로 뺀다
+        // (tutorial-view.tsx의 제목 겹침 문제와 같은 이유·같은 해결).
+        <SpeakableCard
+          id={speakableId}
+          text={speechText}
+          variant="leading"
+          className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm"
+        >
+          {cardContent}
+        </SpeakableCard>
+      ) : (
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">{cardContent}</div>
       )}
 
       <RecommendationReminderModal
@@ -146,6 +195,6 @@ export function BanchanRecommendationSection({
         }}
         onClose={() => setShowReminder(false)}
       />
-    </div>
+    </>
   );
 }
