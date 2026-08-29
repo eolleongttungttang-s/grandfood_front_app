@@ -233,8 +233,8 @@ function OverviewRow({ label, value, onClick }: { label: string; value: string; 
 function StepHeading({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <h2 className="text-2xl leading-snug font-extrabold text-foreground">{title}</h2>
-      {hint && <p className="text-base text-muted-foreground">{hint}</p>}
+      <h2 className="break-keep text-2xl leading-snug font-extrabold text-foreground">{title}</h2>
+      {hint && <p className="break-keep text-base text-muted-foreground">{hint}</p>}
     </div>
   );
 }
