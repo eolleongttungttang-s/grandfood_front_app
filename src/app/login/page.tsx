@@ -34,24 +34,19 @@ import { addWard, createSelfWard, getWard } from "@/lib/wards";
 
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
 
-const DEMO_CREDENTIALS: Record<UserRole, { loginId: string; password: string }> = {
-  user: { loginId: "gf-user01", password: "1234" },
-  guardian: { loginId: "gf-guardian01", password: "1234" },
-};
-
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useSession();
   const [tab, setTab] = useState<UserRole>("user");
-  const [loginId, setLoginId] = useState(DEMO_CREDENTIALS.user.loginId);
-  const [password, setPassword] = useState(DEMO_CREDENTIALS.user.password);
+  const [loginId, setLoginId] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   function selectTab(next: UserRole) {
     setTab(next);
-    setLoginId(DEMO_CREDENTIALS[next].loginId);
-    setPassword(DEMO_CREDENTIALS[next].password);
+    setLoginId("");
+    setPassword("");
     setError(null);
   }
 
@@ -253,7 +248,7 @@ export default function LoginPage() {
                     consent-view.tsx가 본인 연락처 뒷자리 4자리로 자동 생성해준 값이라,
                     본인이 그걸 "비밀번호"로 기억 못 하는 경우가 많다. 빈 칸일 때만 힌트를 보여준다. */}
                 {tab === "user" && !password && (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="break-keep text-sm text-muted-foreground">
                     보호자를 통해 가입하셨으면 연락처 뒷자리를 입력해주세요.
                   </p>
                 )}
@@ -294,8 +289,8 @@ export default function LoginPage() {
               </div>
             </form>
 
-            <p className="mt-5 text-center text-xs text-muted-foreground">
-              데모 계정이 미리 입력되어 있어요 · 탭을 바꾸면 계정도 함께 바뀌어요
+            <p className="mt-5 break-keep text-center text-sm text-muted-foreground">
+              탭을 바꾸면 계정도 함께 바뀌어요
             </p>
           </CardContent>
         </Card>
