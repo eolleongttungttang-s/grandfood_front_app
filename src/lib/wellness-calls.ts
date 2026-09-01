@@ -13,7 +13,7 @@ import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 const REQUEST_TIMEOUT_MS = 15_000;
 
 const BACKEND_SESSION_REQUIRED_MESSAGE =
-  "이 대상자를 관리하는 보호자 계정 또는 본인 계정으로 로그인해야 안부확인콜을 요청할 수 있어요.";
+  "이 대상자를 관리하는 보호자 계정 또는 본인 계정으로 로그인해야 안부확인알람을 요청할 수 있어요.";
 
 // 어느 대상자인지(backendWardId)는 알아야 하고 그 대상자가 백엔드에 아직 없으면(한 번도 다른
 // 기능을 안 써봤으면) 새로 만들어야 하는데, 그 확보 과정(ensureBackendWardId)엔 보호자/본인
@@ -46,7 +46,7 @@ export async function requestWellnessCall(identity: {
   try {
     const response = await promise;
     if (!response.ok) {
-      throw new Error(`안부확인콜 요청이 실패했어요 (status ${response.status})`);
+      throw new Error(`안부확인알람 요청이 실패했어요 (status ${response.status})`);
     }
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {

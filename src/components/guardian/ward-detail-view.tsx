@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   ChevronLeft,
@@ -24,7 +24,8 @@ import { HISTORY_DAYS, WardMealDashboard, recentKstDateKeys } from "@/lib/ward-m
 import { dietHistoryForDate } from "@/lib/meal-dashboard";
 import { LeftoverDayGrid, LeftoverLegend } from "@/components/app/leftover-day-grid";
 import { ACTIVITY_LEVEL_LABEL, fromBackendActivityLevel } from "@/lib/health-profile";
-import type { BackendUserProfile } from "@/lib/backend-auth";
+import { BACKEND_CONDITION_FLAG_TO_LABEL, type BackendUserProfile } from "@/lib/backend-auth";
+import { BACKEND_MEDICATION_FLAG_TO_LABEL } from "@/lib/medication-food-suggestions";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
 import {
@@ -48,13 +49,15 @@ import { ExpandToggle } from "@/components/app/expand-toggle";
 import { DietDayDetail } from "@/components/app/diet-day-detail";
 import { useMonthlyBanchanRecommendation } from "@/lib/use-monthly-banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
-import {
-  addDaysToDateString,
-  computeAchievementPct,
-  computeNutritionSnapshotForDate,
-  todayDateString,
-} from "@/lib/banchan-recommendation";
-import { weekdayLabel } from "@/lib/date-format";
+// 2026-08-29: "최근 7일 달성률"(아래 주석 처리된 계산/렌더 참고)을 숨기면서 여기서만 쓰던
+// import도 함께 주석 처리 — 지우지 않고 남겨서 나중에 되살릴 때 바로 알아볼 수 있게 한다.
+// import {
+//   addDaysToDateString,
+//   computeAchievementPct,
+//   computeNutritionSnapshotForDate,
+//   todayDateString,
+// } from "@/lib/banchan-recommendation";
+// import { weekdayLabel } from "@/lib/date-format";
 import { requestWellnessCall } from "@/lib/wellness-calls";
 import { deliveryStore, wardDeliveries } from "@/lib/delivery";
 import {
@@ -182,6 +185,19 @@ export function WardDetailView({
   const activityLevel = backendProfile?.activityLevel
     ? fromBackendActivityLevel(backendProfile.activityLevel)
     : detail.healthProfile.activityLevel;
+  // 진단 받은 질환 / 복용 중인 약 — profile-view.tsx(이용자 본인 마이 화면)와 같은 이유로
+  // 여기도 추가한다(2026-08-24 피드백: 화면 위쪽의 "질환 · 알레르기 · 복약" 카드가
+  // detail.conditions/detail.medications라는 옛 목업 데이터를 그대로 보여주고 있어서,
+  // 실제로 답한 값(careProfile)이나 백엔드 값과 안 맞을 수 있었다 — "생활 정보" 카드에는
+  // 반대로 이 두 항목 자체가 아예 없어서, 정작 수정 버튼 옆엔 지금 값이 안 보였다).
+  const medicationLabels = backendProfile
+    ? backendProfile.medicationFlags.map((flag) => BACKEND_MEDICATION_FLAG_TO_LABEL[flag] ?? flag)
+    : careProfile?.takesMedication
+      ? [...careProfile.medications, ...careProfile.customMedications].map((m) => m.name).filter(Boolean)
+      : [];
+  const conditionLabels = backendProfile
+    ? backendProfile.conditionFlags.map((flag) => BACKEND_CONDITION_FLAG_TO_LABEL[flag] ?? flag)
+    : (careProfile?.conditions ?? []);
   const banchanIdentity = {
     wardId: ward.id,
     wardName: ward.name,
@@ -199,25 +215,20 @@ export function WardDetailView({
   const menuEmoji =
     todayMenu.isReal || todayMenu.isGenerating ? "🍽️" : (representativeDish?.imageEmoji ?? "🍽️");
 
-  // "최근 7일 달성률" — 보호자 전용(2026-08-19 결정, 어르신 본인 화면은 그대로 둠). 이미
-  // 위에서 조회한 banchanRecommendation.monthly를 그대로 재사용해서 최근 7일 각각의 "실제/
-  // 목표" 평균 달성률을 구한다. "최근 14일 섭취 기록" 카드와 겹박스가 되지 않도록 같은 카드
-  // 안에 이어붙인다(records-view.tsx는 두 카드로 나뉘어 있지만, 여긴 보호자가 한 화면에서
-  // 완식 여부와 영양 달성률을 같이 훑어보게 하나로 합친다).
-  const NUTRITION_TREND_DAYS = 7;
-  // useMemo로 banchanRecommendation.monthly에만 묶어뒀었는데, 그 안에서 부르는
-  // todayDateString()은 "지금"(wall clock) 기준이라 monthly가 안 바뀌는 한(주간 생성
-  // 폴링이 끝난 뒤엔 안 바뀜) 자정이 지나도 다시 계산되지 않았다(코드 리뷰 지적: 그래프
-  // 날짜 범위와 "오늘" 표시가 어제 기준에 멈춰 있었음). computeNutritionSnapshotForDate는
-  // 이미 메모리에 있는 monthly.weeks를 훑는 순수 조회라 매 렌더마다 다시 계산해도 비용이
-  // 거의 없다 — 메모이제이션을 빼서 항상 실제 "오늘"을 반영하게 한다.
-  const today = todayDateString();
-  const nutritionTrend: { date: string; pct: number | null }[] = [];
-  for (let i = NUTRITION_TREND_DAYS - 1; i >= 0; i--) {
-    const date = addDaysToDateString(today, -i);
-    nutritionTrend.push({ date, pct: computeAchievementPct(computeNutritionSnapshotForDate(banchanRecommendation.monthly, date)) });
-  }
-  const hasNutritionTrend = nutritionTrend.some((d) => d.pct != null);
+  // "최근 7일 달성률" — 2026-08-29 사용자 피드백으로 숨김. 이 값은 실제 섭취량(잔반율)이
+  // 아니라 "AI가 배정한 반찬의 영양가 합이 목표치에 얼마나 가까웠는지"라, 바로 아래
+  // "최근 14일 섭취 기록"(실제 완식/소량/미응답 기록)과 다른 걸 재는데도 이름이
+  // "달성률"이라 보호자가 "실제로 잘 드셨다"로 오해하기 쉬웠다. 완전히 지우진 않고
+  // 계산/렌더 모두 주석 처리만 해둔다 — 나중에 라벨을 바꾸거나 실제 섭취량 기반으로
+  // 다시 계산하는 식으로 되살릴 수 있게.
+  // const NUTRITION_TREND_DAYS = 7;
+  // const today = todayDateString();
+  // const nutritionTrend: { date: string; pct: number | null }[] = [];
+  // for (let i = NUTRITION_TREND_DAYS - 1; i >= 0; i--) {
+  //   const date = addDaysToDateString(today, -i);
+  //   nutritionTrend.push({ date, pct: computeAchievementPct(computeNutritionSnapshotForDate(banchanRecommendation.monthly, date)) });
+  // }
+  // const hasNutritionTrend = nutritionTrend.some((d) => d.pct != null);
 
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   // diet-view.tsx의 같은 카드와 동일하게 기본은 접어둔다(2026-08-14 방침 — 필요한 사람만 더 눌러보게).
@@ -261,16 +272,18 @@ export function WardDetailView({
         age: ward.age,
         address: ward.address,
       });
-      toast.success(`${ward.name}님 안부 확인을 요청했어요.`);
+      toast.success(`${ward.name}님 안부확인알람을 요청했어요.`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "안부 확인 요청에 실패했어요.");
+      toast.error(err instanceof Error ? err.message : "안부확인알람 요청에 실패했어요.");
     } finally {
       setRequestingWellnessCall(false);
     }
   }
 
+  const rootRef = useRef<HTMLDivElement>(null);
+
   return (
-    <div className="flex flex-1 flex-col">
+    <div ref={rootRef} className="flex flex-1 flex-col">
       <div className="flex items-center justify-between bg-sidebar px-5 py-3 text-sidebar-foreground">
         <div className="flex items-center gap-3">
           <GrandFoodMark className="h-6 w-6 shrink-0 rounded-md" />
@@ -328,7 +341,7 @@ export function WardDetailView({
             </Button>
             <Button size="sm" onClick={requestWellnessCheck} disabled={requestingWellnessCall}>
               <MessageCircle />
-              {requestingWellnessCall ? "요청하는 중..." : "안부 확인 요청"}
+              {requestingWellnessCall ? "요청하는 중..." : "안부확인알람 요청"}
             </Button>
             <Button
               variant="outline"
@@ -506,14 +519,27 @@ export function WardDetailView({
         <>
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
           <span className="text-xs font-bold text-foreground">질환 · 알레르기 · 복약</span>
+          {/* 진단 질환/복약은 2026-08-24까지 detail.conditions/detail.medications(예전
+              목업 데이터)를 그대로 보여주고 있었다 — 실제로 답한 값(careProfile)이나
+              백엔드 값과 안 맞을 수 있었고, 그렇다고 이 카드에 수정 버튼도 없어서
+              보호자가 고칠 방법도 안 보였다(피드백: "이걸 보호자가 직접 수정하는 칸이
+              없나보네?"). profile-view.tsx(이용자 본인 마이 화면)와 같은 기준
+              (medicationLabels/conditionLabels)으로 바꾸고, 아래에 수정 버튼도 단다. */}
           <div className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold text-muted-foreground">진단 질환</span>
             <div className="flex flex-wrap gap-1.5">
-              {detail.conditions.map((c) => (
-                <Badge key={c} variant="secondary">
-                  {c}
-                </Badge>
-              ))}
+              {conditionLabels.length > 0 ? (
+                conditionLabels.map((c) => (
+                  <Badge key={c} variant="secondary">
+                    {c}
+                  </Badge>
+                ))
+              ) : (
+                <span className="text-sm text-muted-foreground">없음</span>
+              )}
+              {careProfile?.conditionsNote && (
+                <Badge variant="secondary">{careProfile.conditionsNote}</Badge>
+              )}
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
@@ -530,20 +556,29 @@ export function WardDetailView({
               )}
             </div>
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold text-muted-foreground">복약</span>
-            {detail.medications.map((m) => (
-              <div key={m.name} className="flex flex-col gap-0.5">
-                <div className="flex justify-between text-sm">
-                  <span className="text-foreground">{m.name}</span>
-                  <span className="text-muted-foreground">{m.schedule}</span>
-                </div>
-                {m.products.length > 0 && (
-                  <span className="text-xs text-muted-foreground">{m.products.join(", ")}</span>
-                )}
-              </div>
-            ))}
+            <div className="flex flex-wrap gap-1.5">
+              {medicationLabels.length > 0 ? (
+                medicationLabels.map((m, i) => (
+                  <Badge key={`${m}-${i}`} variant="secondary">
+                    {m}
+                  </Badge>
+                ))
+              ) : (
+                <span className="text-sm text-muted-foreground">없음</span>
+              )}
+            </div>
           </div>
+          <Button
+            variant="outline"
+            className="mt-1 w-full justify-center"
+            nativeButton={false}
+            render={<Link href={`/guardian/wards/detail/survey?id=${ward.id}&section=care`} />}
+          >
+            <ClipboardEdit />
+            질환 · 복약 수정하기
+          </Button>
         </div>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
@@ -655,10 +690,10 @@ export function WardDetailView({
       {activeTab === "records" && (
         <>
         <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm">
-          {/* 완식 여부(최근 14일)와 영양 목표 달성률(최근 7일)을 보호자가 한 화면에서 같이
-              훑어보게 하나의 카드로 합쳤다(2026-08-19 결정, 어르신 본인 화면(records-view.tsx)
-              은 두 카드로 분리된 채 그대로 둠 — 어르신 화면은 단순함을 우선한다). */}
-          {hasNutritionTrend && (
+          {/* "영양 목표 달성률(최근 7일)" 막대 그래프는 2026-08-29 사용자 피드백으로 숨김
+              (위 계산부 주석 참고 — 실제 섭취량이 아니라 식단 구성과 목표치의 근접도를
+              재는 값이라 "달성률"이라는 이름이 오해를 샀다). JSX만 통째로 주석 처리. */}
+          {/* {hasNutritionTrend && (
             <div className="flex flex-col gap-3">
               <h2 className="text-sm font-bold text-foreground">최근 {NUTRITION_TREND_DAYS}일 달성률</h2>
               <div className="flex items-end gap-1.5">
@@ -685,9 +720,9 @@ export function WardDetailView({
                 })}
               </div>
             </div>
-          )}
+          )} */}
 
-          <div className={`flex flex-col gap-3 ${hasNutritionTrend ? "border-t border-border pt-4" : ""}`}>
+          <div className="flex flex-col gap-3">
             {/* 범례는 제목과 한 줄에 두어야 가시성이 좋다는 피드백에 따라 같은 행에 둔다. */}
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
               <h2 className="text-sm font-bold text-foreground">최근 14일 섭취 기록</h2>
@@ -769,13 +804,11 @@ export function WardDetailView({
           active: activeTab === tab.id,
           onClick: () => {
             setActiveTab(tab.id);
-            // 실제로는 main(guardian/layout.tsx)이 아니라 window/document가 스크롤
-            // 컨테이너다 — main은 flex-1 + overflow-y-auto지만 상위 AccessibilityFrame이
-            // min-h-screen(고정 height가 아니라 최소값)이라 절대 clip되지 않고 콘텐츠
-            // 크기만큼 그대로 자라기 때문(코드 리뷰 지적으로 재확인, main.scrollTop을
-            // 직접 바꿔봐도 반응 없음을 확인함). 탭을 누르면 맨 위로 되돌려서 새 탭
-            // 내용(더 짧을 수 있음)을 바로 보여준다.
-            window.scrollTo({ top: 0, behavior: "instant" });
+            // 탭을 누르면 맨 위로 되돌려서 새 탭 내용(더 짧을 수 있음)을 바로 보여준다.
+            // 실제 스크롤 컨테이너는 이 컴포넌트가 아니라 guardian/layout.tsx의 main이라
+            // closest로 찾아서 그쪽 scrollTop을 바꾼다(AccessibilityFrame이 이제 h-dvh로
+            // 고정 높이라 main이 진짜 스크롤 영역이다 — window는 더 이상 스크롤되지 않는다).
+            rootRef.current?.closest("main")?.scrollTo({ top: 0, behavior: "instant" });
           },
         }))}
       />

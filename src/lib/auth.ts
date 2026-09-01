@@ -1,5 +1,10 @@
 import { createLocalStore } from "@/lib/local-store";
 
+// 크로스디바이스 폴백 로그인(ensureLocalUserAccount)이 백엔드가 안 주는 전화번호 자리에
+// 채워두는 더미값 — password-security-notice.ts가 "이 계정은 원래 출처(진짜 전화번호)를
+// 모른다"는 신호로도 재사용한다.
+export const UNKNOWN_PHONE_PLACEHOLDER = "000-0000-0000";
+
 export type UserRole = "user" | "guardian";
 
 export type Account = {
@@ -26,6 +31,15 @@ export type Account = {
    *  TODO(backend): UserModel에 해당 컬럼이 생기면 POST /users 요청 바디에 실어 보내야 함
    *  (지금은 백엔드에 저장할 자리가 없어서 로컬에만 둠 — docs/backend-api-contract.md 참고). */
   ttsCallConsent?: boolean;
+  /** role === "user"만 해당 — "auto-generated"면 본인이 고른 게 아니라 QR초대
+   *  가입(consent-view.tsx)이 전화번호 뒷자리로 자동 만든 비밀번호다. password-security-notice.ts가
+   *  이 값을 보고 "비밀번호가 전화번호로 자동 생성됐다"는 안내를 띄울지 정한다 — 비밀번호
+   *  숫자 모양(4자리)만으로 추측하면, 직접 가입하며 스스로 "1234" 같은 걸 고른 사람에게도
+   *  "전화번호로 자동 생성됐다"는 틀린 문구를 보여주게 된다(2026-08-27 피드백). 값이 없으면
+   *  본인이 직접 정했거나(직접가입) 크로스디바이스 폴백(ensureLocalUserAccount)처럼 이 기기가
+   *  원래 출처를 알 방법이 없는 경우다 — 후자는 실제로 자동생성 비밀번호를 쓰고 있어도 안내를
+   *  못 띄우는 알려진 한계지만, 틀린 문구를 보여주는 것보다 안전한 쪽을 택했다. */
+  passwordSource?: "auto-generated";
 };
 
 export type RegisterAccountCommand = {
@@ -42,6 +56,7 @@ export type RegisterAccountCommand = {
   selfWardId?: string;
   wardIds?: string[];
   ttsCallConsent?: boolean;
+  passwordSource?: "auto-generated";
 };
 
 export type RegisterAccountResult =
@@ -103,6 +118,20 @@ export function updateAccountTtsCallConsent(loginId: string, consent: boolean): 
   ttsConsentOverridesStore.update((prev) => ({ ...prev, [loginId]: consent }));
 }
 
+// 이용자 본인 계정(role: "user")만 해당 — user/profile/edit/page.tsx의 "기본 정보 수정"이
+// 생년월일을 바꿀 수 있게 하면서 같은 오버레이 패턴을 재사용한다. 예전엔 이 화면이 Ward.age
+// (숫자)만 갱신하고 계정의 birthDate는 그대로 둬서, 다시 이 화면을 열면 원래 생년월일이
+// 사라지고 매번 빈 선택창부터 다시 골라야 했다(2026-08-26 피드백 — "생년월일은 초기화될
+// 필요가 없잖아").
+export const birthDateOverridesStore = createLocalStore<Record<string, string>>(
+  "grandfood-app-birth-date-overrides",
+  {}
+);
+
+export function updateAccountBirthDate(loginId: string, birthDate: string): void {
+  birthDateOverridesStore.update((prev) => ({ ...prev, [loginId]: birthDate }));
+}
+
 // session.tsx가 이 store를 구독해서, 어느 화면에서 linkWardToGuardian이 호출되든(로그인
 // 시점이 아니어도) 이미 떠 있는 화면의 account.wardIds가 즉시 갱신되게 한다 — 그 전엔
 // account가 loginId 문자열이 바뀔 때만(사실상 재로그인) 다시 계산돼서, 로그인된 채로
@@ -123,10 +152,14 @@ export function linkWardToGuardian(guardianLoginId: string, wardId: string): voi
 export function getAccounts(): Account[] {
   const ttsOverrides = ttsConsentOverridesStore.read();
   const wardLinkOverrides = wardLinkOverridesStore.read();
+  const birthDateOverrides = birthDateOverridesStore.read();
   return [...ACCOUNTS, ...readRegisteredAccounts()].map((account) => {
     let next = account;
     if (account.loginId in ttsOverrides) {
       next = { ...next, ttsCallConsent: ttsOverrides[account.loginId] };
+    }
+    if (account.loginId in birthDateOverrides) {
+      next = { ...next, birthDate: birthDateOverrides[account.loginId] };
     }
     const linkedWardIds = wardLinkOverrides[account.loginId];
     if (next.role === "guardian" && linkedWardIds?.length) {
@@ -229,7 +262,7 @@ export function ensureLocalUserAccount(params: {
     role: "user",
     org: "개인 이용자",
     name: params.name,
-    phone: "000-0000-0000",
+    phone: UNKNOWN_PHONE_PLACEHOLDER,
     selfWardId: params.selfWardId,
   };
   writeRegisteredAccounts([...readRegisteredAccounts(), account]);
@@ -290,6 +323,7 @@ export function registerAccount(command: RegisterAccountCommand): RegisterAccoun
           address,
           planType: command.planType ?? "basic",
           ttsCallConsent: command.ttsCallConsent ?? false,
+          passwordSource: command.passwordSource,
         }
       : {}),
     ...(command.role === "user"

@@ -17,7 +17,7 @@ export function TopBar({
   onBack?: () => void;
 }) {
   return (
-    <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-5 py-4">
+    <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-5 py-2.5">
       <div className="flex items-center gap-3">
         {onBack && (
           <button
@@ -36,7 +36,11 @@ export function TopBar({
               {subtitle}
             </span>
           )}
-          <h1 className="text-lg font-extrabold tracking-tight text-foreground">
+          {/* break-keep(word-break: keep-all) — 기본값이면 한글은 (라틴 문자와 달리) 음절
+              단위로 아무 데서나 줄바꿈돼서, 좁은 화면에서 "최선호님"이 "최" / "선호님"처럼
+              이름 중간에서 잘렸다(2026-08-26 피드백). 띄어쓰기(쉼표 뒤)에서만 줄바꿈하도록
+              강제한다 — "안녕하세요," / "최선호님"처럼 단어 단위로 끊긴다. */}
+          <h1 className="text-lg font-extrabold tracking-tight text-foreground break-keep">
             {title}
           </h1>
         </div>

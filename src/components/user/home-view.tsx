@@ -6,10 +6,13 @@ import {
   Bell,
   Camera,
   ChevronRight,
+  CircleHelp,
   Images,
   Sparkles,
 } from "lucide-react";
+import { toast } from "sonner";
 
+import { Account } from "@/lib/auth";
 import { Ward, WardDetail } from "@/lib/wards";
 import { getPartnerStore } from "@/lib/partner-stores";
 import { getRepresentativeDish } from "@/lib/dishes";
@@ -18,8 +21,12 @@ import {
   fetchElderNotifications,
   fetchElderStreakNotification,
   getElderDeliveryNotification,
+  getElderPasswordSecurityNotice,
+  getElderSosAcknowledgment,
   getSeenNotificationIds,
 } from "@/lib/notifications";
+import { sosAckStore, spokenSosAckStore } from "@/lib/sos-store";
+import { speakUrgent } from "@/lib/accessibility";
 import { BackendMealType, computeTodayNutritionSnapshot } from "@/lib/banchan-recommendation";
 import { resolveTodayMenu, TODAY_MENU_GENERATING_MESSAGE } from "@/lib/today-menu";
 import { deriveHealthInsight } from "@/lib/health-insights";
@@ -83,10 +90,12 @@ export function HomeView({
   name,
   ward,
   detail,
+  account,
 }: {
   name: string;
   ward: Ward;
   detail: WardDetail;
+  account: Account;
 }) {
   const dislikes = wardDislikes(useLocalStore(dislikesStore), ward.id);
   // dislikesStore(로컬 id 목록)만으로는 이 브라우저에서 누른 기록만 보인다 — 백엔드에
@@ -151,6 +160,24 @@ export function HomeView({
   // "안 본 것"으로 친다 — 한 번 목록을 열어보면 그때까지 있던 항목은 다시는 배지를 안 켠다
   // (2026-08-21 피드백, "한 번 보면 꺼져야지 계속 켜져 있으면 자꾸 확인하게 된다").
   const [hasUnreadNotification, setHasUnreadNotification] = useState(false);
+  // 보호자가 "확인했어요"를 누르면(같은 브라우저 데모 한정) sosAckStore가 바뀐다 — 그걸
+  // 감지해서 아래 effect를 다시 돌려 배지에 반영한다(notifications-view.tsx와 같은 이유).
+  const sosAck = useLocalStore(sosAckStore);
+
+  // 보호자가 확인하면 어르신이 알림함을 직접 열어보지 않아도 바로 음성으로 들리도록,
+  // 홈 화면에 있을 때 자동 재생한다(2026-08-24 피드백) — spokenSosAckStore에 없는
+  // (아직 이 브라우저에서 한 번도 안 읽어준) sos-ack만 골라서 재생하고 바로 기록해
+  // 재렌더/재방문마다 반복 재생되지 않게 한다. 토스트도 같이 띄운다 — 사용자 조작 없이
+  // useEffect에서 바로 부르는 음성이라 일부 브라우저의 자동재생 정책에 조용히 막힐 수
+  // 있는데(2026-08-24 코드 리뷰 지적), 그래도 눈으로는 반드시 확인할 수 있게 하기 위함.
+  useEffect(() => {
+    const ackItem = getElderSosAcknowledgment(ward.id);
+    if (!ackItem) return;
+    if (spokenSosAckStore.read().includes(ackItem.id)) return;
+    speakUrgent(ackItem.message);
+    toast.info(ackItem.message);
+    spokenSosAckStore.update((prev) => [...prev, ackItem.id]);
+  }, [ward.id, sosAck]);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,14 +191,22 @@ export function HomeView({
       }).catch(() => null),
     ]).then(([notifications, streak]) => {
       if (cancelled) return;
-      const merged = [getElderDeliveryNotification(ward.status), ...notifications, ...(streak ? [streak] : [])];
+      const sosAckItem = getElderSosAcknowledgment(ward.id);
+      const passwordNotice = getElderPasswordSecurityNotice(account);
+      const merged = [
+        getElderDeliveryNotification(ward.status),
+        ...(sosAckItem ? [sosAckItem] : []),
+        ...(passwordNotice ? [passwordNotice] : []),
+        ...notifications,
+        ...(streak ? [streak] : []),
+      ];
       const seen = new Set(getSeenNotificationIds(ward.id));
       setHasUnreadNotification(merged.some((n) => !seen.has(n.id)));
     });
     return () => {
       cancelled = true;
     };
-  }, [ward.id, ward.name, ward.age, ward.address, ward.status]);
+  }, [ward.id, ward.name, ward.age, ward.address, ward.status, sosAck, account]);
 
   // 오늘 실제 AI 추천이 있으면 그걸, 없으면 목업으로 자연스럽게 폴백한다 — diet-view.tsx와
   // 같은 이유(2026-08-13 피드백, "오늘의 추천 반찬 조합" 카드와 AI 반찬 추천 달력이 서로
@@ -232,8 +267,12 @@ export function HomeView({
   // 찾으면(분석이 유난히 오래 걸리거나 실패) 포기하고 "기록" 탭 안내로 넘긴다.
   const [pendingAnalysisMealId, setPendingAnalysisMealId] = useState<string | null>(null);
   const [analysisTimedOut, setAnalysisTimedOut] = useState(false);
-  const POLL_INTERVAL_MS = 4000;
-  const POLL_MAX_ATTEMPTS = 8; // 최대 약 32초
+  // GPU 잔반 분석 자체는 0.8초 안에 끝나는데(2026-08-25 확인), 예전엔 폴링 간격이
+  // 4초라 아무리 빨리 끝나도 최소 4초는 기다려야 화면에 반영됐다 — 1초로 줄여서
+  // 그 하한선을 낮춘다. 총 대기 한도(약 32초)는 그대로 유지하려고 시도 횟수를
+  // 8 -> 32로 같이 늘렸다.
+  const POLL_INTERVAL_MS = 1000;
+  const POLL_MAX_ATTEMPTS = 32; // 최대 약 32초
 
   useEffect(() => {
     if (!pendingAnalysisMealId) return;
@@ -350,27 +389,53 @@ export function HomeView({
       <div className="flex flex-1 flex-col gap-4 pb-6">
         <TopBar title={`환영해요, ${name}님`} subtitle="그랜드푸드가 처음이시군요" />
         <div className="flex flex-col gap-4 px-5">
-          <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
+          {/* 2026-08-29 사용자 피드백 — 원래 문구가 3문장(추천·배송·잔반분석·구독안내)이라
+              첫 진입 화면치고 너무 길었다. 핵심(AI 추천+배송, 잔반 자동분석)만 한 문장으로
+              줄이고, 구독 필요 여부에 따라 달라지던 마지막 안내 문장은 버튼 라벨이 이미
+              같은 역할을 하므로 없앴다. 글자 크기도 문단·버튼 모두 키우고(text-base/lg,
+              버튼은 다른 화면의 주요 CTA와 같은 h-14 규모), 이 카드도 다른 홈 카드들처럼
+              SpeakableCard로 감싸 탭하면 Azure 음성으로 읽어주게 한다. 문단에 break-keep을
+              준 이유는 — 모바일 폭에서 "분석해드려요"처럼 한 단어 중간이 "분석해드"/"려요"로
+              갈라지는 문제가 있었다(2026-08-29 사용자 리포트, ward-list-view.tsx SOS 배너와
+              동일한 원인·수정). */}
+          <SpeakableCard
+            id="home-first-time-welcome"
+            text="건강 상태에 맞는 반찬을 AI가 골라 배송해드리고, 잔반 사진만 올리면 잔반율도 자동으로 분석해드려요."
+            className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card p-6 text-center shadow-sm"
+          >
             <GrandFoodMark className="h-14 w-14" />
             <p className="text-base font-bold text-foreground">GrandFood와 함께 시작해요</p>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              그랜드푸드는 건강 상태와 질환·알레르기에 맞춰 AI가 매주 반찬을 추천하고, 담당
-              반찬가게가 그대로 배송해드리는 서비스예요. 잔반 사진만 올리면 잔반율도 자동으로
-              분석해드려요.
-              {needsSubscription && " 먼저 구독을 시작하면 바로 이용하실 수 있어요."}
+            <p className="break-keep text-base leading-relaxed text-muted-foreground">
+              건강 상태에 맞는 반찬을 AI가 골라 배송해드리고, 잔반 사진만 올리면 잔반율도
+              자동으로 분석해드려요.
             </p>
             {needsSubscription ? (
-              <Button className="mt-1 w-full" nativeButton={false} render={<Link href="/user/subscription" />}>
+              // 카드 전체가 SpeakableCard 탭 영역이라 이 버튼 클릭도 그대로 버블링되면
+              // 페이지 이동과 동시에 음성 읽기가 토글된다 — stopPropagation으로 막는다
+              // (식전/식후 사진 업로드 라벨과 동일한 이유, 위 583번째 줄 참고).
+              <Button
+                size="lg"
+                className="mt-1 h-14 w-full text-lg font-bold"
+                nativeButton={false}
+                onClick={(e) => e.stopPropagation()}
+                render={<Link href="/user/subscription" />}
+              >
                 <Sparkles />
                 구독하고 시작하기
               </Button>
             ) : (
-              <Button className="mt-1 w-full" nativeButton={false} render={<Link href="/user/diet" />}>
+              <Button
+                size="lg"
+                className="mt-1 h-14 w-full text-lg font-bold"
+                nativeButton={false}
+                onClick={(e) => e.stopPropagation()}
+                render={<Link href="/user/diet" />}
+              >
                 <Sparkles />
                 AI 반찬 추천 받으러 가기
               </Button>
             )}
-          </div>
+          </SpeakableCard>
         </div>
       </div>
     );
@@ -382,19 +447,28 @@ export function HomeView({
         title={`안녕하세요, ${name}님`}
         subtitle={partnerStore?.name}
         right={
-          <Link
-            href="/user/notifications"
-            aria-label={hasUnreadNotification ? "알림, 안 읽은 알림 있음" : "알림"}
-            className="relative flex h-10 w-10 items-center justify-center rounded-full text-foreground hover:bg-muted"
-          >
-            <Bell className="h-5 w-5" />
-            {hasUnreadNotification && (
-              <span
-                aria-hidden="true"
-                className="absolute top-2 right-2 h-2 w-2 rounded-full bg-destructive ring-2 ring-card"
-              />
-            )}
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link
+              href="/user/tutorial?replay=1"
+              aria-label="사용법 다시 보기"
+              className="flex h-10 w-10 items-center justify-center rounded-full text-foreground hover:bg-muted"
+            >
+              <CircleHelp className="h-5 w-5" />
+            </Link>
+            <Link
+              href="/user/notifications"
+              aria-label={hasUnreadNotification ? "알림, 안 읽은 알림 있음" : "알림"}
+              className="relative flex h-10 w-10 items-center justify-center rounded-full text-foreground hover:bg-muted"
+            >
+              <Bell className="h-5 w-5" />
+              {hasUnreadNotification && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-2 right-2 h-2 w-2 rounded-full bg-destructive ring-2 ring-card"
+                />
+              )}
+            </Link>
+          </div>
         }
       />
 
@@ -419,13 +493,13 @@ export function HomeView({
           text={`${recommendedComboSpeech} ${mealCheckinSpeech}`}
           className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm"
         >
-          <div className="flex items-center gap-3">
-            <span className="text-4xl">{menuEmoji}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">{menuEmoji}</span>
             <div className="flex flex-col">
               <span className="text-xs font-semibold text-muted-foreground">
                 오늘의 추천 반찬 조합
               </span>
-              <span className="text-lg font-extrabold text-foreground">
+              <span className="text-base font-extrabold text-foreground">
                 {partnerStore?.name ?? "담당 반찬가게"}
               </span>
             </div>
@@ -674,7 +748,7 @@ export function HomeView({
         ) : (
           medicationAdvice && (
             <Link
-              href="/user/survey?section=care&returnTo=/user/home"
+              href="/user/survey?section=care&step=medication&returnTo=/user/home"
               className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3"
             >
               <span className="text-sm font-semibold text-foreground">

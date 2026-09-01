@@ -38,8 +38,12 @@ export function SpeakableCard({
   tone?: keyof typeof ICON_TONE;
   /** "overlay"(기본): 카드 우상단에 아이콘을 얹음. "leading": 문장 맨 앞에 아이콘을 인라인으로
    *  넣음 — 카드 문구가 폭에 거의 딱 맞아 overlay 아이콘과 겹칠 때, 그리고 문구 맨 앞에
-   *  원래 이모지 등을 아이콘으로 대체하고 싶을 때 쓴다(예: 홈 화면 영양 팁 카드). */
-  variant?: "overlay" | "leading";
+   *  원래 이모지 등을 아이콘으로 대체하고 싶을 때 쓴다(예: 홈 화면 영양 팁 카드). "none": 이
+   *  카드 안에는 아이콘을 아예 안 그림 — 카드 자체(탭 영역·TTS 로직)는 그대로 쓰되, 스피커
+   *  아이콘을 카드 바깥 다른 자리에 따로 둬야 할 때(예: 튜토리얼 오버레이의 "1/4" 옆) 쓴다.
+   *  이 경우 시각적 표시가 카드 밖에 있으니, 카드가 눌러서 들을 수 있다는 걸 다른 방법으로
+   *  알려줘야 한다. */
+  variant?: "overlay" | "leading" | "none";
   children: ReactNode;
 }) {
   const isSpeaking = useSpeakingCardId() === id;

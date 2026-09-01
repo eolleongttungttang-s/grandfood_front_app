@@ -6,7 +6,11 @@
 // 새로 큐에 올라가므로, "다시 추천받기"도 이 함수를 그대로 다시 부르면 된다.
 
 import { API_BASE_URL } from "@/lib/api-config";
-import { resolveBackendWardAccess, resolveCachedBackendWardAccess } from "@/lib/backend-auth";
+import {
+  resolveBackendWardAccess,
+  resolveCachedBackendWardAccess,
+  ResolvedBackendWardAccess,
+} from "@/lib/backend-auth";
 import { createLocalStore } from "@/lib/local-store";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
@@ -75,10 +79,33 @@ export type MonthlyBanchanRecommendationWeek = {
   error: string | null;
 };
 
+// 반찬과 별개로 매 끼니 항상 나오는 주식(밥) — 반찬 추천 후보에서는 빠지지만(백엔드
+// _exclude_rice, 2026-08-21) 실제 식판엔 항상 올라가므로, 백엔드가 카탈로그 평균값을
+// 별도 필드로 내려준다(health/schemas.py StapleResponse). 사진/GPU 분석과 무관한
+// "계획 단계" 값이라 실제 섭취량이 아니라 "오늘 메뉴 구성"에만 쓴다.
+export type MealStaple = {
+  name: string;
+  category: string;
+  caloriePer100g: number;
+  proteinPer100g: number;
+  sodiumPer100g: number;
+  carbsPer100g: number;
+};
+
+// day.staple은 원래 시설(기관) 대상자 전용이었지만 2026-08-19부터 B2C도 항상 채워진다
+// (health/service.py get_monthly_banchan_recommendations 참고) — 백엔드 스키마 주석은
+// 아직 "시설 전용"이라 적혀 있지만 실제 코드는 이미 구분 없이 채운다.
+export type MonthlyBanchanRecommendationDay = {
+  serviceDate: string;
+  meals: { mealType: BackendMealType; staple: MealStaple | null }[];
+};
+
 export type MonthlyBanchanRecommendation = {
   userId: string;
   month: string;
   weeks: MonthlyBanchanRecommendationWeek[];
+  /** 시설/B2C 구분 없이 항상 채워진다(위 타입 주석 참고) — 응답에 아예 없으면(옛 캐시 등) null. */
+  days: MonthlyBanchanRecommendationDay[] | null;
 };
 
 // SUITABILITY_LABEL/CLASS/DOT_CLASS(반찬별 "추천/주의/피하기" 배지·달력 칸 점)는 큰
@@ -133,6 +160,9 @@ export function todayDateString(): string {
 export type DateRecommendation = {
   status: BanchanRecommendationGenerationStatus;
   items: BanchanRecommendationItem[];
+  /** 그 날짜·끼니의 밥(주식) — monthly.days에서 찾아 붙인다. days가 없거나(옛 캐시) 그
+   *  날짜/끼니가 아직 없으면 null. */
+  staple: MealStaple | null;
   /** BanchanRecommendation.target*와 동일 — 주 단위로 저장돼 있지만 "하루" 목표치라
    *  그 주 안의 어느 날에 물어도 같은 값이다(records-view.tsx의 영양성분 분석에서 씀). */
   targetCalorieKcal: number | null;
@@ -173,9 +203,13 @@ export function getRecommendationForDate(
         )
       : allItems.filter((item) => item.deliveryNumber === deliveryNumber); // 옛 회차 기반 데이터
 
+    const day = monthly.days?.find((d) => d.serviceDate === dateStr);
+    const staple = mealType == null ? null : day?.meals.find((m) => m.mealType === mealType)?.staple ?? null;
+
     return {
       status: week.generationStatus,
       items,
+      staple,
       targetCalorieKcal: week.recommendation?.targetCalorieKcal ?? null,
       targetProteinG: week.recommendation?.targetProteinG ?? null,
       targetSodiumMg: week.recommendation?.targetSodiumMg ?? null,
@@ -221,6 +255,19 @@ function parseRecommendation(data: any): BanchanRecommendation {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseStaple(staple: any): MealStaple | null {
+  if (!staple) return null;
+  return {
+    name: staple.name,
+    category: staple.category,
+    caloriePer100g: staple.calorie_per_100g,
+    proteinPer100g: staple.protein_per_100g,
+    sodiumPer100g: staple.sodium_per_100g,
+    carbsPer100g: staple.carbs_per_100g,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function parseMonthlyRecommendation(data: any): MonthlyBanchanRecommendation {
   return {
     userId: data.user_id,
@@ -232,6 +279,17 @@ function parseMonthlyRecommendation(data: any): MonthlyBanchanRecommendation {
       recommendation: week.recommendation ? parseRecommendation(week.recommendation) : null,
       error: week.error ?? null,
     })),
+    days: data.days
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        data.days.map((day: any) => ({
+          serviceDate: day.service_date,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          meals: (day.meals ?? []).map((meal: any) => ({
+            mealType: meal.meal_type,
+            staple: parseStaple(meal.staple),
+          })),
+        }))
+      : null,
   };
 }
 
@@ -259,6 +317,57 @@ async function parseErrorMessage(response: Response): Promise<string> {
     // 응답 바디가 JSON이 아니면 아래 기본 메시지로 폴백
   }
   return `AI 반찬 추천 요청이 실패했어요 (status ${response.status})`;
+}
+
+// GET .../monthly/{month} 응답을 그대로(가공 없이) 가져온다 — withLeadingWeek이 "이 달
+// 자체" 조회와 "앞머리가 걸쳐 있는 지난달" 조회 양쪽에 이 함수를 그대로 재사용한다.
+async function fetchMonthlyRaw(
+  access: ResolvedBackendWardAccess,
+  month: string
+): Promise<MonthlyBanchanRecommendation | null> {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/health/users/${access.backendWardId}/banchan-recommendations/monthly/${month}`,
+    { headers: { Authorization: `Bearer ${access.accessToken}` } },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) return null;
+    return parseMonthlyRecommendation(await response.json());
+  } catch {
+    return null;
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
+// 백엔드가 각 주를 "그 주의 월요일이 속한 달"에만 배정한다(grandfood_backend
+// health/service.py _weeks_in_month) — 그래서 1일이 월요일이 아닌 달(대부분)은 1일부터
+// 그 달의 첫 월요일 전날까지 며칠(예: 9월이면 9/1~9/6)이 통째로 이전 달 소속 주에 걸쳐
+// 있어 이 달 응답의 weeks 첫머리에서 아예 빠진다. 이 며칠도 실제로는 반찬 추천이 있는
+// 날이라(그 지난달 소속 주 안에), 지난달 GET을 한 번 더 불러 그 주를 찾아 이 달 weeks
+// 앞에 붙인다 — 이렇게 하면 getRecommendationForDate를 쓰는 모든 화면(이 파일, 달력,
+// 오늘의 추천 반찬, 영양성분 분석, 보호자 달성률 등)이 이 며칠도 자동으로 정상 데이터를
+// 받는다. 예전엔 달력 컴포넌트 하나에만 이 병합을 넣었었는데, 그러면 그 컴포넌트 밖의
+// 화면들은 여전히 이 며칠에 대해 null을 받아 목업으로 폴백했다(2026-09-01 피드백, 홈
+// 화면 "오늘의 메뉴"가 안 바뀌어 보이던 원인) — 여기 fetch 레벨로 옮겨서 한 번만 고친다.
+// 지난달 조회가 실패하거나 그 주가 아직 없으면(드묾) 앞머리 없이 원래 weeks만 돌려준다 —
+// 원래도 없던 걸 지운 게 아니라 못 채운 것뿐이라 안전하다.
+async function withLeadingWeek(
+  access: ResolvedBackendWardAccess,
+  monthly: MonthlyBanchanRecommendation
+): Promise<MonthlyBanchanRecommendation> {
+  const firstOfMonth = `${monthly.month}-01`;
+  const firstWeek = monthly.weeks[0];
+  if (!firstWeek || firstWeek.weekStartDate <= firstOfMonth) return monthly;
+
+  const leadingWeekStart = addDaysToDateString(firstWeek.weekStartDate, -7);
+  const previousMonth = addMonthsToMonthString(monthly.month, -1);
+  const previousMonthly = await fetchMonthlyRaw(access, previousMonth);
+  const leadingWeek = previousMonthly?.weeks.find((w) => w.weekStartDate === leadingWeekStart);
+  if (!leadingWeek) return monthly;
+
+  return { ...monthly, weeks: [leadingWeek, ...monthly.weeks] };
 }
 
 // POST /health/users/{user_id}/banchan-recommendations/monthly — 그 달에 속한 모든 주의 추천
@@ -295,7 +404,7 @@ export async function requestMonthlyBanchanRecommendation(
   try {
     const response = await promise;
     if (!response.ok) throw new Error(await parseErrorMessage(response));
-    return parseMonthlyRecommendation(await response.json());
+    return await withLeadingWeek(access, parseMonthlyRecommendation(await response.json()));
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new Error("AI 반찬 추천이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.");
@@ -326,20 +435,9 @@ export async function fetchMonthlyBanchanRecommendation(
   const access = resolveCachedBackendWardAccess(identity.wardId);
   if (!access) return null;
 
-  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
-    `${API_BASE_URL}/health/users/${access.backendWardId}/banchan-recommendations/monthly/${month}`,
-    { headers: { Authorization: `Bearer ${access.accessToken}` } },
-    REQUEST_TIMEOUT_MS
-  );
-  try {
-    const response = await promise;
-    if (!response.ok) return null;
-    return parseMonthlyRecommendation(await response.json());
-  } catch {
-    return null;
-  } finally {
-    clearRequestTimeout();
-  }
+  const monthly = await fetchMonthlyRaw(access, month);
+  if (!monthly) return null;
+  return withLeadingWeek(access, monthly);
 }
 
 // 이 대상자가 지금까지 한 번이라도 AI 반찬 추천을 받은 적 있는지 기억해두는 로컬 플래그.
@@ -383,16 +481,36 @@ export function computeNutritionSnapshotForDate(
 ): TodayNutritionSnapshot {
   const target = getRecommendationForDate(monthly, dateStr);
   const items = target?.items ?? [];
+  // 섭취기록 탭 "오늘 영양성분 분석"(records-view.tsx)이 바로 이 함수로 "실제" 섭취량을
+  // 구하는데, 밥(주식)은 반찬 추천 슬롯을 안 차지해 items엔 안 잡히지만(MealStaple 주석
+  // 참고) 목표치(targetCalorieKcal 등, health/nutrition_targets.py의 하루 TDEE·KDRI 기준)는
+  // 밥을 포함한 값이라, 밥을 빼고 반찬끼리만 더하면 "실제"가 항상 밥만큼 목표보다 낮게
+  // 나온다 — 특히 탄수화물은 밥이 주 공급원이라 격차가 크다(2026-08-26 피드백). 식단 탭의
+  // 끼니별 요약(today-menu.ts)은 처음부터 밥을 포함해서 계산해 문제없었는데, 이 함수만
+  // 밥을 빼먹고 있었다. getRecommendationForDate의
+  // staple 필드는 끼니 하나만 콕 집어 조회할 때(mealType 지정)만 채워지고, 여기처럼 하루
+  // 전체(모든 끼니의 items를 합친) 스냅샷을 구할 땐 항상 null이라 그걸 그대로 쓸 수 없다 —
+  // 그날 각 끼니(day.meals)의 staple을 전부 찾아 합산한다(하루에 끼니가 여러 번이면 밥도
+  // 그만큼 여러 번 먹은 것으로 취급, today-menu.ts:141-144의 끼니 1회분 처리와 같은 방식).
+  const day = monthly?.days?.find((d) => d.serviceDate === dateStr);
+  const staples = (day?.meals ?? []).map((m) => m.staple).filter((s): s is MealStaple => s != null);
   // 소수 100g당 값을 여러 개 더하면 부동소수점 오차가 그대로 쌓여 "24.630000000000003"처럼
   // 노출된다(2026-08-21 버그 리포트, today-menu.ts의 sum()과 동일한 원인) — 소수점 둘째
   // 자리에서 반올림해 지운다.
   const round2 = (n: number) => Math.round(n * 100) / 100;
+  const sumWithStaples = (
+    pick: (i: BanchanRecommendationItem) => number | null,
+    pickStaple: (s: MealStaple) => number
+  ) =>
+    round2(
+      items.reduce((sum, i) => sum + (pick(i) ?? 0), staples.reduce((sum, s) => sum + pickStaple(s), 0))
+    );
   return {
     hasData: target?.status === "done" && items.length > 0,
-    kcal: round2(items.reduce((sum, i) => sum + (i.caloriePer100g ?? 0), 0)),
-    proteinG: round2(items.reduce((sum, i) => sum + (i.proteinPer100g ?? 0), 0)),
-    sodiumMg: round2(items.reduce((sum, i) => sum + (i.sodiumPer100g ?? 0), 0)),
-    carbsG: round2(items.reduce((sum, i) => sum + (i.carbsPer100g ?? 0), 0)),
+    kcal: sumWithStaples((i) => i.caloriePer100g, (s) => s.caloriePer100g),
+    proteinG: sumWithStaples((i) => i.proteinPer100g, (s) => s.proteinPer100g),
+    sodiumMg: sumWithStaples((i) => i.sodiumPer100g, (s) => s.sodiumPer100g),
+    carbsG: sumWithStaples((i) => i.carbsPer100g, (s) => s.carbsPer100g),
     targetCalorieKcal: target?.targetCalorieKcal ?? null,
     targetProteinG: target?.targetProteinG ?? null,
     targetSodiumMg: target?.targetSodiumMg ?? null,

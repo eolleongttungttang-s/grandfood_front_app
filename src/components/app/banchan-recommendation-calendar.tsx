@@ -28,6 +28,7 @@ import {
   BanchanRecommendationGenerationStatus,
   fetchMonthlyBanchanRecommendation,
   getRecommendationForDate,
+  MealStaple,
   MonthlyBanchanRecommendation,
   todayDateString,
   WardIdentity,
@@ -167,6 +168,26 @@ function DishCard({ item }: { item: BanchanRecommendationItem }) {
         {item.proteinPer100g != null && <NutrientFact nutrient="protein" value={`${item.proteinPer100g}g`} />}
         {item.sodiumPer100g != null && <NutrientFact nutrient="sodium" value={`${item.sodiumPer100g}mg`} />}
         {item.carbsPer100g != null && <NutrientFact nutrient="carbs" value={`${item.carbsPer100g}g`} />}
+      </div>
+    </div>
+  );
+}
+
+// 밥(주식)은 반찬 추천 후보에서 빠져 BanchanRecommendationItem이 아니지만(banchan-
+// recommendation.ts MealStaple 참고), 실제 식판엔 항상 있으므로 이 목록에도 반찬 카드와
+// 같은 자리에 표시한다 — 카탈로그 평균값(계획 단계 수치)이라 슬롯/적합도 개념이 없다.
+function StapleDishCard({ staple }: { staple: MealStaple }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card p-3">
+      <span className="text-lg font-bold text-foreground">{staple.name}</span>
+      <span className="w-fit rounded-full bg-muted px-2.5 py-0.5 text-sm font-medium text-muted-foreground">
+        {staple.category}
+      </span>
+      <div className="flex flex-wrap gap-1.5">
+        <NutrientFact nutrient="calorie" value={`${staple.caloriePer100g}kcal/100g`} />
+        <NutrientFact nutrient="protein" value={`${staple.proteinPer100g}g`} />
+        <NutrientFact nutrient="sodium" value={`${staple.sodiumPer100g}mg`} />
+        <NutrientFact nutrient="carbs" value={`${staple.carbsPer100g}g`} />
       </div>
     </div>
   );
@@ -372,6 +393,12 @@ export function BanchanRecommendationCalendar({
         .filter((item) => item.mealType === selectedMealType)
         .sort((a, b) => a.slotIndex - b.slotIndex)
     : [];
+  // buildDayCells는 mealType 없이(그날 전체 합산으로) 호출하므로 DayCell.items엔 밥이
+  // 없다 — 끼니 하나를 골랐을 때만 의미가 있는 정보라 여기서 선택된 끼니로 따로 조회한다.
+  const stapleForSelectedMeal =
+    selected && displayedMonthly
+      ? (getRecommendationForDate(displayedMonthly, selected.date, selectedMealType)?.staple ?? null)
+      : null;
 
   // 건강 프로필 저장은 이미 생성된 recommendation을 자동으로 다시 계산하지 않는다(2026-08-18
   // 확인 — 백엔드에 무효화/재계산 로직이 없음, 프론트에서 고칠 수 없는 부분). 그래서 로컬에
@@ -687,10 +714,15 @@ export function BanchanRecommendationCalendar({
                     columns={3}
                     completedValues={selected?.date === todayStr ? todayCompletedMealTypes : undefined}
                   />
-                  {mealTypeItems.length === 0 ? (
+                  {mealTypeItems.length === 0 && !stapleForSelectedMeal ? (
                     <p className="text-sm text-muted-foreground">이 끼니엔 배정된 반찬이 없어요.</p>
                   ) : (
-                    mealTypeItems.map((item) => <DishCard key={item.banchanId} item={item} />)
+                    <>
+                      {stapleForSelectedMeal && <StapleDishCard staple={stapleForSelectedMeal} />}
+                      {mealTypeItems.map((item) => (
+                        <DishCard key={item.banchanId} item={item} />
+                      ))}
+                    </>
                   )}
                 </div>
               ) : (
@@ -703,16 +735,12 @@ export function BanchanRecommendationCalendar({
                 </div>
               )}
 
-              {recommendation && recommendation.referenceGuidelines.length > 0 && (
-                <div className="flex flex-col gap-1 border-t border-border pt-2">
-                  <span className="text-[11px] font-semibold text-muted-foreground">이번 주 참고 자료</span>
-                  {recommendation.referenceGuidelines.map((g, i) => (
-                    <span key={i} className="text-[11px] text-muted-foreground">
-                      · {g.title}
-                    </span>
-                  ))}
-                </div>
-              )}
+              {/* 예전엔 여기에 recommendation.referenceGuidelines(당뇨병.csv 등 RAG 원본
+                  파일명)를 "이번 주 참고 자료"로 그대로 나열했다 — 내부 자료 파일명이 어르신
+                  화면에 그대로 노출되는 문제라 화면 표시를 없앴다(2026-08-24 피드백). 다만
+                  이건 프론트 표시만 없앤 것이고, 백엔드 응답(reference_guidelines 필드) 자체는
+                  여전히 원본 파일명을 그대로 내려준다 — banchan-recommendation.ts의
+                  referenceGuidelines 타입/파싱은 남겨뒀지만 화면에 쓰는 곳은 없다. */}
             </>
           )}
         </div>

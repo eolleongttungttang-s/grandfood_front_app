@@ -178,5 +178,14 @@ html[data-contrast="high"] .text-muted-foreground {
     border-radius: 0 !important;
     max-width: 100% !important;
     margin: 0 !important;
+    /* print-frame은 화면에선 h-dvh + overflow-hidden 고정 높이라 내부 스크롤 div가
+       콘텐츠를 담당한다 — 인쇄 시엔 그 고정 높이·overflow가 그대로 남으면 뷰포트 한 화면
+       분량만 잘려서 찍힌다(2026-08-26, PDF로 저장 리포트 잘림 회귀). 인쇄 때만 높이를
+       내용에 맞게 풀어준다. */
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .print-frame-scroll {
+    overflow: visible !important;
   }
 }

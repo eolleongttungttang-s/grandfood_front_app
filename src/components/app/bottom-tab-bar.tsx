@@ -30,7 +30,10 @@ export function BottomTabBar({ items }: { items: TabItem[] }) {
         }`;
         if ("href" in item) {
           return (
-            <Link key={item.href} href={item.href} className={className}>
+            // data-tour-target: tab-tour-overlay.tsx가 실제 이 버튼의 화면상 위치를 읽어서
+            // 스포트라이트 강조 위치를 잡는 데 쓴다(2026-08-26, 튜토리얼을 별도 화면 대신
+            // 실제 탭 위에 하이라이트로 보여주는 방식으로 바꾸며 추가).
+            <Link key={item.href} href={item.href} data-tour-target={item.href} className={className}>
               <Icon className="h-5 w-5" />
               {item.label}
             </Link>

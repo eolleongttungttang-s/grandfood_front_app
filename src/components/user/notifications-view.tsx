@@ -7,9 +7,14 @@ import {
   fetchElderNotifications,
   fetchElderStreakNotification,
   getElderDeliveryNotification,
+  getElderPasswordSecurityNotice,
+  getElderSosAcknowledgment,
   markNotificationsSeen,
   notificationBadgeClass,
 } from "@/lib/notifications";
+import { useSession } from "@/lib/session";
+import { sosAckStore } from "@/lib/sos-store";
+import { useLocalStore } from "@/lib/use-store";
 import { Ward } from "@/lib/wards";
 import { Badge } from "@/components/ui/badge";
 import { TopBar } from "@/components/app/top-bar";
@@ -17,13 +22,17 @@ import { TopBar } from "@/components/app/top-bar";
 // home-view.tsx가 예전엔 "안내 사항"/완식 스트릭 카드를 화면에 늘 띄워뒀는데, 배송 예정과
 // 달리 매일 훑어야 하는 정보가 아니라 "궁금할 때 들어가 보는" 정보라 화면만 길게 만들었다
 // (2026-08-21 피드백, 배민 배송 조회 방식과 비교). guardian/notifications-view.tsx와 같은
-// 패턴으로 별도 화면으로 뺐다 — 다만 여기는 보호자의 SOS 확인 액션이 없다(어르신 본인
-// 알림엔 해당 없음). 완식 스트릭은 백엔드 알림이 아니라 프론트 합성 항목이라(notifications.ts
-// 상단 주석 참고) guardian의 SOS(로컬 합성)와 같은 방식으로 맨 앞에 따로 붙인다.
+// 패턴으로 별도 화면으로 뺐다. 완식 스트릭/보호자의 SOS 확인 알림은 백엔드 알림이 아니라
+// 프론트 합성 항목이라(notifications.ts 상단 주석 참고) 맨 앞에 따로 붙인다.
 export function NotificationsView({ ward }: { ward: Ward }) {
+  const { account } = useSession();
   const [items, setItems] = useState<NotificationItem[] | null>(null);
   const [streak, setStreak] = useState<NotificationItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 구독만 하고 값은 안 쓴다 — 보호자가 "확인했어요"를 누르면(같은 브라우저 데모 한정)
+  // sosAckStore가 바뀌고, 그걸 감지해 아래 getElderSosAcknowledgment()가 다시 계산되게
+  // 리렌더를 트리거하는 용도.
+  useLocalStore(sosAckStore);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +63,15 @@ export function NotificationsView({ ward }: { ward: Ward }) {
 
   const loading = items === null && !error;
   const delivery = getElderDeliveryNotification(ward.status);
-  const merged = [delivery, ...(streak ? [streak] : []), ...(items ?? [])];
+  const sosAck = getElderSosAcknowledgment(ward.id);
+  const passwordNotice = getElderPasswordSecurityNotice(account);
+  const merged = [
+    delivery,
+    ...(sosAck ? [sosAck] : []),
+    ...(passwordNotice ? [passwordNotice] : []),
+    ...(streak ? [streak] : []),
+    ...(items ?? []),
+  ];
 
   // 이 화면을 열어서 목록을 실제로 본 시점에, 지금까지 온 항목을 전부 "본 것"으로 기록한다
   // — home-view.tsx의 종 아이콘 배지가 이 기록을 기준으로 켜지므로, 여기 한 번 들어오면
@@ -86,7 +103,7 @@ export function NotificationsView({ ward }: { ward: Ward }) {
             {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-destructive" />}
             <div className={`flex flex-1 flex-col gap-1 ${n.read ? "pl-5" : ""}`}>
               <Badge className={`${notificationBadgeClass(n.type)} w-fit`}>{n.type}</Badge>
-              <p className="text-sm text-foreground">{n.message}</p>
+              <p className="text-sm break-keep text-foreground">{n.message}</p>
               <span className="text-xs text-muted-foreground">{n.date}</span>
             </div>
           </div>
