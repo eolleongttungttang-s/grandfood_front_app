@@ -1,9 +1,12 @@
 // 보호자앱 대상자 상세("오늘 잔반율"/"최근 14일 섭취 기록")를 실제 grandfood_backend에 연결한다:
 // GET /app/guardian/{elder_id}/diet-history, GET /app/guardian/{elder_id}/intake-summary.
 // wards.ts의 getWardDetail()이 만드는 leftoverPercent/mealHistory는 여전히 seedFromId 기반
-// 목업이다(user 쪽 records-view.tsx/reports.ts 월간 리포트가 그 값을 그대로 쓰고 있어 손대지
-// 않았다) — 이 파일은 guardian 상세 화면 두 카드에서만 그 목업을 실제 값(dailyLeftover)으로
-// 덮어쓰기 위한 별도 조회다.
+// 목업이다 — 다만 user 쪽 records-view.tsx와 guardian 리포트(report-view.tsx, reports.ts
+// getNutritionReport 기반)도 이제 각자 실제 diet-history를 따로 불러와 "real ?? mock"으로
+// 이 목업을 덮어쓰므로(둘 다 2026-08-21 커밋에서 반영, ff5bfe8), "그대로 쓰는" 화면은 더 이상
+// 없다 — 셋 다 실제 backendWardId가 아직 캐시되지 않은(사진 업로드 등 실제 백엔드 액션을
+// 한 번도 안 한) 대상자에 한해서만 이 목업을 보여준다. 이 파일은 그중 guardian 상세 화면
+// 두 카드에서 쓰는 조회다.
 //
 // intake-summary의 average_leftover_pct는 잔반 비전 분석(YOLO)이 아직 안 붙어 있어(leftover_analysis
 // 원자료 없음, GrandFood_피드백_20개항목_전체정리 15번 검토 중 확인) 지금은 항상 null로 온다 —
