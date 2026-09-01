@@ -6,7 +6,11 @@
 // 새로 큐에 올라가므로, "다시 추천받기"도 이 함수를 그대로 다시 부르면 된다.
 
 import { API_BASE_URL } from "@/lib/api-config";
-import { resolveBackendWardAccess, resolveCachedBackendWardAccess } from "@/lib/backend-auth";
+import {
+  resolveBackendWardAccess,
+  resolveCachedBackendWardAccess,
+  ResolvedBackendWardAccess,
+} from "@/lib/backend-auth";
 import { createLocalStore } from "@/lib/local-store";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
@@ -315,6 +319,57 @@ async function parseErrorMessage(response: Response): Promise<string> {
   return `AI 반찬 추천 요청이 실패했어요 (status ${response.status})`;
 }
 
+// GET .../monthly/{month} 응답을 그대로(가공 없이) 가져온다 — withLeadingWeek이 "이 달
+// 자체" 조회와 "앞머리가 걸쳐 있는 지난달" 조회 양쪽에 이 함수를 그대로 재사용한다.
+async function fetchMonthlyRaw(
+  access: ResolvedBackendWardAccess,
+  month: string
+): Promise<MonthlyBanchanRecommendation | null> {
+  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
+    `${API_BASE_URL}/health/users/${access.backendWardId}/banchan-recommendations/monthly/${month}`,
+    { headers: { Authorization: `Bearer ${access.accessToken}` } },
+    REQUEST_TIMEOUT_MS
+  );
+  try {
+    const response = await promise;
+    if (!response.ok) return null;
+    return parseMonthlyRecommendation(await response.json());
+  } catch {
+    return null;
+  } finally {
+    clearRequestTimeout();
+  }
+}
+
+// 백엔드가 각 주를 "그 주의 월요일이 속한 달"에만 배정한다(grandfood_backend
+// health/service.py _weeks_in_month) — 그래서 1일이 월요일이 아닌 달(대부분)은 1일부터
+// 그 달의 첫 월요일 전날까지 며칠(예: 9월이면 9/1~9/6)이 통째로 이전 달 소속 주에 걸쳐
+// 있어 이 달 응답의 weeks 첫머리에서 아예 빠진다. 이 며칠도 실제로는 반찬 추천이 있는
+// 날이라(그 지난달 소속 주 안에), 지난달 GET을 한 번 더 불러 그 주를 찾아 이 달 weeks
+// 앞에 붙인다 — 이렇게 하면 getRecommendationForDate를 쓰는 모든 화면(이 파일, 달력,
+// 오늘의 추천 반찬, 영양성분 분석, 보호자 달성률 등)이 이 며칠도 자동으로 정상 데이터를
+// 받는다. 예전엔 달력 컴포넌트 하나에만 이 병합을 넣었었는데, 그러면 그 컴포넌트 밖의
+// 화면들은 여전히 이 며칠에 대해 null을 받아 목업으로 폴백했다(2026-09-01 피드백, 홈
+// 화면 "오늘의 메뉴"가 안 바뀌어 보이던 원인) — 여기 fetch 레벨로 옮겨서 한 번만 고친다.
+// 지난달 조회가 실패하거나 그 주가 아직 없으면(드묾) 앞머리 없이 원래 weeks만 돌려준다 —
+// 원래도 없던 걸 지운 게 아니라 못 채운 것뿐이라 안전하다.
+async function withLeadingWeek(
+  access: ResolvedBackendWardAccess,
+  monthly: MonthlyBanchanRecommendation
+): Promise<MonthlyBanchanRecommendation> {
+  const firstOfMonth = `${monthly.month}-01`;
+  const firstWeek = monthly.weeks[0];
+  if (!firstWeek || firstWeek.weekStartDate <= firstOfMonth) return monthly;
+
+  const leadingWeekStart = addDaysToDateString(firstWeek.weekStartDate, -7);
+  const previousMonth = addMonthsToMonthString(monthly.month, -1);
+  const previousMonthly = await fetchMonthlyRaw(access, previousMonth);
+  const leadingWeek = previousMonthly?.weeks.find((w) => w.weekStartDate === leadingWeekStart);
+  if (!leadingWeek) return monthly;
+
+  return { ...monthly, weeks: [leadingWeek, ...monthly.weeks] };
+}
+
 // POST /health/users/{user_id}/banchan-recommendations/monthly — 그 달에 속한 모든 주의 추천
 // 생성을 백그라운드로 큐에 올린다(202 Accepted, 동기로 items까지 채워서 돌려주지 않는다).
 // generating 중인 주는 진행 중인 백그라운드 작업과 경합하지 않도록 항상 건드리지 않고,
@@ -349,7 +404,7 @@ export async function requestMonthlyBanchanRecommendation(
   try {
     const response = await promise;
     if (!response.ok) throw new Error(await parseErrorMessage(response));
-    return parseMonthlyRecommendation(await response.json());
+    return await withLeadingWeek(access, parseMonthlyRecommendation(await response.json()));
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new Error("AI 반찬 추천이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.");
@@ -380,20 +435,9 @@ export async function fetchMonthlyBanchanRecommendation(
   const access = resolveCachedBackendWardAccess(identity.wardId);
   if (!access) return null;
 
-  const { promise, clearTimeout: clearRequestTimeout } = fetchWithTimeout(
-    `${API_BASE_URL}/health/users/${access.backendWardId}/banchan-recommendations/monthly/${month}`,
-    { headers: { Authorization: `Bearer ${access.accessToken}` } },
-    REQUEST_TIMEOUT_MS
-  );
-  try {
-    const response = await promise;
-    if (!response.ok) return null;
-    return parseMonthlyRecommendation(await response.json());
-  } catch {
-    return null;
-  } finally {
-    clearRequestTimeout();
-  }
+  const monthly = await fetchMonthlyRaw(access, month);
+  if (!monthly) return null;
+  return withLeadingWeek(access, monthly);
 }
 
 // 이 대상자가 지금까지 한 번이라도 AI 반찬 추천을 받은 적 있는지 기억해두는 로컬 플래그.
